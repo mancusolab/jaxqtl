@@ -71,6 +71,13 @@ class AbstractExponential(ABC):
         # consider use jax.grad(func) -> function
         pass
 
+    @abstractmethod
+    def _calc_scale(
+        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+    ) -> jnp.ndarray:
+        # output a scalar for phi in EF
+        pass
+
     # @abstractmethod
     # def _log_prob(self) -> jnp.ndarray:
     #     # output a scalar
@@ -152,6 +159,14 @@ class Normal(AbstractExponential):
             return func(x)
         else:
             return jnp.array([1.0])
+
+    def _calc_scale(
+        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+    ) -> jnp.ndarray:
+        resid = jnp.sum(jnp.square(pred - y))
+        df = y.shape[0] - beta.shape[0]
+        phi = resid / df
+        return phi
 
     # def _log_prob(self) -> jnp.ndarray:
     #     # output joint density as a scalar
@@ -259,6 +274,11 @@ class Binomial(AbstractExponential):
         else:
             return jnp.exp(-jnp.log(x) - jnp.log(1 - x))
 
+    def _calc_scale(
+        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+    ) -> jnp.ndarray:
+        return jnp.array([1.0])
+
     def _log_prob(self) -> jnp.ndarray:
         # output joint density as a scalar
         pass
@@ -336,6 +356,11 @@ class Poisson(AbstractExponential):
             return func(x)
         else:
             return 1 / x
+
+    def _calc_scale(
+        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+    ) -> jnp.ndarray:
+        return jnp.array([1.0])
 
     def _log_prob(self) -> jnp.ndarray:
         # output joint density as a scalar

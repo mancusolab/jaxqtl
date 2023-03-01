@@ -102,6 +102,7 @@ class IRLS(AbstractLinearSolve):
         self._glink = family._glink
         self._glink_inv = family._glink_inv
         self._glink_der = family._glink_der
+        self._calc_scale = family._calc_scale
 
     def _calc_weight(
         self, X: jnp.ndarray, beta: jnp.ndarray
@@ -110,8 +111,9 @@ class IRLS(AbstractLinearSolve):
         mu_k = self._glink_inv(pred_k)
         num = self._hlink_der(pred_k)
         g_deriv_k = self._glink_der(mu_k)
+        phi = self._calc_scale(pred_k, self.y, beta)
         weight_k = num / (
-            g_deriv_k * self.scale
+            g_deriv_k * phi
         )  # TODO: for normal, the self.scale should be residual variance
         return pred_k, mu_k, g_deriv_k, weight_k
 

@@ -11,7 +11,6 @@ spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
 # -------------------------------------------------#
 
 # # test linear regression function
-# TODO!!: need fix residual variance for calculating SE
 test_irls = GLM(
     X=spector_data.exog, y=spector_data.endog, family=family.Normal(), append=False
 )
