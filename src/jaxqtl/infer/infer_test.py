@@ -2,7 +2,7 @@ import statsmodels.api as sm
 from statsmodels.discrete.discrete_model import Poisson
 
 import src.jaxqtl.infer.distribution as family
-from src.jaxqtl.infer.solve import GLM
+from src.jaxqtl.infer.glm import GLM
 
 # load toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()

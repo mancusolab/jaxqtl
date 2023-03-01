@@ -2,7 +2,7 @@ from abc import ABC, abstractmethod
 
 # typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
 # from typing import Callable, List, NamedTuple, Optional, Tuple, Union
-from typing import Callable, Optional
+from typing import Callable, Optional, Tuple
 
 import jax.numpy as jnp
 
@@ -73,7 +73,10 @@ class AbstractExponential(ABC):
 
     @abstractmethod
     def _calc_scale(
-        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
     ) -> jnp.ndarray:
         # output a scalar for phi in EF
         pass
@@ -86,6 +89,19 @@ class AbstractExponential(ABC):
     @abstractmethod
     def _score(self) -> jnp.ndarray:
         pass
+
+    def calc_weight(
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        mu_k = self._glink_inv(pred)
+        num = self._hlink_der(pred)
+        g_deriv_k = self._glink_der(mu_k)
+        phi = self._calc_scale(X, y, pred)
+        weight_k = num / (g_deriv_k * phi)
+        return mu_k, g_deriv_k, weight_k
 
     @abstractmethod
     def tree_flatten(self):
@@ -161,10 +177,13 @@ class Normal(AbstractExponential):
             return jnp.array([1.0])
 
     def _calc_scale(
-        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
     ) -> jnp.ndarray:
         resid = jnp.sum(jnp.square(pred - y))
-        df = y.shape[0] - beta.shape[0]
+        df = y.shape[0] - X.shape[1]
         phi = resid / df
         return phi
 
@@ -275,7 +294,10 @@ class Binomial(AbstractExponential):
             return jnp.exp(-jnp.log(x) - jnp.log(1 - x))
 
     def _calc_scale(
-        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
     ) -> jnp.ndarray:
         return jnp.array([1.0])
 
@@ -358,7 +380,10 @@ class Poisson(AbstractExponential):
             return 1 / x
 
     def _calc_scale(
-        self, pred: jnp.ndarray, y: jnp.ndarray, beta: jnp.ndarray
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
     ) -> jnp.ndarray:
         return jnp.array([1.0])
 
