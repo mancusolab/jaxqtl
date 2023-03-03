@@ -6,7 +6,7 @@ from jax.tree_util import register_pytree_node_class
 
 from .distribution import Binomial, Normal, Poisson
 from .optimize import irls  # a function
-from .solve import QRSolve
+from .solve import CGSolve, CholeskySolve, QRSolve
 
 
 class GLMState(NamedTuple):
@@ -45,8 +45,17 @@ class GLM:
             self.family = Binomial()
         elif family == "Poisson":
             self.family = Poisson()
+        else:
+            print("no family found")
+
         if solver == "qr":
             self.solver = QRSolve()
+        elif solver == "cholesky":
+            self.solver = CholeskySolve()
+        elif solver == "CG":
+            self.solver = CGSolve()
+        else:
+            print("no solver found")
 
         # key = random.PRNGKey(seed)
         # self.key, self.key_init = random.split(key, 2)

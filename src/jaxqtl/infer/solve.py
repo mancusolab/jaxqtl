@@ -10,6 +10,8 @@ from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 from .distribution import AbstractExponential
 
+# from typing import Any, Callable, Optional, Union
+
 
 @register_pytree_node_class
 class AbstractLinearSolve(ABC):
@@ -77,11 +79,11 @@ class CholeskySolve(AbstractLinearSolve):
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k)
-        w_X = w_half[:, jnp.newaxis] * X
+        w_X = w_half * X
 
         XtWX = w_X.T @ w_X
-        XtWy = w_X.T @ r
-        factor = jspla.cho_factor(XtWX)
+        XtWy = (X * weight).T @ r
+        factor = jspla.cho_factor(XtWX, lower=True)
 
         return jspla.cho_solve(factor, XtWy)
 
@@ -100,8 +102,9 @@ class CGSolve(AbstractLinearSolve):
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k)
+        w_half_X = X * w_half
 
         def _matvec(beta):
-            return w_half * (X @ beta)
+            return w_half_X @ beta
 
-        return ls.solve_normal_cg(_matvec, r, init=jnp.zeros(X.shape[1]))
+        return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))

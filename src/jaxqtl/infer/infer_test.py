@@ -6,7 +6,7 @@ from src.jaxqtl.infer.glm import GLM
 # load toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
-
+solver = "qr"  # qr, cholesky, CG
 # -------------------------------------------------#
 
 # test linear regression function
@@ -14,7 +14,7 @@ test_irls = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Gaussian",
-    solver="qr",
+    solver=solver,
     append=False,
 )
 test_irls.fit()
@@ -31,7 +31,7 @@ test_logit = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Binomial",
-    solver="qr",
+    solver=solver,
     append=False,
 )
 test_logit.fit()
@@ -46,7 +46,7 @@ test_poisson = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Poisson",
-    solver="qr",
+    solver=solver,
     append=False,
 )
 test_poisson.fit()
