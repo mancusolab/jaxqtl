@@ -8,16 +8,23 @@ import jax.scipy.linalg as jspla
 # from jax import grad
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from src.jaxqtl.infer.distribution import AbstractExponential
+from .distribution import AbstractExponential
 
 
 @register_pytree_node_class
 class AbstractLinearSolve(ABC):
+    """
+    eta = X @ beta, the linear component
+    """
+
     @abstractmethod
     def __call__(
-        self, X: jnp.ndarray, y: jnp.ndarray, model: AbstractExponential
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        oldbeta: jnp.ndarray,
+        family: AbstractExponential,
     ) -> jnp.ndarray:
-        # type hint: X, y input should be jnp.ndarray, output should be jnp.ndarray
         pass
 
     def __init_subclass__(cls, **kwargs):
@@ -36,18 +43,20 @@ class AbstractLinearSolve(ABC):
 
 class QRSolve(AbstractLinearSolve):
     def __call__(
-        self, X: jnp.ndarray, y: jnp.ndarray, model: AbstractExponential
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        oldbeta: jnp.ndarray,
+        family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = model.eta(X, y)
-        pred_k, mu_k, g_deriv_k, weight = model._calc_weight(
-            X, y, eta
-        )  # TODO how to get eta
+        eta = family.eta(X, oldbeta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
 
         w_half = jnp.sqrt(weight)
-        r = pred_k + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k)
         w_r = w_half * r
-        w_X = w_half[:, jnp.newaxis] * X
+        w_X = w_half * X
 
         Q, R = jnp.linalg.qr(w_X)
 
@@ -56,16 +65,18 @@ class QRSolve(AbstractLinearSolve):
 
 class CholeskySolve(AbstractLinearSolve):
     def __call__(
-        self, X: jnp.ndarray, y: jnp.ndarray, model: AbstractExponential
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        oldbeta: jnp.ndarray,
+        family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = model.eta(X, y)
-        pred_k, mu_k, g_deriv_k, weight = model._calc_weight(
-            X, y, eta
-        )  # TODO how to get eta
+        eta = family.eta(X, oldbeta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
 
         w_half = jnp.sqrt(weight)
-        r = pred_k + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k)
         w_X = w_half[:, jnp.newaxis] * X
 
         XtWX = w_X.T @ w_X
@@ -77,16 +88,18 @@ class CholeskySolve(AbstractLinearSolve):
 
 class CGSolve(AbstractLinearSolve):
     def __call__(
-        self, X: jnp.ndarray, y: jnp.ndarray, model: AbstractExponential
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        oldbeta: jnp.ndarray,
+        family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = model.eta(X, y)
-        pred_k, mu_k, g_deriv_k, weight = model._calc_weight(
-            X, y, eta
-        )  # TODO how to get eta
+        eta = family.eta(X, oldbeta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
 
         w_half = jnp.sqrt(weight)
-        r = pred_k + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k)
 
         def _matvec(beta):
             return w_half * (X @ beta)

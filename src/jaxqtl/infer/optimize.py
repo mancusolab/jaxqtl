@@ -23,15 +23,17 @@ def irls(
 ) -> IRLSState:
 
     converged = False
-    old_beta = solver(X, y, family)
+    pfeatures = X.shape[1]
+    old_beta = jnp.zeros((pfeatures, 1))  # initialize with all zeros
 
     for idx in range(max_iter):
-        new_beta = solver(X, y, family)
+        new_beta = solver(X, y, old_beta, family)
         norm = jnpla.norm(new_beta - old_beta)  # alternative check the log likelihood
         if norm <= tol:
             converged = True
+            num_iters = idx + 1  # start count at 0
             break
 
         old_beta = new_beta
 
-    return IRLSState(new_beta, idx, converged)
+    return IRLSState(new_beta, num_iters, converged)
