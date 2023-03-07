@@ -1,7 +1,8 @@
 from typing import NamedTuple
 
+import jax.numpy.linalg as jnpla
+import jax.scipy.linalg as jspla
 from jax import numpy as jnp
-from jax.numpy import linalg as jnpla
 
 from .distribution import AbstractExponential
 from .solve import AbstractLinearSolve
@@ -13,19 +14,30 @@ class IRLSState(NamedTuple):
     converged: bool
 
 
+def OLS(X: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
+    Q, R = jnpla.qr(X)
+    return jspla.solve_triangular(R, Q.T @ y)
+
+
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
     family: AbstractExponential,
     solver: AbstractLinearSolve,
     seed: int,
+    init: str = "default",
     max_iter: int = 1000,
     tol: float = 1e-3,
 ) -> IRLSState:
 
     converged = False
     pfeatures = X.shape[1]
-    old_beta = family.init_mu(pfeatures, seed)
+    if init == "OLS":
+        old_beta = OLS(X, y)
+    elif init == "default":
+        old_beta = family.init_mu(pfeatures, seed)
+    else:
+        print("init method not found.")
 
     for idx in range(max_iter):
         new_beta = solver(X, y, old_beta, family)

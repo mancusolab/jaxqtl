@@ -3,6 +3,7 @@ from abc import ABC, abstractmethod
 import jaxopt.linear_solve as ls
 
 import jax.numpy as jnp
+import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 
 # from jax import grad
@@ -52,14 +53,14 @@ class QRSolve(AbstractLinearSolve):
     ) -> jnp.ndarray:
 
         eta = family.eta(X, oldbeta)  # X @ beta
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k)
         w_r = w_half * r
         w_X = w_half * X
 
-        Q, R = jnp.linalg.qr(w_X)
+        Q, R = jnpla.qr(w_X)
 
         return jspla.solve_triangular(R, Q.T @ w_r)
 
@@ -74,7 +75,7 @@ class CholeskySolve(AbstractLinearSolve):
     ) -> jnp.ndarray:
 
         eta = family.eta(X, oldbeta)
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k)
@@ -97,7 +98,7 @@ class CGSolve(AbstractLinearSolve):
     ) -> jnp.ndarray:
 
         eta = family.eta(X, oldbeta)
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k)

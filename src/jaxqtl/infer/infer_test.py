@@ -1,5 +1,5 @@
 import statsmodels.api as sm
-from statsmodels.discrete.discrete_model import Poisson
+from statsmodels.discrete.discrete_model import Poisson  # NegativeBinomial
 
 from src.jaxqtl.infer.glm import GLM
 
@@ -62,7 +62,7 @@ print(test_poisson)
 # gamma_model = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
 # gamma_results = gamma_model.fit()
 # print(gamma_results.summary())
-#
+
 # test_Gamma = GLM(
 #     X=data.exog,
 #     y=data.endog,
@@ -73,3 +73,20 @@ print(test_poisson)
 # )
 # test_Gamma.fit()
 # print(test_Gamma)
+
+# data = sm.datasets.scotland.load()
+# data.exog = sm.add_constant(data.exog)
+# NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
+# NB_results = NB_model.fit()
+# print(NB_results.summary())
+#
+# test_NB = GLM(
+#     X=data.exog,
+#     y=data.endog,
+#     family="NB",
+#     seed=123,
+#     solver=solver,
+#     append=False,
+# )
+# test_NB.fit()
+# print(test_NB)

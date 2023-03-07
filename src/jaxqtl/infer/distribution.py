@@ -4,9 +4,11 @@ from abc import ABC, abstractmethod
 # from typing import Callable, List, NamedTuple, Optional, Tuple, Union
 from typing import Callable, Optional, Tuple
 
+import numpy as np
+from numpy import random
+
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import random
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 
@@ -113,6 +115,10 @@ class Normal(AbstractExponential):
             glink_der if glink_der is not None else (lambda x: jnp.array([1.0]))
         )
 
+    def random_gen(self, loc: float, scale: float, shape: tuple) -> np.ndarray:
+        y = random.normal(loc, scale, shape)
+        return y
+
     def calc_phi(
         self,
         X: jnp.ndarray,
@@ -156,7 +162,7 @@ class Binomial(AbstractExponential):
     default setting:
     glink = log(p/(1-p))
     glink_inv = 1/(1 + e^-x) # use log1p to calculate this
-    glink_der = 1/p - 1/(1-p) # use log trick to calculate this
+    glink_der = 1/(p*(1-p)) # use log trick to calculate this
     """
 
     def __init__(
@@ -175,8 +181,13 @@ class Binomial(AbstractExponential):
         self.glink_der = (
             glink_der
             if glink_der is not None
+            # else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 - x)))
             else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 - x)))
         )
+
+    def random_gen(self, p: np.ndarray, shape: tuple) -> np.ndarray:
+        y = random.binomial(1, p, shape)
+        return y
 
     def calc_phi(
         self,
@@ -221,6 +232,10 @@ class Poisson(AbstractExponential):
         self.glink_inv = glink_inv if glink_inv is not None else (lambda x: jnp.exp(x))
         self.glink_der = glink_der if glink_der is not None else (lambda x: 1 / x)
 
+    def random_gen(self, mu: np.ndarray, shape: tuple) -> np.ndarray:
+        y = random.poisson(mu, shape)
+        return y
+
     def calc_phi(
         self,
         X: jnp.ndarray,
@@ -246,49 +261,116 @@ class Poisson(AbstractExponential):
         pass
 
 
-class Gamma(AbstractExponential):
-    def __init__(
-        self,
-        glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-    ) -> None:
-        # super().__init__()
-        self.glink = glink if glink is not None else (lambda x: 1 / x)
-        self.glink_inv = glink_inv if glink_inv is not None else (lambda x: 1 / x)
-        self.glink_der = glink_der if glink_der is not None else (lambda x: -1 / x ** 2)
+# class Gamma(AbstractExponential):
+#     """
+#     wierd link function...need work on this
+#     """
+#
+#     def __init__(
+#         self,
+#         glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#         glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#         glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#     ) -> None:
+#         # super().__init__()
+#         self.glink = glink if glink is not None else (lambda x: 1 / x)
+#         self.glink_inv = glink_inv if glink_inv is not None else (lambda x: 1 / x)
+#         self.glink_der = glink_der if glink_der is not None else (lambda x: -1 / x ** 2)
+#
+#     def random_gen(
+#         self, alpha: np.ndarray, beta: np.ndarray, shape: tuple
+#     ) -> np.ndarray:
+#         y = random.gamma(alpha, beta, shape)
+#         return y
+#
+#     def calc_phi(
+#         self,
+#         X: jnp.ndarray,
+#         y: jnp.ndarray,
+#         pred: jnp.ndarray,
+#     ) -> jnp.ndarray:
+#         """
+#         method of moment estimator for phi
+#         """
+#         mu = self.glink_inv(pred)
+#         df = y.shape[0] - X.shape[1]
+#         phi = jnp.sum(jnp.square(mu - y) / jnp.square(mu)) / df
+#         return phi
+#
+#     def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+#         pass
+#
+#     def score(self):
+#         pass
+#
+#     def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+#         return mu ** 2
+#
+#     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+#         # need check with link function
+#         key = random.PRNGKey(seed)
+#         key, key_init = random.split(key, 2)
+#         return random.normal(key, shape=(p, 1))
+#
+#     def tree_flatten(self):
+#         pass
 
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
-        """
-        method of moment estimator for phi
-        """
-        mu = self.glink_inv(pred)
-        df = y.shape[0] - X.shape[1]
-        phi = jnp.sum(jnp.square(mu - y) / jnp.square(mu)) / df
-        return phi
 
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
-        pass
-
-    def score(self):
-        pass
-
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
-        return mu ** 2
-
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
-        # need check with link function
-        key = random.PRNGKey(seed)
-        key, key_init = random.split(key, 2)
-        return random.normal(key, shape=(p, 1))
-
-    def tree_flatten(self):
-        pass
+# class NB(AbstractExponential):
+#     """
+#     NB-2 method, need work on this
+#     Assume alpha = 1.
+#     """
+#
+#     def __init__(
+#         self,
+#         glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#         glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#         glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+#     ) -> None:
+#         # super().__init__()
+#         self.glink = glink if glink is not None else (lambda x, a: jnp.log(x / (1 + x)))
+#         self.glink_inv = (
+#             glink_inv if glink_inv is not None else (lambda x: 1 / (jnp.exp(-x) - 1))
+#         )
+#         self.glink_der = (
+#             glink_der
+#             if glink_der is not None
+#             else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 + x)))
+#         )
+#
+#     def random_gen(self, n: int, p: np.ndarray, shape: tuple) -> np.ndarray:
+#         y = random.negative_binomial(n, p, shape)
+#         return y
+#
+#     def calc_phi(
+#         self,
+#         X: jnp.ndarray,
+#         y: jnp.ndarray,
+#         pred: jnp.ndarray,
+#     ) -> jnp.ndarray:
+#         """
+#         method of moment estimator for phi
+#         """
+#         return jnp.array([1.0])
+#
+#     def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+#         pass
+#
+#     def score(self):
+#         pass
+#
+#     def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+#         return mu + mu ** 2
+#
+#     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+#         # need check with link function
+#         key = random.PRNGKey(seed)
+#         key, key_init = random.split(key, 2)
+#         return random.normal(key, shape=(p, 1))
+#
+#     def tree_flatten(self):
+#         pass
 
 
 """ example usage...
