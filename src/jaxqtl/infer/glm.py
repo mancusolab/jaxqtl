@@ -4,7 +4,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from .distribution import Binomial, Normal, Poisson
+from .distribution import Binomial, Gamma, Normal, Poisson
 from .optimize import irls  # a function
 from .solve import CGSolve, CholeskySolve, QRSolve
 
@@ -32,9 +32,11 @@ class GLM:
         family: str,
         solver: str,
         append: bool,
-        seed: int = 123,
+        seed: int = None,
     ) -> None:
         nobs = len(y)
+        self.seed = seed
+
         self.X = jnp.asarray(X)  # preprocessed in previous steps
         if append is True:
             self.X = jnp.column_stack((jnp.ones((nobs, 1)), self.X))
@@ -45,6 +47,8 @@ class GLM:
             self.family = Binomial()
         elif family == "Poisson":
             self.family = Poisson()
+        elif family == "Gamma":
+            self.family = Gamma()
         else:
             print("no family found")
 
@@ -68,14 +72,14 @@ class GLM:
 
     def fit(self):
         self.beta, self.n_iter, self.converged = irls(
-            self.X, self.y, self.family, self.solver
+            self.X, self.y, self.family, self.solver, self.seed
         )
         self.eta = self.X @ self.beta
         self.beta_se = self.sumstats()
         self.beta = self.beta.reshape((self.X.shape[1],))
         return GLMState(self.beta, self.beta_se, self.n_iter, self.converged)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return f"""
         beta: {self.beta}
         se: {self.beta_se}

@@ -10,12 +10,11 @@ from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 from .distribution import AbstractExponential
 
-# from typing import Any, Callable, Optional, Union
-
 
 @register_pytree_node_class
 class AbstractLinearSolve(ABC):
     """
+    Define parent class for all solvers
     eta = X @ beta, the linear component
     """
 
@@ -52,7 +51,7 @@ class QRSolve(AbstractLinearSolve):
         family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = family.eta(X, oldbeta)
+        eta = family.eta(X, oldbeta)  # X @ beta
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)  # TODO how to get eta
 
         w_half = jnp.sqrt(weight)

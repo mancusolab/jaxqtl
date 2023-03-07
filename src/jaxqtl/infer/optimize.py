@@ -18,13 +18,14 @@ def irls(
     y: jnp.ndarray,
     family: AbstractExponential,
     solver: AbstractLinearSolve,
+    seed: int,
     max_iter: int = 1000,
     tol: float = 1e-3,
 ) -> IRLSState:
 
     converged = False
     pfeatures = X.shape[1]
-    old_beta = jnp.zeros((pfeatures, 1))  # initialize with all zeros
+    old_beta = family.init_mu(pfeatures, seed)
 
     for idx in range(max_iter):
         new_beta = solver(X, y, old_beta, family)

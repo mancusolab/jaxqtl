@@ -6,10 +6,14 @@ from src.jaxqtl.infer.glm import GLM
 # load toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
-solver = "qr"  # qr, cholesky, CG
+solver = "cholesky"  # qr, cholesky, CG
 # -------------------------------------------------#
 
 # test linear regression function
+mod = sm.OLS(spector_data.endog, spector_data.exog)
+res = mod.fit()
+print(res.summary())
+
 test_irls = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
@@ -20,13 +24,13 @@ test_irls = GLM(
 test_irls.fit()
 print(test_irls)
 
-mod = sm.OLS(spector_data.endog, spector_data.exog)
-res = mod.fit()
-print(res.summary())
-
 # -------------------------------------------------#
 
 # test IRLS: logistic regression
+mod = sm.Logit(spector_data.endog, spector_data.exog)
+res = mod.fit()
+print(res.summary())
+
 test_logit = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
@@ -37,11 +41,10 @@ test_logit = GLM(
 test_logit.fit()
 print(test_logit)
 
-mod = sm.Logit(spector_data.endog, spector_data.exog)
-res = mod.fit()
+# test poisson regression
+res = Poisson(spector_data.endog, spector_data.exog).fit(disp=0)
 print(res.summary())
 
-# # test poisson regression
 test_poisson = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
@@ -52,7 +55,21 @@ test_poisson = GLM(
 test_poisson.fit()
 print(test_poisson)
 
-res = Poisson(spector_data.endog, spector_data.exog).fit(disp=0)
-print(res.summary())
-
 # -------------------------------------------------#
+
+# data = sm.datasets.scotland.load()
+# data.exog = sm.add_constant(data.exog)
+# gamma_model = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
+# gamma_results = gamma_model.fit()
+# print(gamma_results.summary())
+#
+# test_Gamma = GLM(
+#     X=data.exog,
+#     y=data.endog,
+#     family="Gamma",
+#     seed=123,
+#     solver=solver,
+#     append=False,
+# )
+# test_Gamma.fit()
+# print(test_Gamma)
