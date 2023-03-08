@@ -3,8 +3,7 @@ from typing import NamedTuple
 import numpy as np
 from numpy import random
 
-# from ..infer.families.distribution import Binomial, Gaussian, Poisson
-from src.jaxqtl.infer.utils import str_to_class
+from src.jaxqtl.infer.families.distribution import Binomial, Gaussian, Poisson
 
 
 class SimState(NamedTuple):
@@ -19,8 +18,12 @@ class SimData:
         self.nobs = nobs
         self.pfeatures = 2
 
-        if family in ["Gaussian", "Binomial", "Poisson"]:
-            self.family = str_to_class(family)()
+        if family == "Gaussian":
+            self.family = Gaussian()
+        elif family == "Binomial":
+            self.family = Binomial()
+        elif family == "Poisson":
+            self.family = Poisson()
         else:
             print("no family found")
 

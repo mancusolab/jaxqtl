@@ -1,5 +1,7 @@
 import statsmodels.api as sm
-from statsmodels.discrete.discrete_model import Poisson  # , NegativeBinomial
+from statsmodels.discrete.discrete_model import (  # , NegativeBinomial
+    Poisson as smPoisson,
+)
 
 from src.jaxqtl.infer.glm import GLM
 
@@ -48,7 +50,7 @@ test_logit.fit()
 print(test_logit)
 
 # test poisson regression
-res = Poisson(spector_data.endog, spector_data.exog).fit(disp=0)
+res = smPoisson(spector_data.endog, spector_data.exog).fit(disp=0)
 print(res.summary())
 
 test_poisson = GLM(

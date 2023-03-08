@@ -1,18 +1,20 @@
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
+
+from scipy.stats import norm, t  # , chi2
 
 from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-# from .families.distribution import Binomial, Gaussian, Poisson
-from .optimize import irls  # a function
+from .families.distribution import Binomial, Gaussian, Poisson
+from .optimize import irls
 from .solve import CGSolve, CholeskySolve, QRSolve
-from .utils import str_to_class
 
 
 class GLMState(NamedTuple):
     beta: jnp.ndarray
     se: jnp.ndarray
+    p: jnp.ndarray
     num_iters: int
     converged: bool
 
@@ -61,8 +63,13 @@ class GLM:
             self.X = jnp.column_stack((jnp.ones((nobs, 1)), self.X))
         self.y = jnp.asarray(y).reshape((nobs, 1))
 
-        if family in ["Gaussian", "Binomial", "Poisson"]:
-            self.family = str_to_class(family)(link)
+        # TODO: how to simplify this
+        if family == "Gaussian":
+            self.family = Gaussian(link)
+        elif family == "Binomial":
+            self.family = Binomial(link)
+        elif family == "Poisson":
+            self.family = Poisson(link)
         else:
             print("no family found")
 
@@ -74,6 +81,19 @@ class GLM:
             self.solver = CGSolve()
         else:
             print("no solver found")
+
+    def WaldTest(self) -> Tuple[jnp.ndarray, jnp.ndarray, int]:
+        """
+        beta_MLE ~ N(beta, I^-1), for large sample size
+        """
+        df = self.X.shape[0] - self.X.shape[1]
+        TS = self.beta / self.beta_se
+
+        if isinstance(self.family, Gaussian):
+            pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
+        else:
+            pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0,1)
+        return TS, pval, df
 
     def sumstats(self):
         _, _, weight = self.family.calc_weight(self.X, self.y, self.eta)
@@ -88,13 +108,15 @@ class GLM:
         self.eta = self.X @ beta
         self.beta_se = self.sumstats()
         self.beta = jnp.reshape(beta, (self.X.shape[1],))
-        return GLMState(self.beta, self.beta_se, self.n_iter, self.converged)
+        self.TS, self.pval, self.df = self.WaldTest()
+        return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
 
     def __str__(self) -> str:
         return f"""
         jaxQTL
         beta: {self.beta}
         se: {self.beta_se}
+        p: {self.pval}
         converged: {self.converged} in {self.n_iter}
                """
 

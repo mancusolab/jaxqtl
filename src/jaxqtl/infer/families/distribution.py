@@ -1,3 +1,4 @@
+import sys
 from abc import ABC, abstractmethod
 
 # typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
@@ -11,9 +12,11 @@ import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from src.jaxqtl.infer.utils import str_to_class
-
 from .links import Identity, Link, Log, Logit
+
+
+def str_to_class(classname):
+    return getattr(sys.modules[__name__], classname)
 
 
 @register_pytree_node_class
@@ -32,12 +35,8 @@ class AbstractExponential(ABC):
 
     def __init__(
         self,
-        # glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        # glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        # glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
         glink: Link,
     ) -> None:
-        # need better way to handle this; mypy check throw errors if excluding this
         self.glink = glink
         pass
 

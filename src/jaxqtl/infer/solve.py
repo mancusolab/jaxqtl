@@ -5,8 +5,6 @@ import jaxopt.linear_solve as ls
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
-
-# from jax import grad
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 from .families.distribution import AbstractExponential
