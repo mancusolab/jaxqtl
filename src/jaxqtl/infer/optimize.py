@@ -4,7 +4,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 from jax import numpy as jnp
 
-from .distribution import AbstractExponential
+from .families.distribution import AbstractExponential
 from .solve import AbstractLinearSolve
 
 
@@ -46,6 +46,9 @@ def irls(
             converged = True
             num_iters = idx + 1  # start count at 0
             break
+        else:
+            converged = False
+            num_iters = idx + 1
 
         old_beta = new_beta
 

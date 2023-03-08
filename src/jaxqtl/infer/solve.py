@@ -9,7 +9,7 @@ import jax.scipy.linalg as jspla
 # from jax import grad
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .distribution import AbstractExponential
+from .families.distribution import AbstractExponential
 
 
 @register_pytree_node_class

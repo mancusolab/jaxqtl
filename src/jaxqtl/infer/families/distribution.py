@@ -2,14 +2,18 @@ from abc import ABC, abstractmethod
 
 # typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
 # from typing import Callable, List, NamedTuple, Optional, Tuple, Union
-from typing import Callable, Optional, Tuple
+from typing import Optional, Tuple
 
 import numpy as np
-from numpy import random
 
+# import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
+
+from src.jaxqtl.infer.utils import str_to_class
+
+from .links import Identity, Link, Log, Logit
 
 
 @register_pytree_node_class
@@ -28,14 +32,13 @@ class AbstractExponential(ABC):
 
     def __init__(
         self,
-        glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        # glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        # glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        # glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        glink: Link,
     ) -> None:
         # need better way to handle this; mypy check throw errors if excluding this
-        self.glink = lambda x: None
-        self.glink_inv = lambda x: None
-        self.glink_der = lambda x: None
+        self.glink = glink
         pass
 
     def __init_subclass__(cls, **kwargs):
@@ -49,7 +52,7 @@ class AbstractExponential(ABC):
         y: jnp.ndarray,
         pred: jnp.ndarray,
     ) -> jnp.ndarray:
-        # output a scalar for phi in EF
+        # phi is the dispersion parameter
         pass
 
     @abstractmethod
@@ -78,8 +81,8 @@ class AbstractExponential(ABC):
         weight for each observation in IRLS
         weight_i = 1 / (V(mu_i) * phi * g'(mu_i)**2)
         """
-        mu_k = self.glink_inv(eta)
-        g_deriv_k = self.glink_der(mu_k)
+        mu_k = self.glink.inverse(eta)
+        g_deriv_k = self.glink.deriv(mu_k)
         phi = self.calc_phi(X, y, eta)
         V_mu = self.calc_Vmu(mu_k)
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
@@ -97,26 +100,22 @@ class AbstractExponential(ABC):
         return cls(*children)
 
 
-class Normal(AbstractExponential):
+class Gaussian(AbstractExponential):
     """
     By explicitly write phi (here is sigma^2), we can treat normal distribution as one-parameter EF
     """
 
     def __init__(
         self,
-        glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        glink: str = "canonical",
     ) -> None:
-        # super().__init__(glink, glink_inv, glink_der)
-        self.glink = glink if glink is not None else (lambda x: x)
-        self.glink_inv = glink_inv if glink_inv is not None else (lambda x: x)
-        self.glink_der = (
-            glink_der if glink_der is not None else (lambda x: jnp.array([1.0]))
-        )
+        if glink != "canonical":
+            super().__init__(str_to_class(glink)())
+        else:
+            super().__init__(Identity())
 
     def random_gen(self, loc: float, scale: float, shape: tuple) -> np.ndarray:
-        y = random.normal(loc, scale, shape)
+        y = np.random.normal(loc, scale, shape)
         return y
 
     def calc_phi(
@@ -167,26 +166,15 @@ class Binomial(AbstractExponential):
 
     def __init__(
         self,
-        glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        glink: str = "canonical",
     ) -> None:
-        # super().__init__()
-        self.glink = glink if glink is not None else (lambda x: jnp.log(x / (1 - x)))
-        self.glink_inv = (
-            glink_inv
-            if glink_inv is not None
-            else (lambda x: jnp.exp(-jnp.log1p(jnp.exp(-x))))
-        )
-        self.glink_der = (
-            glink_der
-            if glink_der is not None
-            # else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 - x)))
-            else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 - x)))
-        )
+        if glink != "canonical":
+            super().__init__(str_to_class(glink)())
+        else:
+            super().__init__(Logit())
 
     def random_gen(self, p: np.ndarray, shape: tuple) -> np.ndarray:
-        y = random.binomial(1, p, shape)
+        y = np.random.binomial(1, p, shape)
         return y
 
     def calc_phi(
@@ -217,23 +205,15 @@ class Binomial(AbstractExponential):
 class Poisson(AbstractExponential):
     def __init__(
         self,
-        glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        hlink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-        hlink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
+        glink: str = "canonical",
     ) -> None:
-        # super().__init__()
-        self.glink = glink if glink is not None else (lambda x: jnp.log(x))
-        self.hlink = hlink if hlink is not None else (lambda x: x)
-        self.hlink_der = (
-            hlink_der if hlink_der is not None else (lambda x: jnp.array([1.0]))
-        )
-        self.glink_inv = glink_inv if glink_inv is not None else (lambda x: jnp.exp(x))
-        self.glink_der = glink_der if glink_der is not None else (lambda x: 1 / x)
+        if glink != "canonical":
+            super().__init__(str_to_class(glink)())
+        else:
+            super().__init__(Log())
 
     def random_gen(self, mu: np.ndarray, shape: tuple) -> np.ndarray:
-        y = random.poisson(mu, shape)
+        y = np.random.poisson(mu, shape)
         return y
 
     def calc_phi(
@@ -280,7 +260,7 @@ class Poisson(AbstractExponential):
 #     def random_gen(
 #         self, alpha: np.ndarray, beta: np.ndarray, shape: tuple
 #     ) -> np.ndarray:
-#         y = random.gamma(alpha, beta, shape)
+#         y = np.random.gamma(alpha, beta, shape)
 #         return y
 #
 #     def calc_phi(
@@ -308,18 +288,18 @@ class Poisson(AbstractExponential):
 #
 #     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
 #         # need check with link function
-#         key = random.PRNGKey(seed)
+#         key = jax.random.PRNGKey(seed)
 #         key, key_init = random.split(key, 2)
-#         return random.normal(key, shape=(p, 1))
+#         return jax.random.normal(key, shape=(p, 1))
 #
 #     def tree_flatten(self):
 #         pass
-
-
+#
+#
 # class NB(AbstractExponential):
 #     """
 #     NB-2 method, need work on this
-#     Assume alpha = 1.
+#     Assume phi = 1/r = 1.
 #     """
 #
 #     def __init__(
@@ -329,9 +309,9 @@ class Poisson(AbstractExponential):
 #         glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
 #     ) -> None:
 #         # super().__init__()
-#         self.glink = glink if glink is not None else (lambda x, a: jnp.log(x / (1 + x)))
+#         self.glink = glink if glink is not None else (lambda x: jnp.log(x / (1 + x)))
 #         self.glink_inv = (
-#             glink_inv if glink_inv is not None else (lambda x: 1 / (jnp.exp(-x) - 1))
+#             glink_inv if glink_inv is not None else (lambda x: jnp.exp(jnp.log(x) - jnp.log(jnp.expm1(x))))
 #         )
 #         self.glink_der = (
 #             glink_der
@@ -340,7 +320,7 @@ class Poisson(AbstractExponential):
 #         )
 #
 #     def random_gen(self, n: int, p: np.ndarray, shape: tuple) -> np.ndarray:
-#         y = random.negative_binomial(n, p, shape)
+#         y = np.random.negative_binomial(n, p, shape)
 #         return y
 #
 #     def calc_phi(
@@ -365,9 +345,9 @@ class Poisson(AbstractExponential):
 #
 #     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
 #         # need check with link function
-#         key = random.PRNGKey(seed)
-#         key, key_init = random.split(key, 2)
-#         return random.normal(key, shape=(p, 1))
+#         key = jax.random.PRNGKey(seed)
+#         key, key_init = jax.random.split(key, 2)
+#         return jax.random.normal(key, shape=(p, 1))
 #
 #     def tree_flatten(self):
 #         pass

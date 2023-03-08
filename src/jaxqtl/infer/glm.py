@@ -4,9 +4,10 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from .distribution import NB, Binomial, Gamma, Normal, Poisson
+# from .families.distribution import Binomial, Gaussian, Poisson
 from .optimize import irls  # a function
 from .solve import CGSolve, CholeskySolve, QRSolve
+from .utils import str_to_class
 
 
 class GLMState(NamedTuple):
@@ -23,6 +24,19 @@ class GLM:
     model = jaxqtl.GLM(X, y, family="Gaussian", solver="qr", append=True)
     res = model.fit()
     print(res)
+
+     from statsmodel code:
+     ============= ===== === ===== ====== ======= === ==== ====== ====== ====
+     Family        ident log logit probit cloglog pow opow nbinom loglog logc
+     ============= ===== === ===== ====== ======= === ==== ====== ====== ====
+     Gaussian      x     x   x     x      x       x   x     x      x
+     inv Gaussian  x     x                        x
+     binomial      x     x   x     x      x       x   x           x      x
+     Poisson       x     x                        x
+     neg binomial  x     x                        x        x
+     gamma         x     x                        x
+     Tweedie       x     x                        x
+     ============= ===== === ===== ====== ======= === ==== ====== ====== ====
     """
 
     def __init__(
@@ -30,29 +44,25 @@ class GLM:
         X: jnp.ndarray,
         y: jnp.ndarray,
         family: str,
-        solver: str,
-        append: bool,
+        link: str = "canonical",  # [canonical, Identity, Log, Logit, ...]
+        solver: str = "qr",
+        append: bool = True,
         init: str = "default",  # [default or OLS]
+        maxiter: int = 100,
         seed: int = None,
     ) -> None:
         nobs = len(y)
         self.seed = seed
         self.init = init
+        self.maxiter = maxiter
 
         self.X = jnp.asarray(X)  # preprocessed in previous steps
         if append is True:
             self.X = jnp.column_stack((jnp.ones((nobs, 1)), self.X))
         self.y = jnp.asarray(y).reshape((nobs, 1))
-        if family == "Gaussian":
-            self.family = Normal()
-        elif family == "Binomial":
-            self.family = Binomial()
-        elif family == "Poisson":
-            self.family = Poisson()
-        elif family == "Gamma":
-            self.family = Gamma()
-        elif family == "NB":
-            self.family = NB()
+
+        if family in ["Gaussian", "Binomial", "Poisson"]:
+            self.family = str_to_class(family)(link)
         else:
             print("no family found")
 
@@ -65,9 +75,6 @@ class GLM:
         else:
             print("no solver found")
 
-        # key = random.PRNGKey(seed)
-        # self.key, self.key_init = random.split(key, 2)
-
     def sumstats(self):
         _, _, weight = self.family.calc_weight(self.X, self.y, self.eta)
         infor = (self.X * weight).T @ self.X
@@ -75,12 +82,12 @@ class GLM:
         return beta_se
 
     def fit(self):
-        self.beta, self.n_iter, self.converged = irls(
-            self.X, self.y, self.family, self.solver, self.seed, self.init
+        beta, self.n_iter, self.converged = irls(
+            self.X, self.y, self.family, self.solver, self.seed, self.init, self.maxiter
         )
-        self.eta = self.X @ self.beta
+        self.eta = self.X @ beta
         self.beta_se = self.sumstats()
-        self.beta = self.beta.reshape((self.X.shape[1],))
+        self.beta = jnp.reshape(beta, (self.X.shape[1],))
         return GLMState(self.beta, self.beta_se, self.n_iter, self.converged)
 
     def __str__(self) -> str:

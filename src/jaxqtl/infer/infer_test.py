@@ -1,12 +1,12 @@
 import statsmodels.api as sm
-from statsmodels.discrete.discrete_model import Poisson  # NegativeBinomial
+from statsmodels.discrete.discrete_model import Poisson  # , NegativeBinomial
 
 from src.jaxqtl.infer.glm import GLM
 
 # load toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
-solver = "cholesky"  # qr, cholesky, CG
+solver = "qr"  # qr, cholesky, CG
 # -------------------------------------------------#
 
 # test linear regression function
@@ -18,8 +18,11 @@ test_irls = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Gaussian",
+    link="canonical",
     solver=solver,
     append=False,
+    init="default",
+    maxiter=1000,
 )
 test_irls.fit()
 print(test_irls)
@@ -35,8 +38,11 @@ test_logit = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Binomial",
+    link="canonical",
     solver=solver,
     append=False,
+    init="default",
+    maxiter=1000,
 )
 test_logit.fit()
 print(test_logit)
@@ -49,8 +55,11 @@ test_poisson = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
     family="Poisson",
+    link="canonical",
     solver=solver,
     append=False,
+    init="default",
+    maxiter=1000,
 )
 test_poisson.fit()
 print(test_poisson)
@@ -76,9 +85,9 @@ print(test_poisson)
 
 # data = sm.datasets.scotland.load()
 # data.exog = sm.add_constant(data.exog)
-# NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
-# NB_results = NB_model.fit()
-# print(NB_results.summary())
+# # NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
+# # NB_results = NB_model.fit(maxiter=100)
+# # print(NB_results.summary())
 #
 # test_NB = GLM(
 #     X=data.exog,
@@ -87,6 +96,7 @@ print(test_poisson)
 #     seed=123,
 #     solver=solver,
 #     append=False,
+#     init="default",
 # )
 # test_NB.fit()
 # print(test_NB)
