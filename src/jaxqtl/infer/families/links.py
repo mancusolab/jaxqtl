@@ -92,6 +92,7 @@ class Logit(Link):
         """
         Power transform link function
         g(mu) = log(mu / (1-mu))
+        0 < mu < 1
         """
         return jnp.log(mu / (1 - mu))
 
@@ -122,3 +123,28 @@ class Log(Link):
 
     def inverse_deriv(self, eta):
         return jnp.exp(eta)
+
+
+class NBlink(Link):
+    def __init__(self, alpha: float = 1.0):
+        self.alpha = alpha
+
+    def __call__(self, mu: jnp.ndarray):
+        z = mu * self.alpha
+        return jnp.log(z / (z + 1))
+
+    def inverse(self, eta):
+        z = jnp.exp(eta)
+        return z / (self.alpha * (1 - z))
+
+    def deriv(self, mu):
+        """
+        1/(mu * (mu * alpha + 1)), mu > 0
+        """
+        term1 = -jnp.log(mu)
+        term2 = -jnp.log(mu * self.alpha + 1)
+        return jnp.exp(term1 + term2)
+
+    def inverse_deriv(self, eta):
+        z = jnp.exp(eta)
+        return jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)

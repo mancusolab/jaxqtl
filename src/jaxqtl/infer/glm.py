@@ -6,7 +6,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from .families.distribution import Binomial, Gaussian, Poisson
+from .families.distribution import NB, Binomial, Gaussian, Poisson
 from .optimize import irls
 from .solve import CGSolve, CholeskySolve, QRSolve
 
@@ -26,6 +26,8 @@ class GLM:
     model = jaxqtl.GLM(X, y, family="Gaussian", solver="qr", append=True)
     res = model.fit()
     print(res)
+
+    need check domain in glink function
 
      from statsmodel code:
      ============= ===== === ===== ====== ======= === ==== ====== ====== ====
@@ -51,7 +53,7 @@ class GLM:
         append: bool = True,
         init: str = "default",  # [default or OLS]
         maxiter: int = 100,
-        seed: int = None,
+        seed: int = 123,
     ) -> None:
         nobs = len(y)
         self.seed = seed
@@ -70,6 +72,8 @@ class GLM:
             self.family = Binomial(link)
         elif family == "Poisson":
             self.family = Poisson(link)
+        elif family == "NB":
+            self.family = NB(link)
         else:
             print("no family found")
 

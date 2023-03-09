@@ -7,14 +7,15 @@ from typing import Optional, Tuple
 
 import numpy as np
 
-# import jax
+import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .links import Identity, Link, Log, Logit
+from .links import Identity, Link, Log, Logit, NBlink
 
 
+# TODO: not sure better way to instantiate from argument
 def str_to_class(classname):
     return getattr(sys.modules[__name__], classname)
 
@@ -84,8 +85,7 @@ class AbstractExponential(ABC):
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.calc_phi(X, y, eta)
         V_mu = self.calc_Vmu(mu_k)
-        # weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
-        weight_k = jnp.exp(-2 * jnp.log(g_deriv_k) - jnp.log(V_mu) - jnp.log(phi))
+        weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
 
     def eta(self, X: jnp.ndarray, beta: jnp.ndarray) -> jnp.ndarray:
@@ -114,8 +114,8 @@ class Gaussian(AbstractExponential):
         else:
             super().__init__(Identity())
 
-    def random_gen(self, loc: float, scale: float, shape: tuple) -> np.ndarray:
-        y = np.random.normal(loc, scale, shape)
+    def random_gen(self, loc: float, scale: float) -> np.ndarray:
+        y = np.random.normal(loc, scale)
         return y
 
     def calc_phi(
@@ -173,8 +173,8 @@ class Binomial(AbstractExponential):
         else:
             super().__init__(Logit())
 
-    def random_gen(self, p: np.ndarray, shape: tuple) -> np.ndarray:
-        y = np.random.binomial(1, p, shape)
+    def random_gen(self, p: np.ndarray) -> np.ndarray:
+        y = np.random.binomial(1, p)
         return y
 
     def calc_phi(
@@ -212,8 +212,8 @@ class Poisson(AbstractExponential):
         else:
             super().__init__(Log())
 
-    def random_gen(self, mu: np.ndarray, shape: tuple) -> np.ndarray:
-        y = np.random.poisson(mu, shape)
+    def random_gen(self, mu: np.ndarray) -> np.ndarray:
+        y = np.random.poisson(mu)
         return y
 
     def calc_phi(
@@ -236,6 +236,55 @@ class Poisson(AbstractExponential):
     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
         # need check with link function
         return jnp.zeros((p, 1))
+
+    def tree_flatten(self):
+        pass
+
+
+class NB(AbstractExponential):
+    """
+    NB-2 method, need work on this
+    Assume alpha = 1/r = 1.
+    """
+
+    def __init__(self, glink: str = "canonical", alpha: float = 1.0) -> None:
+        self.alpha = alpha
+        if glink != "canonical":
+            super().__init__(str_to_class(glink)())
+        else:
+            super().__init__(NBlink(alpha=1.0))
+            # super().__init__(Log())
+
+    def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
+        r = 1
+        p = round(mu) / (round(mu) + 1)
+        y = np.random.negative_binomial(r, 1 - p)
+        return y
+
+    def calc_phi(
+        self,
+        X: jnp.ndarray,
+        y: jnp.ndarray,
+        pred: jnp.ndarray,
+    ) -> jnp.ndarray:
+        return jnp.array([1.0])
+
+    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+        pass
+
+    def score(self):
+        pass
+
+    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+        # estimate alpha
+        # a = ((resid**2 / mu - 1) / mu).sum() / df_resid
+        return mu + self.alpha * mu ** 2
+
+    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+        # need check with link function
+        key = jax.random.PRNGKey(seed)
+        key, key_init = jax.random.split(key, 2)
+        return jax.random.normal(key, shape=(p, 1))
 
     def tree_flatten(self):
         pass
@@ -290,63 +339,6 @@ class Poisson(AbstractExponential):
 #         # need check with link function
 #         key = jax.random.PRNGKey(seed)
 #         key, key_init = random.split(key, 2)
-#         return jax.random.normal(key, shape=(p, 1))
-#
-#     def tree_flatten(self):
-#         pass
-#
-#
-# class NB(AbstractExponential):
-#     """
-#     NB-2 method, need work on this
-#     Assume phi = 1/r = 1.
-#     """
-#
-#     def __init__(
-#         self,
-#         glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#         glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#         glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#     ) -> None:
-#         # super().__init__()
-#         self.glink = glink if glink is not None else (lambda x: jnp.log(x / (1 + x)))
-#         self.glink_inv = (
-#             glink_inv if glink_inv is not None else (lambda x: jnp.exp(jnp.log(x) - jnp.log(jnp.expm1(x))))
-#         )
-#         self.glink_der = (
-#             glink_der
-#             if glink_der is not None
-#             else (lambda x: jnp.exp(-jnp.log(x) - jnp.log(1 + x)))
-#         )
-#
-#     def random_gen(self, n: int, p: np.ndarray, shape: tuple) -> np.ndarray:
-#         y = np.random.negative_binomial(n, p, shape)
-#         return y
-#
-#     def calc_phi(
-#         self,
-#         X: jnp.ndarray,
-#         y: jnp.ndarray,
-#         pred: jnp.ndarray,
-#     ) -> jnp.ndarray:
-#         """
-#         method of moment estimator for phi
-#         """
-#         return jnp.array([1.0])
-#
-#     def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
-#         pass
-#
-#     def score(self):
-#         pass
-#
-#     def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
-#         return mu + mu ** 2
-#
-#     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
-#         # need check with link function
-#         key = jax.random.PRNGKey(seed)
-#         key, key_init = jax.random.split(key, 2)
 #         return jax.random.normal(key, shape=(p, 1))
 #
 #     def tree_flatten(self):

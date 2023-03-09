@@ -1,5 +1,5 @@
 import statsmodels.api as sm
-from statsmodels.discrete.discrete_model import (  # , NegativeBinomial
+from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
 
@@ -24,7 +24,7 @@ test_irls = GLM(
     solver=solver,
     append=False,
     init="default",
-    maxiter=1000,
+    maxiter=100,
 )
 test_irls.fit()
 print(test_irls)
@@ -44,7 +44,7 @@ test_logit = GLM(
     solver=solver,
     append=False,
     init="default",
-    maxiter=1000,
+    maxiter=100,
 )
 test_logit.fit()
 print(test_logit)
@@ -61,7 +61,7 @@ test_poisson = GLM(
     solver=solver,
     append=False,
     init="default",
-    maxiter=1000,
+    maxiter=100,
 )
 test_poisson.fit()
 print(test_poisson)
@@ -87,10 +87,10 @@ print(test_poisson)
 
 # data = sm.datasets.scotland.load()
 # data.exog = sm.add_constant(data.exog)
-# # NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
-# # NB_results = NB_model.fit(maxiter=100)
-# # print(NB_results.summary())
-#
+# NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
+# NB_results = NB_model.fit(maxiter=100)
+# print(NB_results.summary())
+
 # test_NB = GLM(
 #     X=data.exog,
 #     y=data.endog,

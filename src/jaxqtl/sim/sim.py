@@ -2,7 +2,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from src.jaxqtl.infer.families.distribution import Binomial, Gaussian, Poisson
+from src.jaxqtl.infer.families.distribution import NB, Binomial, Gaussian, Poisson
 
 
 class SimState(NamedTuple):
@@ -22,6 +22,8 @@ class SimData:
             self.family = Binomial()
         elif family == "Poisson":
             self.family = Poisson()
+        elif family == "NB":
+            self.family = NB(alpha=1.0)
         else:
             print("no family found")
 
@@ -30,14 +32,13 @@ class SimData:
         p = self.pfeatures
         X_shape = (n, p)
         beta_shape = (p, 1)
-        y_shape = (n, 1)
 
         X = np.zeros(X_shape)
         maf = 0.3
         # h2g = 0.1
         # M = 100
 
-        X[:, 0] = np.ones((n,))
+        X[:, 0] = np.ones((n,))  # intercept
         X[:, 1] = np.random.binomial(3, maf, (n,))  # genotype (0,1,2)
         X[:, 2] = np.random.binomial(1, 0.5, (n,))  # sex (0, 1)
         X[:, 3] = np.random.normal(0, 1, (n,))  # center, standardize age
@@ -49,12 +50,10 @@ class SimData:
 
         eta = X @ beta
         mu = self.family.glink.inverse(eta)
-        # sigma = 1  # sigma
+        # sigma = 1
 
         # TODO: need to call this function with diff parameters
-        # y = self.family.random_gen(mu, sigma, y_shape)
-        y = self.family.random_gen(mu, y_shape)
-        # _, _, W = self.family.calc_weight(X, y, eta)
-        # se = np.sqrt(np.diag(np.linalg.inv((X * W).T @ X) * sigma ** 2))
+        # y = self.family.random_gen(mu, sigma)
+        y = self.family.random_gen(mu)
 
         return SimState(X, y, beta)
