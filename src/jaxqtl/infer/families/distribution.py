@@ -84,7 +84,8 @@ class AbstractExponential(ABC):
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.calc_phi(X, y, eta)
         V_mu = self.calc_Vmu(mu_k)
-        weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
+        # weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
+        weight_k = jnp.exp(-2 * jnp.log(g_deriv_k) - jnp.log(V_mu) - jnp.log(phi))
         return mu_k, g_deriv_k, weight_k
 
     def eta(self, X: jnp.ndarray, beta: jnp.ndarray) -> jnp.ndarray:
