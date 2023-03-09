@@ -22,7 +22,7 @@ class AbstractLinearSolve(ABC):
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
-        oldbeta: jnp.ndarray,
+        eta: jnp.ndarray,
         family: AbstractExponential,
     ) -> jnp.ndarray:
         pass
@@ -46,11 +46,10 @@ class QRSolve(AbstractLinearSolve):
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
-        oldbeta: jnp.ndarray,
+        eta: jnp.ndarray,
         family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = family.eta(X, oldbeta)  # X @ beta
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -68,11 +67,10 @@ class CholeskySolve(AbstractLinearSolve):
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
-        oldbeta: jnp.ndarray,
+        eta: jnp.ndarray,
         family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = family.eta(X, oldbeta)
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -91,11 +89,10 @@ class CGSolve(AbstractLinearSolve):
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
-        oldbeta: jnp.ndarray,
+        eta: jnp.ndarray,
         family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = X @ oldbeta
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)

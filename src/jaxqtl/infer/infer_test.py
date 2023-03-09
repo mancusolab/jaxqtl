@@ -5,6 +5,7 @@ from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
 
 from src.jaxqtl.infer.families.distribution import Binomial, Poisson
 from src.jaxqtl.infer.glm import GLM
+from src.jaxqtl.infer.solve import CholeskySolve
 
 # load toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()
@@ -20,6 +21,17 @@ print(res.summary())
 test_irls = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
+    append=False,
+    init="default",
+    maxiter=100,
+)
+test_irls.fit()
+print(test_irls)
+
+test_irls = GLM(
+    X=spector_data.exog,
+    y=spector_data.endog,
+    solver=CholeskySolve(),
     append=False,
     init="default",
     maxiter=100,

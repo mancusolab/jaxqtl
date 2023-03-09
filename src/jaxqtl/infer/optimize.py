@@ -40,7 +40,7 @@ def irls(
         print("init method not found.")
 
     for idx in range(max_iter):
-        new_beta = solver(X, y, old_beta, family)
+        new_beta = solver(X, y, X @ old_beta, family)
         norm = jnpla.norm(new_beta - old_beta)  # alternative check the log likelihood
         if norm <= tol:
             converged = True
