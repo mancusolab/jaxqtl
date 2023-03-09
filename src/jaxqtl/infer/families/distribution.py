@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .links import Identity, Link, Log, Logit, NBlink
+from .links import AbstractLink, Identity, Log, Logit, NBlink
 
 
 # TODO: not sure better way to instantiate from argument
@@ -36,10 +36,10 @@ class AbstractExponential(ABC):
 
     def __init__(
         self,
-        glink: Link,
+        glink: AbstractLink,
     ) -> None:
         self.glink = glink
-        pass
+        return
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -56,7 +56,7 @@ class AbstractExponential(ABC):
         pass
 
     @abstractmethod
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
         pass
 
     @abstractmethod
@@ -88,9 +88,6 @@ class AbstractExponential(ABC):
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
 
-    def eta(self, X: jnp.ndarray, beta: jnp.ndarray) -> jnp.ndarray:
-        return X @ beta
-
     @abstractmethod
     def tree_flatten(self):
         pass
@@ -107,12 +104,9 @@ class Gaussian(AbstractExponential):
 
     def __init__(
         self,
-        glink: str = "canonical",
+        glink: AbstractLink = Identity(),
     ) -> None:
-        if glink != "canonical":
-            super().__init__(str_to_class(glink)())
-        else:
-            super().__init__(Identity())
+        super().__init__(glink)
 
     def random_gen(self, loc: float, scale: float) -> np.ndarray:
         y = np.random.normal(loc, scale)
@@ -129,11 +123,8 @@ class Gaussian(AbstractExponential):
         phi = resid / df
         return phi
 
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
-        nobs = len(y)
-        logprob = jaxstats.multivariate_normal.logpdf(
-            y, jnp.zeros(nobs), jnp.diag(jnp.ones(nobs))
-        )
+    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+        logprob = jnp.sum(jaxstats.norm.logpdf(y, self.glink.inverse(eta), 1.0))
         return logprob
 
     def score(self):
@@ -166,12 +157,9 @@ class Binomial(AbstractExponential):
 
     def __init__(
         self,
-        glink: str = "canonical",
+        glink: AbstractLink = Logit(),
     ) -> None:
-        if glink != "canonical":
-            super().__init__(str_to_class(glink)())
-        else:
-            super().__init__(Logit())
+        super().__init__(glink)
 
     def random_gen(self, p: np.ndarray) -> np.ndarray:
         y = np.random.binomial(1, p)
@@ -185,7 +173,11 @@ class Binomial(AbstractExponential):
     ) -> jnp.ndarray:
         return jnp.array([1.0])
 
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+        """
+        this works if we're using sigmoid link
+        -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
+        """
         pass
 
     def score(self):
@@ -205,12 +197,9 @@ class Binomial(AbstractExponential):
 class Poisson(AbstractExponential):
     def __init__(
         self,
-        glink: str = "canonical",
+        glink: AbstractLink = Log(),
     ) -> None:
-        if glink != "canonical":
-            super().__init__(str_to_class(glink)())
-        else:
-            super().__init__(Log())
+        super().__init__(glink)
 
     def random_gen(self, mu: np.ndarray) -> np.ndarray:
         y = np.random.poisson(mu)
@@ -224,7 +213,7 @@ class Poisson(AbstractExponential):
     ) -> jnp.ndarray:
         return jnp.array([1.0])
 
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
         pass
 
     def score(self):
@@ -247,13 +236,9 @@ class NB(AbstractExponential):
     Assume alpha = 1/r = 1.
     """
 
-    def __init__(self, glink: str = "canonical", alpha: float = 1.0) -> None:
-        self.alpha = alpha
-        if glink != "canonical":
-            super().__init__(str_to_class(glink)())
-        else:
-            super().__init__(NBlink(alpha=1.0))
-            # super().__init__(Log())
+    def __init__(self, glink: AbstractLink = NBlink(alpha=1.0)):
+        self.alpha = glink.alpha
+        super().__init__(glink)
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
         r = 1
@@ -269,7 +254,7 @@ class NB(AbstractExponential):
     ) -> jnp.ndarray:
         return jnp.array([1.0])
 
-    def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
         pass
 
     def score(self):
@@ -326,7 +311,7 @@ class NB(AbstractExponential):
 #         phi = jnp.sum(jnp.square(mu - y) / jnp.square(mu)) / df
 #         return phi
 #
-#     def log_prob(self, y: jnp.ndarray) -> jnp.ndarray:
+#     def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
 #         pass
 #
 #     def score(self):

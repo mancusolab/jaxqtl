@@ -34,7 +34,7 @@ class AbstractLinearSolve(ABC):
     def tree_flatten(self):
         children = ()
         aux = ()
-        return (children, aux)
+        return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
@@ -95,7 +95,7 @@ class CGSolve(AbstractLinearSolve):
         family: AbstractExponential,
     ) -> jnp.ndarray:
 
-        eta = family.eta(X, oldbeta)
+        eta = X @ oldbeta
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)

@@ -1,13 +1,14 @@
-# from abc import ABC, abstractmethod
-# typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
-# from typing import Callable, List, NamedTuple, Optional, Tuple, Union
+from abc import ABC, abstractmethod
 
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
+# typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
+# from typing import Callable, List, NamedTuple, Optional, Tuple, Union
+
 
 @register_pytree_node_class
-class Link:
+class AbstractLink(ABC):
     """
     Parent class for different link function g(mu) = eta
     """
@@ -16,30 +17,35 @@ class Link:
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
+    @abstractmethod
     def __call__(self, mu: jnp.ndarray) -> jnp.ndarray:
         """
         calculate g(mu) = eta
         """
         pass
 
+    @abstractmethod
     def inverse(self, eta: jnp.ndarray) -> jnp.ndarray:
         """
         calculate g^-1(eta) = mu
         """
         pass
 
+    @abstractmethod
     def deriv(self, mu: jnp.ndarray) -> jnp.ndarray:
         """
         calculate g'(mu)
         """
         pass
 
+    @abstractmethod
     def inverse_deriv(self, eta: jnp.ndarray) -> jnp.ndarray:
         """
         calculate g^{-1}'(eta)
         """
         pass
 
+    @abstractmethod
     def tree_flatten(self):
         pass
 
@@ -48,7 +54,7 @@ class Link:
         return cls(*children)
 
 
-class Power(Link):
+class Power(AbstractLink):
     def __init__(self, power=1.0):
         self.power = power
 
@@ -57,16 +63,10 @@ class Power(Link):
         Power transform link function
         g(mu) = mu ** self.power
         """
-        if self.power == 1:
-            return mu
-        else:
-            return jnp.power(mu, self.power)
+        return jnp.power(mu, self.power)
 
     def inverse(self, eta):
-        if self.power == 1.0:
-            return eta
-        else:
-            return jnp.power(eta, 1.0 / self.power)
+        return jnp.power(eta, 1.0 / self.power)
 
     def deriv(self, mu):
         if self.power == 1:
@@ -81,13 +81,21 @@ class Power(Link):
         else:
             return jnp.power(eta, 1 / self.power - 1) / self.power
 
+    def tree_flatten(self):
+        children = (self.power,)
+        aux = None
+        return children, aux
+
 
 class Identity(Power):
     def __init__(self):
-        super().__init__(power=1.0)
+        super().__init__(1.0)
+
+    def tree_flatten(self):
+        pass
 
 
-class Logit(Link):
+class Logit(AbstractLink):
     def __call__(self, mu: jnp.ndarray):
         """
         Power transform link function
@@ -106,8 +114,13 @@ class Logit(Link):
         z = jnp.exp(eta)
         return z / (1 + z) ** 2
 
+    def tree_flatten(self):
+        children = ()
+        aux = None
+        return children, aux
 
-class Log(Link):
+
+class Log(AbstractLink):
     def __call__(self, mu: jnp.ndarray):
         """
         Power transform link function
@@ -124,8 +137,13 @@ class Log(Link):
     def inverse_deriv(self, eta):
         return jnp.exp(eta)
 
+    def tree_flatten(self):
+        children = (self.power,)
+        aux = None
+        return children, aux
 
-class NBlink(Link):
+
+class NBlink(AbstractLink):
     def __init__(self, alpha: float = 1.0):
         self.alpha = alpha
 
@@ -148,3 +166,8 @@ class NBlink(Link):
     def inverse_deriv(self, eta):
         z = jnp.exp(eta)
         return jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
+
+    def tree_flatten(self):
+        children = (self.alpha,)
+        aux = None
+        return children, aux

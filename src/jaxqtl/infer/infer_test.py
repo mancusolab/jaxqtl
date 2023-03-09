@@ -3,6 +3,7 @@ from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
 
+from src.jaxqtl.infer.families.distribution import Binomial, Poisson
 from src.jaxqtl.infer.glm import GLM
 
 # load toy example data from statsmodels to compare
@@ -19,9 +20,6 @@ print(res.summary())
 test_irls = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
-    family="Gaussian",
-    link="canonical",
-    solver=solver,
     append=False,
     init="default",
     maxiter=100,
@@ -39,9 +37,7 @@ print(res.summary())
 test_logit = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
-    family="Binomial",
-    link="canonical",
-    solver=solver,
+    family=Binomial(),
     append=False,
     init="default",
     maxiter=100,
@@ -56,9 +52,7 @@ print(res.summary())
 test_poisson = GLM(
     X=spector_data.exog,
     y=spector_data.endog,
-    family="Poisson",
-    link="canonical",
-    solver=solver,
+    family=Poisson(),
     append=False,
     init="default",
     maxiter=100,
