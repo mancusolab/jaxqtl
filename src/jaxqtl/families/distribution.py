@@ -41,12 +41,12 @@ class ExponentialFamily(ABC):
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         # phi is the dispersion parameter
         pass
 
     @abstractmethod
-    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
+    def log_prob(self, y: ArrayLike, mu: ArrayLike, phi: float) -> Array:
         pass
 
     @abstractmethod
@@ -70,7 +70,7 @@ class ExponentialFamily(ABC):
         """
         mu_k = self.glink.inverse(eta)
         g_deriv_k = self.glink.deriv(mu_k)
-        phi = self.calc_phi(X, y, eta)
+        phi = self.calc_phi(X, y, mu_k)
         V_mu = self.variance(mu_k)
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
@@ -102,14 +102,14 @@ class Gaussian(ExponentialFamily):
         y = np.random.normal(loc, scale)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
-        resid = jnp.sum(jnp.square(pred - y))
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+        resid = jnp.sum(jnp.square(mu - y))
         df = y.shape[0] - X.shape[1]
         phi = resid / df
         return phi
 
-    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        logprob = jnp.sum(jaxstats.norm.logpdf(y, self.glink.inverse(eta), 1.0))
+    def log_prob(self, y: ArrayLike, mu: ArrayLike, phi: float) -> Array:
+        logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
         return logprob
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
@@ -139,15 +139,16 @@ class Binomial(ExponentialFamily):
         y = np.random.binomial(1, p)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
+    def log_prob(self, y: ArrayLike, mu: ArrayLike, phi: float) -> Array:
         """
         this works if we're using sigmoid link
         -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
         """
-        pass
+        logprob = jnp.sum(jaxstats.bernoulli.logpmf(y, mu))
+        return logprob
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
@@ -171,11 +172,12 @@ class Poisson(ExponentialFamily):
         y = np.random.poisson(mu)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        return jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
+    def log_prob(self, y: ArrayLike, mu: ArrayLike, phi: float) -> Array:
+        logprob = jnp.sum(jaxstats.poisson.logpmf(y, mu))
+        return logprob
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
@@ -208,10 +210,10 @@ class NegativeBinomial(ExponentialFamily):
         y = np.random.negative_binomial(r, 1 - p)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
+    def log_prob(self, y: ArrayLike, mu: ArrayLike, phi: float) -> Array:
         pass
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
@@ -260,7 +262,7 @@ class NegativeBinomial(ExponentialFamily):
 #         y = np.random.gamma(alpha, beta, shape)
 #         return y
 #
-#       def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+#       def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
 #         """
 #         method of moment estimator for phi
 #         """

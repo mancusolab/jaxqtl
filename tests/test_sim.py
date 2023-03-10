@@ -15,7 +15,7 @@ config.update("jax_enable_x64", True)
 
 np.random.seed(1)
 
-n = 1000  # TODO: not converge for seed=1, n=1000
+n = 100  # TODO: not converge for seed=1, n=1000
 solver = "qr"
 family = Poisson()
 

@@ -6,8 +6,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from jaxqtl.families.distribution import ExponentialFamily, Gaussian
-
+from ..families.distribution import ExponentialFamily, Gaussian
 from .optimize import irls
 from .solve import CGSolve, LinearSolve
 
@@ -90,7 +89,7 @@ class GLM:
 
     def fit(self):
         beta, self.n_iter, self.converged = irls(
-            self.X, self.y, self.family, self.solver, self.seed, self.init, self.maxiter
+            self.X, self.y, self.family, self.solver, self.seed, self.maxiter
         )
         self.eta = self.X @ beta
         self.beta_se = self.sumstats()

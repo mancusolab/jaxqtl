@@ -20,38 +20,37 @@ def OLS(X: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
     return jspla.solve_triangular(R, Q.T @ y)
 
 
+# @jit
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
     family: ExponentialFamily,
     solver: LinearSolve,
     seed: int,
-    init: str = "default",
     max_iter: int = 1000,
     tol: float = 1e-3,
 ) -> IRLSState:
 
     converged = False
-    pfeatures = X.shape[1]
-    if init == "OLS":
-        eta = X @ OLS(X, y)
-    elif init == "default":
-        eta = family.init_mu(pfeatures, seed)
-    else:
-        print("init method not found.")
 
-    old_beta = None
+    eta = X @ OLS(X, y)
+    mu = family.glink.inverse(eta)
+    phi = family.calc_phi(X, y, mu)
+    old_pdf = family.log_prob(y, mu, phi)
+
     for idx in range(max_iter):
         beta = solver(X, y, eta, family)
-        norm = jnpla.norm(beta - old_beta)  # alternative check the log likelihood
-        if norm <= tol:
+        eta = X @ beta
+        mu = family.glink.inverse(eta)
+        phi = family.calc_phi(X, y, mu)
+        new_pdf = family.log_prob(y, mu, phi)
+        delta = jnp.abs(new_pdf - old_pdf)  # alternative check the log likelihood
+        if delta <= tol:
             converged = True
             num_iters = idx + 1  # start count at 0
             break
         else:
-            converged = False
+            old_pdf = new_pdf
             num_iters = idx + 1
-
-        eta = X @ beta
 
     return IRLSState(beta, num_iters, converged)
