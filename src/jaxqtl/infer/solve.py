@@ -11,7 +11,7 @@ from src.jaxqtl.families.distribution import ExponentialFamily
 
 
 @register_pytree_node_class
-class AbstractLinearSolve(ABC):
+class LinearSolve(ABC):
     """
     Define parent class for all solvers
     eta = X @ beta, the linear component
@@ -41,7 +41,7 @@ class AbstractLinearSolve(ABC):
         return cls()
 
 
-class QRSolve(AbstractLinearSolve):
+class QRSolve(LinearSolve):
     def __call__(
         self,
         X: jnp.ndarray,
@@ -62,7 +62,7 @@ class QRSolve(AbstractLinearSolve):
         return jspla.solve_triangular(R, Q.T @ w_r)
 
 
-class CholeskySolve(AbstractLinearSolve):
+class CholeskySolve(LinearSolve):
     def __call__(
         self,
         X: jnp.ndarray,
@@ -84,7 +84,7 @@ class CholeskySolve(AbstractLinearSolve):
         return jspla.cho_solve(factor, XtWy)
 
 
-class CGSolve(AbstractLinearSolve):
+class CGSolve(LinearSolve):
     def __call__(
         self,
         X: jnp.ndarray,

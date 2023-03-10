@@ -9,7 +9,7 @@ from jax.tree_util import register_pytree_node_class
 from src.jaxqtl.families.distribution import ExponentialFamily, Gaussian
 
 from .optimize import irls
-from .solve import AbstractLinearSolve, CGSolve
+from .solve import CGSolve, LinearSolve
 
 
 class GLMState(NamedTuple):
@@ -49,7 +49,7 @@ class GLM:
         X: jnp.ndarray,
         y: jnp.ndarray,
         family: ExponentialFamily = Gaussian(),
-        solver: AbstractLinearSolve = CGSolve(),
+        solver: LinearSolve = CGSolve(),
         append: bool = True,
         init: str = "default",  # [default or OLS]
         maxiter: int = 100,
