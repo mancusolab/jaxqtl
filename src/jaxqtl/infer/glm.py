@@ -6,7 +6,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from src.jaxqtl.families.distribution import ExponentialFamily, Gaussian
+from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 
 from .optimize import irls
 from .solve import CGSolve, LinearSolve

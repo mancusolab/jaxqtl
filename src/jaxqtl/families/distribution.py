@@ -32,7 +32,7 @@ class ExponentialFamily(ABC):
 
     def __init__(self, glink: Link, validate: bool = True):
         if validate:
-            if glink not in self._links:
+            if not any([isinstance(glink, link) for link in self._links]):
                 raise ValueError(f"Link {glink} is invalid for Family {self}")
         self.glink = glink
 

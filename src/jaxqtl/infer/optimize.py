@@ -4,7 +4,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 from jax import numpy as jnp
 
-from src.jaxqtl.families.distribution import ExponentialFamily
+from jaxqtl.families.distribution import ExponentialFamily
 
 from .solve import LinearSolve
 

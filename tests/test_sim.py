@@ -5,10 +5,10 @@ from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
 
 from jax.config import config
 
-from jaxqtl.infer.families.distribution import Poisson
+from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
-from jaxqtl.sim.sim import SimData
+from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
 

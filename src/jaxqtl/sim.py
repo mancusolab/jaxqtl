@@ -2,7 +2,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from src.jaxqtl.families.distribution import ExponentialFamily, Gaussian
+from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 
 
 class SimState(NamedTuple):
