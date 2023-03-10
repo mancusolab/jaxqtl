@@ -3,7 +3,7 @@ from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
 
-from src.jaxqtl.infer.families.distribution import Binomial, Poisson
+from src.jaxqtl.families.distribution import Binomial, Poisson
 from src.jaxqtl.infer.glm import GLM
 from src.jaxqtl.infer.solve import CholeskySolve
 

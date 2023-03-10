@@ -3,9 +3,6 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-# typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
-# from typing import Callable, List, NamedTuple, Optional, Tuple, Union
-
 
 @register_pytree_node_class
 class Link(ABC):

@@ -2,7 +2,7 @@ from typing import NamedTuple
 
 import numpy as np
 
-from src.jaxqtl.infer.families.distribution import NB, Binomial, Gaussian, Poisson
+from src.jaxqtl.families.distribution import ExponentialFamily, Gaussian
 
 
 class SimState(NamedTuple):
@@ -12,20 +12,10 @@ class SimState(NamedTuple):
 
 
 class SimData:
-    def __init__(self, family: str, nobs: int) -> None:
+    def __init__(self, nobs: int, family: ExponentialFamily = Gaussian()) -> None:
         self.nobs = nobs
         self.pfeatures = 6
-
-        if family == "Gaussian":
-            self.family = Gaussian()
-        elif family == "Binomial":
-            self.family = Binomial()
-        elif family == "Poisson":
-            self.family = Poisson()
-        elif family == "NB":
-            self.family = NB(alpha=1.0)
-        else:
-            print("no family found")
+        self.family = family
 
     def gen_data(self):
         n = self.nobs

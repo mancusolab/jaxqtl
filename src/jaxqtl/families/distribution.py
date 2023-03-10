@@ -1,8 +1,4 @@
-import sys
 from abc import ABC, abstractmethod
-
-# typing.NamedTuple class is immutable (cannot change attribute values) [Chapter 7]
-# from typing import Callable, List, NamedTuple, Optional, Tuple, Union
 from typing import Optional, Tuple
 
 import numpy as np
@@ -13,11 +9,6 @@ import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 from .links import Identity, Link, Log, Logit, NBlink
-
-
-# TODO: not sure better way to instantiate from argument
-def str_to_class(classname):
-    return getattr(sys.modules[__name__], classname)
 
 
 @register_pytree_node_class
@@ -234,7 +225,7 @@ class NB(ExponentialFamily):
     """
 
     def __init__(self, glink: Link = NBlink(alpha=1.0)):
-        self.alpha = glink.alpha
+        self.alpha = 1.0  # TODO: fix this glink.alpha
         super().__init__(glink)
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:

@@ -5,10 +5,10 @@ from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
 
 from jax.config import config
 
-from src.jaxqtl.infer.families.distribution import Poisson
-from src.jaxqtl.infer.glm import GLM
-from src.jaxqtl.infer.solve import CholeskySolve
-from src.jaxqtl.sim.sim import SimData
+from jaxqtl.infer.families.distribution import Poisson
+from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.solve import CholeskySolve
+from jaxqtl.sim.sim import SimData
 
 config.update("jax_enable_x64", True)
 
@@ -17,9 +17,9 @@ np.random.seed(1)
 
 n = 1000  # TODO: not converge for seed=1, n=1000
 solver = "qr"
-family = "Poisson"
+family = Poisson()
 
-sim = SimData(family, n)
+sim = SimData(n, family)
 X, y, beta = sim.gen_data()
 
 print(beta)

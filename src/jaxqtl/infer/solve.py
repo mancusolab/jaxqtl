@@ -7,7 +7,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .families.distribution import ExponentialFamily
+from src.jaxqtl.families.distribution import ExponentialFamily
 
 
 @register_pytree_node_class

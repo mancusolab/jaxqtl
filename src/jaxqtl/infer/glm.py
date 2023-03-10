@@ -6,7 +6,8 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from .families.distribution import ExponentialFamily, Gaussian
+from src.jaxqtl.families.distribution import ExponentialFamily, Gaussian
+
 from .optimize import irls
 from .solve import AbstractLinearSolve, CGSolve
 
@@ -77,7 +78,7 @@ class GLM:
         if isinstance(self.family, Gaussian):
             pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
         else:
-            pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0,1)
+            pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
 
         return TS, pval, df
 
