@@ -214,7 +214,7 @@ class Poisson(AbstractExponential):
         return jnp.array([1.0])
 
     def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
-        pass
+        return jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
 
     def score(self):
         pass

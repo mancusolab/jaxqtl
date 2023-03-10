@@ -33,15 +33,16 @@ def irls(
     converged = False
     pfeatures = X.shape[1]
     if init == "OLS":
-        old_beta = OLS(X, y)
+        eta = X @ OLS(X, y)
     elif init == "default":
-        old_beta = family.init_mu(pfeatures, seed)
+        eta = family.init_mu(pfeatures, seed)
     else:
         print("init method not found.")
 
+    old_beta = None
     for idx in range(max_iter):
-        new_beta = solver(X, y, X @ old_beta, family)
-        norm = jnpla.norm(new_beta - old_beta)  # alternative check the log likelihood
+        beta = solver(X, y, eta, family)
+        norm = jnpla.norm(beta - old_beta)  # alternative check the log likelihood
         if norm <= tol:
             converged = True
             num_iters = idx + 1  # start count at 0
@@ -50,6 +51,6 @@ def irls(
             converged = False
             num_iters = idx + 1
 
-        old_beta = new_beta
+        eta = X @ beta
 
-    return IRLSState(new_beta, num_iters, converged)
+    return IRLSState(beta, num_iters, converged)

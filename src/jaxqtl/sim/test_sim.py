@@ -3,12 +3,19 @@ from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
     Poisson as smPoisson,
 )
 
+from jax.config import config
+
+from src.jaxqtl.infer.families.distribution import Poisson
 from src.jaxqtl.infer.glm import GLM
+from src.jaxqtl.infer.solve import CholeskySolve
 from src.jaxqtl.sim.sim import SimData
+
+config.update("jax_enable_x64", True)
+
 
 np.random.seed(1)
 
-n = 100  # TODO: not converge for seed=1, n=1000
+n = 1000  # TODO: not converge for seed=1, n=1000
 solver = "qr"
 family = "Poisson"
 
@@ -25,7 +32,13 @@ print(smPoisson_res.summary())
 
 # TODO: this has numerical issue when features have too large values (eg. PC has sd=2)
 jaxqtl_poisson = GLM(
-    X=X, y=y, family=family, solver=solver, append=False, init="default", maxiter=100
+    X=X,
+    y=y,
+    family=Poisson(),
+    solver=CholeskySolve(),
+    append=False,
+    init="default",
+    maxiter=100,
 )
 jaxqtl_poisson.fit()
 print(jaxqtl_poisson)
