@@ -8,7 +8,7 @@ from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 
 @register_pytree_node_class
-class AbstractLink(ABC):
+class Link(ABC):
     """
     Parent class for different link function g(mu) = eta
     """
@@ -54,7 +54,7 @@ class AbstractLink(ABC):
         return cls(*children)
 
 
-class Power(AbstractLink):
+class Power(Link):
     def __init__(self, power=1.0):
         self.power = power
 
@@ -95,7 +95,7 @@ class Identity(Power):
         pass
 
 
-class Logit(AbstractLink):
+class Logit(Link):
     def __call__(self, mu: jnp.ndarray):
         """
         Power transform link function
@@ -120,7 +120,7 @@ class Logit(AbstractLink):
         return children, aux
 
 
-class Log(AbstractLink):
+class Log(Link):
     def __call__(self, mu: jnp.ndarray):
         """
         Power transform link function
@@ -143,7 +143,7 @@ class Log(AbstractLink):
         return children, aux
 
 
-class NBlink(AbstractLink):
+class NBlink(Link):
     def __init__(self, alpha: float = 1.0):
         self.alpha = alpha
 

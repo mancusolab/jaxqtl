@@ -12,7 +12,7 @@ import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .links import AbstractLink, Identity, Log, Logit, NBlink
+from .links import Identity, Link, Log, Logit, NBlink
 
 
 # TODO: not sure better way to instantiate from argument
@@ -21,7 +21,7 @@ def str_to_class(classname):
 
 
 @register_pytree_node_class
-class AbstractExponential(ABC):
+class ExponentialFamily(ABC):
     """
     Define parent class for exponential family distribution (One parameter EF for now).
     Provide all required link function relevant to generalized linear model (GLM).
@@ -34,10 +34,7 @@ class AbstractExponential(ABC):
     : log_prob : log joint density of all observations
     """
 
-    def __init__(
-        self,
-        glink: AbstractLink,
-    ) -> None:
+    def __init__(self, glink: Link):
         self.glink = glink
         return
 
@@ -97,14 +94,14 @@ class AbstractExponential(ABC):
         return cls(*children)
 
 
-class Gaussian(AbstractExponential):
+class Gaussian(ExponentialFamily):
     """
     By explicitly write phi (here is sigma^2), we can treat normal distribution as one-parameter EF
     """
 
     def __init__(
         self,
-        glink: AbstractLink = Identity(),
+        glink: Link = Identity(),
     ) -> None:
         super().__init__(glink)
 
@@ -147,7 +144,7 @@ class Gaussian(AbstractExponential):
         pass
 
 
-class Binomial(AbstractExponential):
+class Binomial(ExponentialFamily):
     """
     default setting:
     glink = log(p/(1-p))
@@ -157,7 +154,7 @@ class Binomial(AbstractExponential):
 
     def __init__(
         self,
-        glink: AbstractLink = Logit(),
+        glink: Link = Logit(),
     ) -> None:
         super().__init__(glink)
 
@@ -194,10 +191,10 @@ class Binomial(AbstractExponential):
         pass
 
 
-class Poisson(AbstractExponential):
+class Poisson(ExponentialFamily):
     def __init__(
         self,
-        glink: AbstractLink = Log(),
+        glink: Link = Log(),
     ) -> None:
         super().__init__(glink)
 
@@ -230,13 +227,13 @@ class Poisson(AbstractExponential):
         pass
 
 
-class NB(AbstractExponential):
+class NB(ExponentialFamily):
     """
     NB-2 method, need work on this
     Assume alpha = 1/r = 1.
     """
 
-    def __init__(self, glink: AbstractLink = NBlink(alpha=1.0)):
+    def __init__(self, glink: Link = NBlink(alpha=1.0)):
         self.alpha = glink.alpha
         super().__init__(glink)
 

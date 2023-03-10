@@ -4,7 +4,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 from jax import numpy as jnp
 
-from .families.distribution import AbstractExponential
+from .families.distribution import ExponentialFamily
 from .solve import AbstractLinearSolve
 
 
@@ -22,7 +22,7 @@ def OLS(X: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
-    family: AbstractExponential,
+    family: ExponentialFamily,
     solver: AbstractLinearSolve,
     seed: int,
     init: str = "default",

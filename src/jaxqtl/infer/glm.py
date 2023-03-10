@@ -6,7 +6,7 @@ from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from .families.distribution import AbstractExponential, Gaussian
+from .families.distribution import ExponentialFamily, Gaussian
 from .optimize import irls
 from .solve import AbstractLinearSolve, CGSolve
 
@@ -47,7 +47,7 @@ class GLM:
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
-        family: AbstractExponential = Gaussian(),
+        family: ExponentialFamily = Gaussian(),
         solver: AbstractLinearSolve = CGSolve(),
         append: bool = True,
         init: str = "default",  # [default or OLS]

@@ -7,7 +7,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
-from .families.distribution import AbstractExponential
+from .families.distribution import ExponentialFamily
 
 
 @register_pytree_node_class
@@ -23,7 +23,7 @@ class AbstractLinearSolve(ABC):
         X: jnp.ndarray,
         y: jnp.ndarray,
         eta: jnp.ndarray,
-        family: AbstractExponential,
+        family: ExponentialFamily,
     ) -> jnp.ndarray:
         pass
 
@@ -47,7 +47,7 @@ class QRSolve(AbstractLinearSolve):
         X: jnp.ndarray,
         y: jnp.ndarray,
         eta: jnp.ndarray,
-        family: AbstractExponential,
+        family: ExponentialFamily,
     ) -> jnp.ndarray:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
@@ -68,7 +68,7 @@ class CholeskySolve(AbstractLinearSolve):
         X: jnp.ndarray,
         y: jnp.ndarray,
         eta: jnp.ndarray,
-        family: AbstractExponential,
+        family: ExponentialFamily,
     ) -> jnp.ndarray:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
@@ -90,7 +90,7 @@ class CGSolve(AbstractLinearSolve):
         X: jnp.ndarray,
         y: jnp.ndarray,
         eta: jnp.ndarray,
-        family: AbstractExponential,
+        family: ExponentialFamily,
     ) -> jnp.ndarray:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
