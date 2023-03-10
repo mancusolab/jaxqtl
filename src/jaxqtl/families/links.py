@@ -1,7 +1,9 @@
 from abc import ABC, abstractmethod
 
 import jax.numpy as jnp
+from jax import Array
 from jax.tree_util import register_pytree_node, register_pytree_node_class
+from jax.typing import ArrayLike
 
 
 @register_pytree_node_class
@@ -15,36 +17,37 @@ class Link(ABC):
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
-    def __call__(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def __call__(self, mu: ArrayLike) -> Array:
         """
         calculate g(mu) = eta
         """
         pass
 
     @abstractmethod
-    def inverse(self, eta: jnp.ndarray) -> jnp.ndarray:
+    def inverse(self, eta: ArrayLike) -> Array:
         """
         calculate g^-1(eta) = mu
         """
         pass
 
     @abstractmethod
-    def deriv(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def deriv(self, mu: ArrayLike) -> Array:
         """
         calculate g'(mu)
         """
         pass
 
     @abstractmethod
-    def inverse_deriv(self, eta: jnp.ndarray) -> jnp.ndarray:
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
         """
         calculate g^{-1}'(eta)
         """
         pass
 
-    @abstractmethod
     def tree_flatten(self):
-        pass
+        children = ()
+        aux = ()
+        return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
@@ -54,46 +57,45 @@ class Link(ABC):
 class Power(Link):
     def __init__(self, power=1.0):
         self.power = power
+        super(Power, self).__init__()
 
-    def __call__(self, mu: jnp.ndarray):
-        """
-        Power transform link function
-        g(mu) = mu ** self.power
-        """
+    def __call__(self, mu: ArrayLike) -> Array:
         return jnp.power(mu, self.power)
 
-    def inverse(self, eta):
+    def inverse(self, eta: ArrayLike) -> Array:
         return jnp.power(eta, 1.0 / self.power)
 
-    def deriv(self, mu):
-        if self.power == 1:
-            # return vector of ones, with same shape as p (note: can we return one value instead?)
-            return jnp.ones_like(mu)
-        else:
-            return self.power * jnp.power(mu, self.power - 1)
+    def deriv(self, mu: ArrayLike) -> Array:
+        return self.power * jnp.power(mu, self.power - 1)
 
-    def inverse_deriv(self, eta):
-        if self.power == 1:
-            return jnp.ones_like(eta)
-        else:
-            return jnp.power(eta, 1 / self.power - 1) / self.power
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
+        return jnp.power(eta, 1 / self.power - 1) / self.power
 
     def tree_flatten(self):
         children = (self.power,)
-        aux = None
+        aux = ()
         return children, aux
 
 
-class Identity(Power):
+class Identity(Link):
     def __init__(self):
-        super().__init__(1.0)
+        super(Identity, self).__init__()
 
-    def tree_flatten(self):
-        pass
+    def __call__(self, mu: ArrayLike) -> Array:
+        return mu
+
+    def inverse(self, eta: ArrayLike) -> Array:
+        return eta
+
+    def deriv(self, mu: ArrayLike) -> Array:
+        return jnp.ones_like(mu)
+
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
+        return jnp.ones_like(eta)
 
 
 class Logit(Link):
-    def __call__(self, mu: jnp.ndarray):
+    def __call__(self, mu: ArrayLike) -> Array:
         """
         Power transform link function
         g(mu) = log(mu / (1-mu))
@@ -101,37 +103,28 @@ class Logit(Link):
         """
         return jnp.log(mu / (1 - mu))
 
-    def inverse(self, eta):
+    def inverse(self, eta: ArrayLike) -> Array:
         return jnp.exp(-jnp.log1p(jnp.exp(-eta)))
 
-    def deriv(self, mu):
+    def deriv(self, mu: ArrayLike) -> Array:
         return jnp.exp(-jnp.log(mu) - jnp.log(1 - mu))
 
-    def inverse_deriv(self, eta):
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
         z = jnp.exp(eta)
         return z / (1 + z) ** 2
 
-    def tree_flatten(self):
-        children = ()
-        aux = None
-        return children, aux
-
 
 class Log(Link):
-    def __call__(self, mu: jnp.ndarray):
-        """
-        Power transform link function
-        g(mu) = log(mu)
-        """
+    def __call__(self, mu: ArrayLike) -> Array:
         return jnp.log(mu)
 
-    def inverse(self, eta):
+    def inverse(self, eta: ArrayLike) -> Array:
         return jnp.exp(eta)
 
-    def deriv(self, mu):
+    def deriv(self, mu: ArrayLike) -> Array:
         return 1.0 / mu
 
-    def inverse_deriv(self, eta):
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
         return jnp.exp(eta)
 
     def tree_flatten(self):
@@ -143,16 +136,17 @@ class Log(Link):
 class NBlink(Link):
     def __init__(self, alpha: float = 1.0):
         self.alpha = alpha
+        super(NBlink, self).__init__()
 
-    def __call__(self, mu: jnp.ndarray):
+    def __call__(self, mu: ArrayLike) -> Array:
         z = mu * self.alpha
         return jnp.log(z / (z + 1))
 
-    def inverse(self, eta):
+    def inverse(self, eta: ArrayLike) -> Array:
         z = jnp.exp(eta)
         return z / (self.alpha * (1 - z))
 
-    def deriv(self, mu):
+    def deriv(self, mu: ArrayLike) -> Array:
         """
         1/(mu * (mu * alpha + 1)), mu > 0
         """
@@ -160,7 +154,7 @@ class NBlink(Link):
         term2 = -jnp.log(mu * self.alpha + 1)
         return jnp.exp(term1 + term2)
 
-    def inverse_deriv(self, eta):
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
         z = jnp.exp(eta)
         return jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
 

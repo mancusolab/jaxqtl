@@ -1,14 +1,17 @@
 from abc import ABC, abstractmethod
-from typing import Optional, Tuple
+from typing import List, Optional, Tuple
 
 import numpy as np
+from typing_extensions import Self
 
 import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
+from jax import Array
 from jax.tree_util import register_pytree_node, register_pytree_node_class
+from jax.typing import ArrayLike
 
-from .links import Identity, Link, Log, Logit, NBlink
+from .links import Identity, Link, Log, Logit, NBlink, Power
 
 
 @register_pytree_node_class
@@ -25,46 +28,42 @@ class ExponentialFamily(ABC):
     : log_prob : log joint density of all observations
     """
 
-    def __init__(self, glink: Link):
+    _links: List[Self]  # type: ignore
+
+    def __init__(self, glink: Link, validate: bool = True):
+        if validate:
+            if glink not in self._links:
+                raise ValueError(f"Link {glink} is invalid for Family {self}")
         self.glink = glink
-        return
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
         # phi is the dispersion parameter
         pass
 
     @abstractmethod
-    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
     @abstractmethod
-    def score(self) -> jnp.ndarray:
+    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
     @abstractmethod
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def variance(self, mu: ArrayLike) -> Array:
         pass
 
     @abstractmethod
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+    def init_mu(self, p: int, seed: Optional[int]) -> Array:
         pass
 
     def calc_weight(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        eta: jnp.ndarray,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike
+    ) -> Tuple[Array, Array, Array]:
         """
         weight for each observation in IRLS
         weight_i = 1 / (V(mu_i) * phi * g'(mu_i)**2)
@@ -72,13 +71,17 @@ class ExponentialFamily(ABC):
         mu_k = self.glink.inverse(eta)
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.calc_phi(X, y, eta)
-        V_mu = self.calc_Vmu(mu_k)
+        V_mu = self.variance(mu_k)
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
 
-    @abstractmethod
     def tree_flatten(self):
-        pass
+        children = (
+            self.glink,
+            False,
+        )  # validation already occurred, we shouldn't need to redo it
+        aux = ()
+        return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
@@ -90,49 +93,33 @@ class Gaussian(ExponentialFamily):
     By explicitly write phi (here is sigma^2), we can treat normal distribution as one-parameter EF
     """
 
-    def __init__(
-        self,
-        glink: Link = Identity(),
-    ) -> None:
-        super().__init__(glink)
+    _links = [Identity, Log, Power]
 
-    def random_gen(self, loc: float, scale: float) -> np.ndarray:
+    def __init__(self, glink: Link = Identity(), validate: bool = True):
+        super(Gaussian, self).__init__(glink, validate)
+
+    def random_gen(self, loc: ArrayLike, scale: ArrayLike) -> Array:
         y = np.random.normal(loc, scale)
         return y
 
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
         resid = jnp.sum(jnp.square(pred - y))
         df = y.shape[0] - X.shape[1]
         phi = resid / df
         return phi
 
-    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
         logprob = jnp.sum(jaxstats.norm.logpdf(y, self.glink.inverse(eta), 1.0))
         return logprob
 
-    def score(self):
-        mu_grad = jnp.sum((self.y - self.mu) / self.scale)
-        var_grad = jnp.sum(
-            -0.5 * (1 / self.scale - jnp.square((self.y - self.mu) / self.scale))
-        )
-        return jnp.array([mu_grad, var_grad])
+    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
+        pass  # TODO: old implementation was broken...
 
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
-        return jnp.array([1.0])
+    def variance(self, mu: ArrayLike) -> Array:
+        return jnp.ones_like(mu)
 
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+    def init_mu(self, p: int, seed: Optional[int]) -> Array:
         return jnp.zeros((p, 1))
-
-    def __str__(self):
-        return f"Normal with mean {self.mu}, sd {self.sd}, logP ={self._log_prob()}"
-
-    def tree_flatten(self):
-        pass
 
 
 class Binomial(ExponentialFamily):
@@ -143,90 +130,77 @@ class Binomial(ExponentialFamily):
     glink_der = 1/(p*(1-p)) # use log trick to calculate this
     """
 
-    def __init__(
-        self,
-        glink: Link = Logit(),
-    ) -> None:
-        super().__init__(glink)
+    _links = [Logit, Log, Identity]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
-    def random_gen(self, p: np.ndarray) -> np.ndarray:
+    def __init__(self, glink: Link = Logit(), validate: bool = True):
+        super(Binomial, self).__init__(glink, validate)
+
+    def random_gen(self, p: ArrayLike) -> Array:
         y = np.random.binomial(1, p)
         return y
 
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
-        return jnp.array([1.0])
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+        return jnp.asarray(1.0)
 
-    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
         """
         this works if we're using sigmoid link
         -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
         """
         pass
 
-    def score(self):
+    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def variance(self, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+    def init_mu(self, p: int, seed: Optional[int]) -> Array:
         # need check with link function
         return jnp.zeros((p, 1))
-
-    def tree_flatten(self):
-        pass
 
 
 class Poisson(ExponentialFamily):
-    def __init__(
-        self,
-        glink: Link = Log(),
-    ) -> None:
-        super().__init__(glink)
 
-    def random_gen(self, mu: np.ndarray) -> np.ndarray:
+    _links = [Identity, Log]  # Sqrt
+
+    def __init__(self, glink: Link = Log(), validate: bool = True):
+        super(Poisson, self).__init__(glink, validate)
+
+    def random_gen(self, mu: ArrayLike) -> Array:
         y = np.random.poisson(mu)
         return y
 
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
-        return jnp.array([1.0])
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+        return jnp.asarray(1.0)
 
-    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
         return jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
 
-    def score(self):
+    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def variance(self, mu: ArrayLike) -> Array:
         return mu
 
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+    def init_mu(self, p: int, seed: Optional[int]) -> Array:
         # need check with link function
         return jnp.zeros((p, 1))
 
-    def tree_flatten(self):
-        pass
 
-
-class NB(ExponentialFamily):
+class NegativeBinomial(ExponentialFamily):
     """
     NB-2 method, need work on this
     Assume alpha = 1/r = 1.
     """
 
-    def __init__(self, glink: Link = NBlink(alpha=1.0)):
-        self.alpha = 1.0  # TODO: fix this glink.alpha
-        super().__init__(glink)
+    _links = [Identity, Log, NBlink, Power]  # CLogLog
+
+    def __init__(
+        self, glink: Link = Log(), alpha: ArrayLike = 1.0, validate: bool = True
+    ):
+        self.alpha = alpha
+        super(NegativeBinomial, self).__init__(glink, validate)
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
         r = 1
@@ -234,33 +208,34 @@ class NB(ExponentialFamily):
         y = np.random.negative_binomial(r, 1 - p)
         return y
 
-    def calc_phi(
-        self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        pred: jnp.ndarray,
-    ) -> jnp.ndarray:
-        return jnp.array([1.0])
+    def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
+        return jnp.asarray(1.0)
 
-    def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+    def log_prob(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def score(self):
+    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+    def variance(self, mu: ArrayLike) -> Array:
         # estimate alpha
         # a = ((resid**2 / mu - 1) / mu).sum() / df_resid
         return mu + self.alpha * mu ** 2
 
-    def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+    def init_mu(self, p: int, seed: Optional[int]) -> Array:
         # need check with link function
         key = jax.random.PRNGKey(seed)
         key, key_init = jax.random.split(key, 2)
         return jax.random.normal(key, shape=(p, 1))
 
     def tree_flatten(self):
-        pass
+        children = (
+            self.glink,
+            self.alpha,
+            False,
+        )  # validation already occurred, we shouldn't need to redo it
+        aux = ()
+        return children, aux
 
 
 # class Gamma(AbstractExponential):
@@ -280,17 +255,12 @@ class NB(ExponentialFamily):
 #         self.glink_der = glink_der if glink_der is not None else (lambda x: -1 / x ** 2)
 #
 #     def random_gen(
-#         self, alpha: np.ndarray, beta: np.ndarray, shape: tuple
+#         self, alpha: ArrayLike, beta: ArrayLike, shape: tuple
 #     ) -> np.ndarray:
 #         y = np.random.gamma(alpha, beta, shape)
 #         return y
 #
-#     def calc_phi(
-#         self,
-#         X: jnp.ndarray,
-#         y: jnp.ndarray,
-#         pred: jnp.ndarray,
-#     ) -> jnp.ndarray:
+#       def calc_phi(self, X: ArrayLike, y: ArrayLike, pred: ArrayLike) -> Array:
 #         """
 #         method of moment estimator for phi
 #         """
@@ -299,16 +269,16 @@ class NB(ExponentialFamily):
 #         phi = jnp.sum(jnp.square(mu - y) / jnp.square(mu)) / df
 #         return phi
 #
-#     def log_prob(self, y: jnp.ndarray, eta: jnp.ndarray) -> jnp.ndarray:
+#     def log_prob(self, y: score(self, y: ArrayLike, eta: ArrayLike) -> Array:
 #         pass
 #
-#     def score(self):
+#     def score(self, score(self, y: ArrayLike, eta: ArrayLike) -> Array:
 #         pass
 #
-#     def calc_Vmu(self, mu: jnp.ndarray) -> jnp.ndarray:
+#     def variance(self, mu: ArrayLike) -> Array:
 #         return mu ** 2
 #
-#     def init_mu(self, p: int, seed: Optional[int]) -> jnp.ndarray:
+#     def init_mu(self, p: int, seed: Optional[int]) -> Array:
 #         # need check with link function
 #         key = jax.random.PRNGKey(seed)
 #         key, key_init = random.split(key, 2)
@@ -316,10 +286,3 @@ class NB(ExponentialFamily):
 #
 #     def tree_flatten(self):
 #         pass
-
-
-""" example usage...
-class Normal(AbstractExponential):
-    def __init__(self, scale: Union[jnp.ndarray, float] = 1.):
-        self.scale = scale
-"""
