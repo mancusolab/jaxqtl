@@ -22,7 +22,7 @@ def _assert_betas_eq(state: GLMState, sm_state: GLMResults):
 def test_sim_poisson():
     np.random.seed(1)
 
-    n = 1000  # TODO: not converge for seed=1, n=1000
+    n = 1000
     family = Poisson()
 
     sim = SimData(n, family)

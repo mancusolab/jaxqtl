@@ -127,10 +127,10 @@ class Log(Link):
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         return jnp.exp(eta)
 
-    def tree_flatten(self):
-        children = (self.power,)
-        aux = None
-        return children, aux
+    # def tree_flatten(self):
+    #     children = (self.power,) # no arg
+    #     aux = None
+    #     return children, aux
 
 
 class NBlink(Link):

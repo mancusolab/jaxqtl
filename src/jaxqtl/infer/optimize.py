@@ -33,24 +33,21 @@ def irls(
 
     converged = False
 
-    mu = family.init_mu(y)
-    eta = family.glink(mu)
-    phi = family.calc_phi(X, y, mu)
-    old_pdf = family.log_prob(y, mu, phi)
+    eta = family.init_eta(y)
+    old_pdf = family.log_prob(X, y, eta)
 
     for idx in range(max_iter):
         beta = solver(X, y, eta, family)
-        eta = X @ beta
-        mu = family.glink.inverse(eta)
-        phi = family.calc_phi(X, y, mu)
-        new_pdf = family.log_prob(y, mu, phi)
-        delta = jnp.abs(new_pdf - old_pdf)  # alternative check the log likelihood
+        new_pdf = family.log_prob(X, y, X @ beta)
+        delta = jnp.abs(new_pdf - old_pdf)
         if delta <= tol:
             converged = True
             num_iters = idx + 1  # start count at 0
             break
         else:
-            old_pdf = new_pdf
-            num_iters = idx + 1
+            num_iters = max_iter
+
+        eta = X @ beta
+        old_pdf = new_pdf
 
     return IRLSState(beta, num_iters, converged)
