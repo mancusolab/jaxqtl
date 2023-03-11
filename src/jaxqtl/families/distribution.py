@@ -120,7 +120,7 @@ class Gaussian(ExponentialFamily):
         return jnp.ones_like(mu)
 
     def init_eta(self, y: ArrayLike) -> Array:
-        return jnp.zeros((len(y), 1))
+        return self.glink((y + y.mean()) / 2)
 
 
 class Binomial(ExponentialFamily):
@@ -186,7 +186,7 @@ class Poisson(ExponentialFamily):
         return mu
 
     def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink(jnp.ones_like(y) * y.mean())
+        return self.glink((y + y.mean()) / 2)  # self.glink(jnp.ones_like(y) * y.mean())
         # return self.glink(y + 0.5) # statsmodel use this
 
 
@@ -225,7 +225,7 @@ class NegativeBinomial(ExponentialFamily):
         return mu + self.alpha * mu ** 2
 
     def init_eta(self, y: ArrayLike) -> Array:
-        pass
+        return self.glink((y + y.mean()) / 2)
 
     def tree_flatten(self):
         children = (
