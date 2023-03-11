@@ -1,10 +1,9 @@
 from abc import ABC, abstractmethod
-from typing import List, Optional, Tuple
+from typing import List, Tuple  # ,Optional
 
 import numpy as np
 from typing_extensions import Self
 
-import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import Array
@@ -58,7 +57,7 @@ class ExponentialFamily(ABC):
         pass
 
     @abstractmethod
-    def init_mu(self, p: int, seed: Optional[int]) -> Array:
+    def init_mu(self, y: ArrayLike) -> Array:
         pass
 
     def calc_weight(
@@ -118,8 +117,8 @@ class Gaussian(ExponentialFamily):
     def variance(self, mu: ArrayLike) -> Array:
         return jnp.ones_like(mu)
 
-    def init_mu(self, p: int, seed: Optional[int]) -> Array:
-        return jnp.zeros((p, 1))
+    def init_mu(self, y: ArrayLike) -> Array:
+        return jnp.zeros((len(y), 1))
 
 
 class Binomial(ExponentialFamily):
@@ -156,9 +155,8 @@ class Binomial(ExponentialFamily):
     def variance(self, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
-    def init_mu(self, p: int, seed: Optional[int]) -> Array:
-        # need check with link function
-        return jnp.zeros((p, 1))
+    def init_mu(self, y: ArrayLike) -> Array:
+        return (y + y.mean()) / 2
 
 
 class Poisson(ExponentialFamily):
@@ -185,9 +183,9 @@ class Poisson(ExponentialFamily):
     def variance(self, mu: ArrayLike) -> Array:
         return mu
 
-    def init_mu(self, p: int, seed: Optional[int]) -> Array:
-        # need check with link function
-        return jnp.zeros((p, 1))
+    def init_mu(self, y: ArrayLike) -> Array:
+        # initialize with log(y+0.5)
+        return y + 0.5
 
 
 class NegativeBinomial(ExponentialFamily):
@@ -224,11 +222,8 @@ class NegativeBinomial(ExponentialFamily):
         # a = ((resid**2 / mu - 1) / mu).sum() / df_resid
         return mu + self.alpha * mu ** 2
 
-    def init_mu(self, p: int, seed: Optional[int]) -> Array:
-        # need check with link function
-        key = jax.random.PRNGKey(seed)
-        key, key_init = jax.random.split(key, 2)
-        return jax.random.normal(key, shape=(p, 1))
+    def init_mu(self, p: int) -> Array:
+        pass
 
     def tree_flatten(self):
         children = (

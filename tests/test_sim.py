@@ -1,47 +1,47 @@
 import numpy as np
+import numpy.testing as nptest
 from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
     Poisson as smPoisson,
 )
+from statsmodels.genmod.generalized_linear_model import GLMResults
 
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.glm import GLM, GLMState
 from jaxqtl.infer.solve import CholeskySolve
 from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
 
 
-np.random.seed(1)
+def _assert_betas_eq(state: GLMState, sm_state: GLMResults):
+    nptest.assert_allclose(state.beta, sm_state.params)
 
-n = 100  # TODO: not converge for seed=1, n=1000
-solver = "qr"
-family = Poisson()
 
-sim = SimData(n, family)
-X, y, beta = sim.gen_data()
+def test_sim_poisson():
+    np.random.seed(1)
 
-print(beta)
-print(f"y: {np.quantile(y, [0, 0.25, 0.5, 0.75, 1])}")
-print(f"mean y: {np.mean(y)}")
+    n = 1000  # TODO: not converge for seed=1, n=1000
+    family = Poisson()
 
-# no intercept
-smPoisson_res = smPoisson(y, X).fit(disp=0)
-print(smPoisson_res.summary())
+    sim = SimData(n, family)
+    X, y, beta = sim.gen_data()
 
-# TODO: this has numerical issue when features have too large values (eg. PC has sd=2)
-jaxqtl_poisson = GLM(
-    X=X,
-    y=y,
-    family=Poisson(),
-    solver=CholeskySolve(),
-    append=False,
-    init="default",
-    maxiter=100,
-)
-jaxqtl_poisson.fit()
-print(jaxqtl_poisson)
+    # no intercept
+    sm_state = smPoisson(y, X).fit(disp=0)
+
+    jaxqtl_poisson = GLM(
+        X=X,
+        y=y,
+        family=Poisson(),
+        solver=CholeskySolve(),
+        append=False,
+        init="default",
+        maxiter=100,
+    )
+    glm_state = jaxqtl_poisson.fit()
+    _assert_betas_eq(glm_state, sm_state)
 
 
 # test NB

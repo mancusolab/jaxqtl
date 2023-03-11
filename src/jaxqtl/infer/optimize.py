@@ -33,8 +33,8 @@ def irls(
 
     converged = False
 
-    eta = X @ OLS(X, y)
-    mu = family.glink.inverse(eta)
+    mu = family.init_mu(y)
+    eta = family.glink(mu)
     phi = family.calc_phi(X, y, mu)
     old_pdf = family.log_prob(y, mu, phi)
 
