@@ -1,14 +1,9 @@
-# from functools import partial
 from typing import NamedTuple, Tuple
 
-import jax.numpy.linalg as jnpla
-import jax.scipy.linalg as jspla
-
-# import jax.scipy.stats as jaxstats
+# import jax
 from jax import lax, numpy as jnp
 
-from jaxqtl.families.distribution import ExponentialFamily
-
+from ..families.distribution import ExponentialFamily
 from .solve import LinearSolve
 
 
@@ -18,12 +13,7 @@ class IRLSState(NamedTuple):
     converged: bool
 
 
-def OLS(X: jnp.ndarray, y: jnp.ndarray) -> jnp.ndarray:
-    Q, R = jnpla.qr(X)
-    return jspla.solve_triangular(R, Q.T @ y)
-
-
-# @jit
+# @jax.jit
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
@@ -33,42 +23,25 @@ def irls(
     max_iter: int = 1000,
     tol: float = 1e-3,
 ) -> IRLSState:
-
-    # @partial(jit, static_argnums=(3,4))
-    # truth = jnp.array([[-1.498017,  0.463852,  0.010495,  0.378555]]).reshape((4,1))
     def body_fun(val: Tuple):
-        old_eta, beta = val
-        beta = solver(X, y, old_eta, family)
-        return old_eta, beta
+        diff, num_iter, beta_o, eta_o = val
+        beta = solver(X, y, eta_o, family)
+        eta_n = X @ beta
+        likelihood_o = family.log_prob(X, y, eta_o)
+        likelihood_n = family.log_prob(X, y, eta_n)
+        diff = likelihood_n - likelihood_o
+
+        return diff, num_iter + 1, beta, eta_n
 
     def cond_fun(val: Tuple):
-        old_eta, beta = val
-        new_pdf = family.log_prob(X, y, X @ beta)
-        old_pdf = family.log_prob(X, y, old_eta)
-        delta = jnp.abs(old_pdf - new_pdf)
-        return delta > tol  # and count <= max_iter
+        diff, num_iter, beta, eta = val
+        cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+        return cond_l
 
     init_beta = jnp.zeros((X.shape[1], 1))
-    init_tuple = (eta, init_beta)
-    old_eta, beta = lax.while_loop(cond_fun, body_fun, init_tuple)
+    init_tuple = (10000.0, 0, init_beta, eta)
 
-    num_iters = max_iter
-    converged = True
-
-    # converged = False
-    # old_pdf = family.log_prob(X, y, eta)
-    # for idx in range(max_iter):
-    #     beta = solver(X, y, eta, family)
-    #     new_pdf = family.log_prob(X, y, X @ beta)
-    #     delta = jnp.abs(new_pdf - old_pdf)
-    #     if delta <= tol:
-    #         converged = True
-    #         num_iters = idx + 1  # start count at 0
-    #         break
-    #     else:
-    #         num_iters = max_iter
-    #
-    #     eta = X @ beta
-    #     old_pdf = new_pdf
+    diff, num_iters, beta, eta = lax.while_loop(cond_fun, body_fun, init_tuple)
+    converged = num_iters < max_iter and jnp.fabs(diff) < tol
 
     return IRLSState(beta, num_iters, converged)

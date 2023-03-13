@@ -1,22 +1,17 @@
 import numpy as np
-import numpy.testing as nptest
 from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
     Poisson as smPoisson,
 )
-from statsmodels.genmod.generalized_linear_model import GLMResults
+from util import assert_betas_eq
 
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.glm import GLM, GLMState
+from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
 from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
-
-
-def _assert_betas_eq(state: GLMState, sm_state: GLMResults):
-    nptest.assert_allclose(state.beta, sm_state.params)
 
 
 def test_sim_poisson():
@@ -40,7 +35,7 @@ def test_sim_poisson():
         maxiter=100,
     )
     glm_state = jaxqtl_poisson.fit()
-    _assert_betas_eq(glm_state, sm_state)
+    assert_betas_eq(glm_state, sm_state)
 
 
 # test NB
