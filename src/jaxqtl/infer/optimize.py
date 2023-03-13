@@ -27,8 +27,8 @@ def irls(
         diff, num_iter, beta_o, eta_o = val
         beta = solver(X, y, eta_o, family)
         eta_n = X @ beta
-        likelihood_o = family.log_prob(X, y, eta_o)
-        likelihood_n = family.log_prob(X, y, eta_n)
+        likelihood_o = family.likelihood(X, y, eta_o)
+        likelihood_n = family.likelihood(X, y, eta_n)
         diff = likelihood_n - likelihood_o
 
         return diff, num_iter + 1, beta, eta_n

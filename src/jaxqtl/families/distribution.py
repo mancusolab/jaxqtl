@@ -40,12 +40,12 @@ class ExponentialFamily(ABC):
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+    def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         # phi is the dispersion parameter
         pass
 
     @abstractmethod
-    def log_prob(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
     @abstractmethod
@@ -54,10 +54,6 @@ class ExponentialFamily(ABC):
 
     @abstractmethod
     def variance(self, mu: ArrayLike) -> Array:
-        pass
-
-    @abstractmethod
-    def init_eta(self, y: ArrayLike) -> Array:
         pass
 
     def calc_weight(
@@ -69,10 +65,13 @@ class ExponentialFamily(ABC):
         """
         mu_k = self.glink.inverse(eta)
         g_deriv_k = self.glink.deriv(mu_k)
-        phi = self.calc_phi(X, y, mu_k)
+        phi = self.scale(X, y, mu_k)
         V_mu = self.variance(mu_k)
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
+
+    def init_eta(self, y: ArrayLike) -> Array:
+        return self.glink((y + y.mean()) / 2)
 
     def tree_flatten(self):
         children = (
@@ -101,15 +100,15 @@ class Gaussian(ExponentialFamily):
         y = np.random.normal(loc, scale)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+    def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         resid = jnp.sum(jnp.square(mu - y))
         df = y.shape[0] - X.shape[1]
         phi = resid / df
         return phi
 
-    def log_prob(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         mu = self.glink.inverse(eta)
-        phi = self.calc_phi(X, y, mu)
+        phi = self.scale(X, y, mu)
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
         return logprob
 
@@ -118,9 +117,6 @@ class Gaussian(ExponentialFamily):
 
     def variance(self, mu: ArrayLike) -> Array:
         return jnp.ones_like(mu)
-
-    def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink((y + y.mean()) / 2)
 
 
 class Binomial(ExponentialFamily):
@@ -140,10 +136,10 @@ class Binomial(ExponentialFamily):
         y = np.random.binomial(1, p)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+    def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         """
         this works if we're using sigmoid link
         -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
@@ -157,8 +153,9 @@ class Binomial(ExponentialFamily):
     def variance(self, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
-    def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink((y + y.mean()) / 2)
+    # def init_eta(self, y: ArrayLike) -> Array:
+    #     """recommended but still work without this"""
+    #     return self.glink((y + 0.5) / 2)
 
 
 class Poisson(ExponentialFamily):
@@ -172,10 +169,10 @@ class Poisson(ExponentialFamily):
         y = np.random.poisson(mu)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+    def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return logprob
 
@@ -184,10 +181,6 @@ class Poisson(ExponentialFamily):
 
     def variance(self, mu: ArrayLike) -> Array:
         return mu
-
-    def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink((y + y.mean()) / 2)  # self.glink(jnp.ones_like(y) * y.mean())
-        # return self.glink(y + 0.5) # statsmodel use this
 
 
 class NegativeBinomial(ExponentialFamily):
@@ -210,10 +203,10 @@ class NegativeBinomial(ExponentialFamily):
         y = np.random.negative_binomial(r, 1 - p)
         return y
 
-    def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+    def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def log_prob(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
@@ -223,9 +216,6 @@ class NegativeBinomial(ExponentialFamily):
         # estimate alpha
         # a = ((resid**2 / mu - 1) / mu).sum() / df_resid
         return mu + self.alpha * mu ** 2
-
-    def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink((y + y.mean()) / 2)
 
     def tree_flatten(self):
         children = (
