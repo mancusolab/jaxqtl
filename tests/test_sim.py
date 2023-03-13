@@ -37,7 +37,6 @@ def test_sim_poisson():
         family=Poisson(),
         solver=CholeskySolve(),
         append=False,
-        init="default",
         maxiter=100,
     )
     glm_state = jaxqtl_poisson.fit()

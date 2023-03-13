@@ -1,4 +1,4 @@
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 from scipy.stats import norm, t  # , chi2
 
@@ -50,14 +50,13 @@ class GLM:
         family: ExponentialFamily = Gaussian(),
         solver: LinearSolve = CGSolve(),
         append: bool = True,
-        init: str = "default",  # [default or OLS]
         maxiter: int = 100,
-        seed: int = 123,
+        tol: float = 1e-3,
+        init: Optional[jnp.ndarray] = None,
     ) -> None:
         nobs = len(y)
-        self.seed = seed
-        self.init = init
         self.maxiter = maxiter
+        self.tol = tol
 
         self.X = jnp.asarray(X)  # preprocessed in previous steps
         if append is True:
@@ -66,6 +65,7 @@ class GLM:
 
         self.family = family
         self.solver = solver
+        self.init = init if init is not None else family.init_eta(self.y)
 
     def WaldTest(self) -> Tuple[jnp.ndarray, jnp.ndarray, int]:
         """
@@ -89,7 +89,7 @@ class GLM:
 
     def fit(self):
         beta, self.n_iter, self.converged = irls(
-            self.X, self.y, self.family, self.solver, self.seed, self.maxiter
+            self.X, self.y, self.family, self.solver, self.init, self.maxiter, self.tol
         )
         self.eta = self.X @ beta
         self.beta_se = self.sumstats()

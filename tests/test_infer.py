@@ -33,7 +33,6 @@ def test_linear_regression():
         X=spector_data.exog,
         y=spector_data.endog,
         append=False,
-        init="default",
         maxiter=100,
     )
     glm_state = test_irls.fit()
@@ -44,7 +43,6 @@ def test_linear_regression():
         y=spector_data.endog,
         solver=CholeskySolve(),
         append=False,
-        init="default",
         maxiter=100,
     )
     glm_state = test_irls.fit()
@@ -61,7 +59,6 @@ def test_logistic():
         y=spector_data.endog,
         family=Binomial(),
         append=False,
-        init="default",
         maxiter=100,
     )
     glm_state = test_logit.fit()
@@ -78,7 +75,6 @@ def test_poisson():
         y=spector_data.endog,
         family=Poisson(),
         append=False,
-        init="default",
         maxiter=100,
     )
     glm_state = test_poisson.fit()
