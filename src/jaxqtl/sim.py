@@ -14,7 +14,7 @@ class SimState(NamedTuple):
 class SimData:
     def __init__(self, nobs: int, family: ExponentialFamily = Gaussian()) -> None:
         self.nobs = nobs
-        self.pfeatures = 6
+        self.pfeatures = 11
         self.family = family
 
     def gen_data(self):
@@ -32,8 +32,9 @@ class SimData:
         X[:, 1] = np.random.binomial(3, maf, (n,))  # genotype (0,1,2)
         X[:, 2] = np.random.binomial(1, 0.5, (n,))  # sex (0, 1)
         X[:, 3] = np.random.normal(0, 1, (n,))  # center, standardize age
-        X[:, 4] = np.random.normal(0, 1, (n,))  # pseudo PC1
-        X[:, 5] = np.random.normal(0, 1, (n,))  # pseudo PC2
+        X[:, 4:11] = np.random.normal(0, 1, (n, 7))
+        # X[:, 4] = np.random.normal(0, 1, (n,))  # pseudo PC1
+        # X[:, 5] = np.random.normal(0, 1, (n,))  # pseudo PC2
 
         beta = np.random.normal(0, 1, beta_shape)
         beta[1] = 0.01  # np.random.normal(0, h2g/M) # causal eQTL effect

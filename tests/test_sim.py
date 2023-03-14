@@ -36,15 +36,3 @@ def test_sim_poisson():
     )
     glm_state = jaxqtl_poisson.fit()
     assert_betas_eq(glm_state, sm_state)
-
-
-# test NB
-# res = smNB(y, X).fit()
-# print(res.summary())
-#
-# test_NB = GLM(
-#     X=X, y=y, family="NB", solver=solver, append=False, init="default", maxiter=100,
-#     link="Log"
-# )
-# test_NB.fit()
-# print(test_NB)

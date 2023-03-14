@@ -7,14 +7,14 @@ from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import CholeskySolve
+from jaxqtl.infer.solve import CholeskySolve  # , QRSolve, CGSolve
 from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
 
 np.random.seed(1)
 
-n = 1000
+n = 10000
 family = Poisson()
 
 sim = SimData(n, family)
@@ -33,8 +33,19 @@ jaxqtl_poisson = GLM(
 )
 glm_state = jaxqtl_poisson.fit()
 
+fitstatsmodel = smPoisson(y, X).fit(disp=0)
+
 print(sm_state.summary())
 print(glm_state)
+
+"""
+time it in ipython:
+
+%timeit -n10 -r10 fitjaxqtl = GLM(X=X,y=y,family=Poisson(),solver=CGSolve(),append=False,maxiter=100).fit()
+%timeit -n10 -r10 fitjaxqtl = GLM(X=X,y=y,family=Poisson(),solver=CholeskySolve(),append=False,maxiter=100).fit()
+%timeit -n10 -r10 fitjaxqtl = GLM(X=X,y=y,family=Poisson(),solver=QRSolve(),append=False,maxiter=100).fit()
+%timeit -n10 -r10 fitstatsmodel= smPoisson(y, X).fit(disp=0)
+"""
 
 # test NB
 # res = smNB(y, X).fit()
