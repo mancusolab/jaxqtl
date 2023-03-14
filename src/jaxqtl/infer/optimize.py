@@ -1,3 +1,4 @@
+from functools import partial
 from typing import NamedTuple, Tuple
 
 import jax
@@ -6,8 +7,6 @@ from jax import lax, numpy as jnp
 from ..families.distribution import ExponentialFamily
 from .solve import LinearSolve
 
-# from functools import partial
-
 
 class IRLSState(NamedTuple):
     beta: jnp.ndarray
@@ -15,8 +14,7 @@ class IRLSState(NamedTuple):
     converged: bool
 
 
-# @partial(jax.jit, static_argnames=["eta", "solver", "X", "y", "family"])
-@jax.jit
+@partial(jax.jit, static_argnames=["max_iter", "tol"])
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
@@ -45,6 +43,6 @@ def irls(
     init_tuple = (10000.0, 0, init_beta, eta)
 
     diff, num_iters, beta, eta = lax.while_loop(cond_fun, body_fun, init_tuple)
-    converged = num_iters < max_iter and jnp.fabs(diff) < tol
+    converged = jnp.logical_and(jnp.fabs(diff) > tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged)
