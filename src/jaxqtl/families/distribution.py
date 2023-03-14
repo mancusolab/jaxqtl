@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple  # ,Optional
+from typing import List, Tuple  # , Optional
 
 import numpy as np
 from typing_extensions import Self
@@ -29,11 +29,16 @@ class ExponentialFamily(ABC):
 
     _links: List[Self]  # type: ignore
 
-    def __init__(self, glink: Link, validate: bool = True):
-        if validate:
-            if not any([isinstance(glink, link) for link in self._links]):
-                raise ValueError(f"Link {glink} is invalid for Family {self}")
+    def __init__(self, glink: Link):
+        if not any([isinstance(glink, link) for link in self._links]):
+            raise ValueError(f"Link {glink} is invalid for Family {self}")
         self.glink = glink
+
+    # def __init__(self, glink: Link, validate: bool = True):
+    #     if validate:
+    #         if not any([isinstance(glink, link) for link in self._links]):
+    #             raise ValueError(f"Link {glink} is invalid for Family {self}")
+    #     self.glink = glink
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -74,12 +79,17 @@ class ExponentialFamily(ABC):
         return self.glink((y + y.mean()) / 2)
 
     def tree_flatten(self):
-        children = (
-            self.glink,
-            False,
-        )  # validation already occurred, we shouldn't need to redo it
+        children = ()
         aux = ()
         return children, aux
+
+    # def tree_flatten(self):
+    #     children = (
+    #         self.glink,
+    #         False,
+    #     )  # validation already occurred, we shouldn't need to redo it
+    #     aux = ()
+    #     return children, aux
 
     @classmethod
     def tree_unflatten(cls, aux, children):
@@ -88,13 +98,17 @@ class ExponentialFamily(ABC):
 
 class Gaussian(ExponentialFamily):
     """
-    By explicitly write phi (here is sigma^2), we can treat normal distribution as one-parameter EF
+    By explicitly write phi (here is sigma^2),
+    we can treat normal distribution as one-parameter EF
     """
 
     _links = [Identity, Log, Power]
 
-    def __init__(self, glink: Link = Identity(), validate: bool = True):
-        super(Gaussian, self).__init__(glink, validate)
+    # def __init__(self, glink: Link = Identity(), validate: bool = True):
+    #     super(Gaussian, self).__init__(glink, validate)
+    def __init__(self, glink: Link = Identity()):
+        super().__init__(glink)
+        # super(Gaussian, self).__init__(glink)
 
     def random_gen(self, loc: ArrayLike, scale: ArrayLike) -> Array:
         y = np.random.normal(loc, scale)
@@ -129,8 +143,10 @@ class Binomial(ExponentialFamily):
 
     _links = [Logit, Log, Identity]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
-    def __init__(self, glink: Link = Logit(), validate: bool = True):
-        super(Binomial, self).__init__(glink, validate)
+    # def __init__(self, glink: Link = Logit(), validate: bool = True):
+    #     super(Binomial, self).__init__(glink, validate)
+    def __init__(self, glink: Link = Logit()):
+        super(Binomial, self).__init__(glink)
 
     def random_gen(self, p: ArrayLike) -> Array:
         y = np.random.binomial(1, p)
@@ -162,8 +178,10 @@ class Poisson(ExponentialFamily):
 
     _links = [Identity, Log]  # Sqrt
 
-    def __init__(self, glink: Link = Log(), validate: bool = True):
-        super(Poisson, self).__init__(glink, validate)
+    # def __init__(self, glink: Link = Log(), validate: bool = True):
+    #     super(Poisson, self).__init__(glink, validate)
+    def __init__(self, glink: Link = Log()):
+        super(Poisson, self).__init__(glink)
 
     def random_gen(self, mu: ArrayLike) -> Array:
         y = np.random.poisson(mu)
@@ -191,11 +209,18 @@ class NegativeBinomial(ExponentialFamily):
 
     _links = [Identity, Log, NBlink, Power]  # CLogLog
 
+    # def __init__(
+    #     self, glink: Link = Log(), alpha: ArrayLike = 1.0, validate: bool = True
+    # ):
+    #     self.alpha = alpha
+    #     super(NegativeBinomial, self).__init__(glink, validate)
     def __init__(
-        self, glink: Link = Log(), alpha: ArrayLike = 1.0, validate: bool = True
+        self,
+        glink: Link = Log(),
+        alpha: ArrayLike = 1.0,
     ):
         self.alpha = alpha
-        super(NegativeBinomial, self).__init__(glink, validate)
+        super(NegativeBinomial, self).__init__(glink)
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
         r = 1

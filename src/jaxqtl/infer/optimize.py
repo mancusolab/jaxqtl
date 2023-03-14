@@ -1,10 +1,12 @@
 from typing import NamedTuple, Tuple
 
-# import jax
+import jax
 from jax import lax, numpy as jnp
 
 from ..families.distribution import ExponentialFamily
 from .solve import LinearSolve
+
+# from functools import partial
 
 
 class IRLSState(NamedTuple):
@@ -13,7 +15,8 @@ class IRLSState(NamedTuple):
     converged: bool
 
 
-# @jax.jit
+# @partial(jax.jit, static_argnames=["eta", "solver", "X", "y", "family"])
+@jax.jit
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,
