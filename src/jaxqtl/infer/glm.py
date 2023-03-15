@@ -1,14 +1,16 @@
 from typing import NamedTuple, Optional, Tuple
 
+import numpy as np
 from scipy.stats import norm, t  # , chi2
 
 from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.tree_util import register_pytree_node_class
 
-from ..families.distribution import ExponentialFamily, Gaussian
-from .optimize import irls
-from .solve import CGSolve, LinearSolve
+from jaxqtl.families.distribution import ExponentialFamily, Gaussian, Poisson
+from jaxqtl.infer.optimize import irls
+from jaxqtl.infer.solve import CGSolve, LinearSolve
+from jaxqtl.load.readfile import read_data
 
 
 class GLMState(NamedTuple):
@@ -115,3 +117,32 @@ class GLM:
     @classmethod
     def tree_unflatten(cls, aux, children):
         return cls(*children, False)
+
+
+def run_bigGLM(geno_path, pheno_path, family: ExponentialFamily):
+    cell_type = "CD14-positive monocyte"
+    dat = read_data(geno_path, pheno_path, cell_type)
+
+    # TODO: order of genotype is not same as count matrix
+    # TODO: use donor_id as family id when creating plink file
+    G = dat.genotype  # n x p variants
+    Xmat = dat.count.obs[["sex", "age"]].astype("float64")
+    ycount = dat.count.X[:, 0]
+
+    num_var = 1000  # G.shape[1]
+    allbeta = np.zeros((4, num_var))
+    allpval = np.zeros((4, num_var))
+
+    for idx in range(num_var):
+        Xmat["variant"] = G[:, idx]
+
+        glmstate = GLM(
+            X=Xmat,
+            y=ycount,
+            family=Poisson(),
+            append=True,
+            maxiter=100,
+        ).fit()
+
+        allbeta[:, idx] = glmstate.beta
+        allpval[:, idx] = glmstate.p
