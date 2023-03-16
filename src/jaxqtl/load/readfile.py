@@ -9,12 +9,6 @@ from pandas_plink import read_plink1_bin
 import jax.numpy as jnp
 
 
-class PlinkState(NamedTuple):
-    bed: jnp.ndarray
-    bim: jnp.ndarray
-    fam: jnp.ndarray
-
-
 class RawDataState(NamedTuple):
     genotype: jnp.ndarray
     count: AnnData
@@ -34,7 +28,9 @@ def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> An
     dat: n_obs (cell) x n_vars (genes)
     dat.var_name = 'ensembl_id'
 
-    No normalization on the count data!
+    No log transformation on the count data!
+    should we include preprocessing here or expect user to provide clean data
+    ready to run GLM
 
     ref: https://scanpy-tutorials.readthedocs.io/en/latest/pbmc3k.html
     """
@@ -44,30 +40,26 @@ def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> An
     # filter genes by min number of cells expressed (in place)
     sc.pp.filter_genes(dat, min_cells=3)  # 11043 × 17841
 
-    # show top 20 genes highly expressed in each cell across all cells
-    # sc.pl.highest_expr_genes(dat, n_top=20, )
-    # sc.pl.scatter(dat, x='nCount_RNA', y='percent.mt')
-    # sc.pl.scatter(dat, x='nCount_RNA', y='nFeature_RNA')
-
     #  filter cells with too many genes expressed
-    dat = dat[dat.obs["nFeature_RNA"] < 2500, :]  # 11026 × 17841
+    dat = dat[dat.obs["n_genes"] < 2500, :]  # 11026 × 17841
 
     #  filter cells that have >5% mitochondrial counts
     dat = dat[dat.obs["percent.mt"] < 5, :]  # 10545 × 17841
 
     # normalize by total UMI count: scale factor (in-place change), CPM if target=1e6
+    # every cell has the same total count
     sc.pp.normalize_total(dat, target_sum=1e4)
 
-    # mean count for given cell type within individual
+    # mean count for given cell type within individual and create a view
     dat.bulk = dc.get_pseudobulk(
         dat,
         sample_col="donor_id",
         groups_col="cell_type",
         mode="mean",
-        min_prop=0.2,
-        min_cells=0,
-        min_counts=0,
-        min_smpls=2,
+        min_prop=0.2,  # filter gene
+        min_smpls=2,  # filter gene
+        min_cells=0,  # filter sample
+        min_counts=0,  # filter sample
     )
 
     # subset to one cell type

@@ -8,6 +8,7 @@ config.update("jax_enable_x64", True)
 
 geno_path = "./tests/data/onek1k"
 pheno_path = "./tests/data/Countdata.h5ad"
+# pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 
 # Check shape of data loaded, i.e. sample size is the same

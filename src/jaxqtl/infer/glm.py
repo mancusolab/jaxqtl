@@ -1,7 +1,11 @@
 from typing import NamedTuple, Optional, Tuple
 
 import numpy as np
+import statsmodels.api as sm
 from scipy.stats import norm, t  # , chi2
+from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
+    Poisson as smPoisson,
+)
 
 from jax import numpy as jnp
 from jax.numpy import linalg as jnpla
@@ -10,15 +14,15 @@ from jax.tree_util import register_pytree_node_class
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian, Poisson
 from jaxqtl.infer.optimize import irls
 from jaxqtl.infer.solve import CGSolve, LinearSolve
-from jaxqtl.load.readfile import read_data
 
 
+# change jnp.ndarray --> np.ndarray for mutable array
 class GLMState(NamedTuple):
-    beta: jnp.ndarray
-    se: jnp.ndarray
-    p: jnp.ndarray
-    num_iters: int
-    converged: bool
+    beta: np.ndarray
+    se: np.ndarray
+    p: np.ndarray
+    num_iters: np.ndarray
+    converged: np.ndarray
 
 
 @register_pytree_node_class
@@ -119,30 +123,70 @@ class GLM:
         return cls(*children, False)
 
 
-def run_bigGLM(geno_path, pheno_path, family: ExponentialFamily):
-    cell_type = "CD14-positive monocyte"
-    dat = read_data(geno_path, pheno_path, cell_type)
-
+def run_bigGLM(
+    dat, family: ExponentialFamily = Poisson(), test_run: Optional[int] = None
+):
     # TODO: order of genotype is not same as count matrix
     # TODO: use donor_id as family id when creating plink file
-    G = dat.genotype  # n x p variants
+    # G = dat.genotype  # n x p variants
     Xmat = dat.count.obs[["sex", "age"]].astype("float64")
-    ycount = dat.count.X[:, 0]
+    num_params = Xmat.shape[1] + 1  # features + intercept
+    num_genes = test_run if test_run is not None else dat.count.X.shape[1]
 
-    num_var = 1000  # G.shape[1]
-    allbeta = np.zeros((4, num_var))
-    allpval = np.zeros((4, num_var))
+    # num_var = 1000  # G.shape[1]
+    all_beta = np.zeros((num_params, num_genes))
+    all_se = np.zeros((num_params, num_genes))
+    all_pval = np.zeros((num_params, num_genes))
+    all_num_iters = np.zeros((num_genes,))
+    all_converged = np.zeros((num_genes,))
 
-    for idx in range(num_var):
-        Xmat["variant"] = G[:, idx]
+    for idx in range(num_genes):
+        # Xmat["variant"] = G[:, idx] # append X with genotype
+        ycount = dat.count.X[:, idx].astype("float64")
 
         glmstate = GLM(
             X=Xmat,
             y=ycount,
-            family=Poisson(),
+            family=family,
             append=True,
-            maxiter=100,
+            maxiter=1000,
         ).fit()
 
-        allbeta[:, idx] = glmstate.beta
-        allpval[:, idx] = glmstate.p
+        all_beta[:, idx] = glmstate.beta
+        all_se[:, idx] = glmstate.se
+        all_pval[:, idx] = glmstate.p
+        all_num_iters[idx] = glmstate.num_iters
+        all_converged[idx] = glmstate.converged
+
+    return GLMState(all_beta, all_se, all_pval, all_num_iters, all_converged)
+
+
+def run_bigGLM_sm(dat, test_run: Optional[int] = None):
+    # TODO: order of genotype is not same as count matrix
+    # TODO: use donor_id as family id when creating plink file
+    # G = dat.genotype  # n x p variants
+    Xmat = dat.count.obs[["sex", "age"]].astype("float64")
+    Xmat = sm.add_constant(Xmat, prepend=True)  # X
+
+    num_params = Xmat.shape[1]  # features + intercept
+    num_genes = test_run if test_run is not None else dat.count.X.shape[1]
+
+    # num_var = 1000  # G.shape[1]
+    all_beta = np.zeros((num_params, num_genes))
+    all_se = np.zeros((num_params, num_genes))
+    all_pval = np.zeros((num_params, num_genes))
+    all_num_iters = np.zeros((num_genes,))
+    all_converged = np.zeros((num_genes,))
+
+    for idx in range(num_genes):
+        # Xmat["variant"] = G[:, idx] # append X with genotype
+        ycount = dat.count.X[:, idx].astype("float64")
+        glmstate = smPoisson(ycount, Xmat).fit(disp=0, full_output=True)
+
+        all_beta[:, idx] = glmstate.params
+        all_se[:, idx] = glmstate.bse
+        all_pval[:, idx] = glmstate.pvalues
+        # all_num_iters[idx] = glmstate.num_iters
+        # all_converged[idx] = glmstate.converged
+
+    return GLMState(all_beta, all_se, all_pval, all_num_iters, all_converged)
