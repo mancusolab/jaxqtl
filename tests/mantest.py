@@ -1,11 +1,14 @@
 import numpy as np
-from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
+
+# import statsmodels.api as sm
+from statsmodels.discrete.discrete_model import (
+    NegativeBinomial as smNB,
     Poisson as smPoisson,
 )
 
 from jax.config import config
 
-from jaxqtl.families.distribution import Poisson
+from jaxqtl.families.distribution import NegativeBinomial as NB, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve  # , QRSolve, CGSolve
 from jaxqtl.sim import SimData
@@ -14,13 +17,13 @@ config.update("jax_enable_x64", True)
 
 np.random.seed(1)
 
-n = 10000
-family = Poisson()
+n = 1000
+family = NB(alpha=2.0)
 
 sim = SimData(n, family)
 X, y, beta = sim.gen_data()
+# X = np.append(X, np.ones((n, 1)), axis=1)
 
-# no intercept
 sm_state = smPoisson(y, X).fit(disp=0)
 
 jaxqtl_poisson = GLM(
@@ -31,12 +34,19 @@ jaxqtl_poisson = GLM(
     append=False,
     maxiter=100,
 )
+
 glm_state = jaxqtl_poisson.fit()
 
-fitstatsmodel = smPoisson(y, X).fit(disp=0)
-
-print(sm_state.summary())
-print(glm_state)
+# calculate residuals --> alpha
+# resid = jaxqtl_poisson.calc_resid(y, jaxqtl_poisson.mu)
+# df = y.shape[0] - X.shape[1]
+# alpha = np.sum((resid ** 2 / jaxqtl_poisson.mu - 1) / jaxqtl_poisson.mu) / df
+#
+#
+# sm_state = smPoisson(y, X).fit(disp=0)
+#
+# print(sm_state.summary())
+# print(glm_state)
 
 """
 time it in ipython:
@@ -48,12 +58,17 @@ time it in ipython:
 """
 
 # test NB
-# res = smNB(y, X).fit()
-# print(res.summary())
-#
-# test_NB = GLM(
-#     X=X, y=y, family="NB", solver=solver, append=False, init="default", maxiter=100,
-#     link="Log"
-# )
-# test_NB.fit()
-# print(test_NB)
+res = smNB(y, X).fit()
+print(res.summary())
+
+test_NB = GLM(
+    X=X,
+    y=y,
+    family=NB(),
+    solver=CholeskySolve(),
+    append=False,
+    maxiter=1000,
+    # link="Log"
+)
+test_NB.fit()
+print(test_NB)

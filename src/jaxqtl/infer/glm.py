@@ -98,11 +98,15 @@ class GLM:
             self.X, self.y, self.family, self.solver, self.init, self.maxiter, self.tol
         )
         self.eta = self.X @ beta
+        self.mu = self.family.glink.inverse(self.eta)
         self.beta_se = self.sumstats()
         self.beta = jnp.reshape(beta, (self.X.shape[1],))
         self.TS, self.pval, self.df = self.WaldTest()
 
         return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
+
+    def calc_resid(self, y: jnp.ndarray, mu: jnp.ndarray) -> jnp.ndarray:
+        return jnp.square(y - mu)
 
     def __str__(self) -> str:
         return f"""

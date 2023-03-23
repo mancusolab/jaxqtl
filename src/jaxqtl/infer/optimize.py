@@ -27,6 +27,7 @@ def irls(
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o = val
         beta = solver(X, y, eta_o, family)
+        # jax.debug.breakpoint()
         eta_n = X @ beta
         likelihood_o = family.likelihood(X, y, eta_o)
         likelihood_n = family.likelihood(X, y, eta_n)
@@ -43,6 +44,6 @@ def irls(
     init_tuple = (10000.0, 0, init_beta, eta)
 
     diff, num_iters, beta, eta = lax.while_loop(cond_fun, body_fun, init_tuple)
-    converged = jnp.logical_and(jnp.fabs(diff) > tol, num_iters <= max_iter)
+    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged)

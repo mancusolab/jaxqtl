@@ -4,9 +4,11 @@ from typing import List, Tuple  # , Optional
 import numpy as np
 from typing_extensions import Self
 
+# import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import Array
+from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
@@ -52,7 +54,7 @@ class ExponentialFamily(ABC):
         pass
 
     @abstractmethod
-    def variance(self, mu: ArrayLike) -> Array:
+    def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         pass
 
     def calc_weight(
@@ -65,7 +67,7 @@ class ExponentialFamily(ABC):
         mu_k = self.glink.inverse(eta)
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.scale(X, y, mu_k)
-        V_mu = self.variance(mu_k)
+        V_mu = self.variance(X, y, mu_k)
         weight_k = 1 / (jnp.square(g_deriv_k) * V_mu * phi)
         return mu_k, g_deriv_k, weight_k
 
@@ -112,7 +114,7 @@ class Gaussian(ExponentialFamily):
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass  # TODO: old implementation was broken...
 
-    def variance(self, mu: ArrayLike) -> Array:
+    def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.ones_like(mu)
 
 
@@ -147,7 +149,7 @@ class Binomial(ExponentialFamily):
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def variance(self, mu: ArrayLike) -> Array:
+    def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
     # def init_eta(self, y: ArrayLike) -> Array:
@@ -176,7 +178,7 @@ class Poisson(ExponentialFamily):
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def variance(self, mu: ArrayLike) -> Array:
+    def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu
 
 
@@ -197,34 +199,42 @@ class NegativeBinomial(ExponentialFamily):
         super(NegativeBinomial, self).__init__(glink)
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
-        r = 1
-        p = round(mu) / (round(mu) + 1)
+        r = 1 / self.alpha  # >= 1
+        p = round(mu) / (round(mu) + self.alpha)
         y = np.random.negative_binomial(r, 1 - p)
         return y
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return jnp.asarray(1.0)
+        return jnp.array([1.0])
 
     def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass
+        r = 1 / self.alpha
+        # r = 1 / beta[-1]
+        mu = self.glink.inverse(eta)
+        p = mu / (mu + r)
+        term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
+        term2 = r * jnp.log(1 - p) + y * jnp.log(p)
+        return jnp.sum(term1 + term2)
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
-    def variance(self, mu: ArrayLike) -> Array:
+    def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         # estimate alpha
-        # a = ((resid**2 / mu - 1) / mu).sum() / df_resid
+        resid = jnp.sum(jnp.square(mu - y))
+        df = y.shape[0] - X.shape[1]
+        self.alpha = jnp.sum((resid ** 2 / mu - 1) / mu) / df
         return mu + self.alpha * mu ** 2
 
     # TODO: validation already occurred, we shouldn't need to redo it
-    def tree_flatten(self):
-        children = (
-            self.glink,
-            self.alpha,
-            False,
-        )  # validation already occurred, we shouldn't need to redo it
-        aux = ()
-        return children, aux
+    # def tree_flatten(self):
+    #     children = (
+    #         self.glink,
+    #         self.alpha,
+    #         # False,
+    #     )  # validation already occurred, we shouldn't need to redo it
+    #     aux = ()
+    #     return children, aux
 
 
 # class Gamma(AbstractExponential):
@@ -264,7 +274,7 @@ class NegativeBinomial(ExponentialFamily):
 #     def score(self, score(self, y: ArrayLike, eta: ArrayLike) -> Array:
 #         pass
 #
-#     def variance(self, mu: ArrayLike) -> Array:
+#     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
 #         return mu ** 2
 #
 #     def init_mu(self, p: int, seed: Optional[int]) -> Array:
