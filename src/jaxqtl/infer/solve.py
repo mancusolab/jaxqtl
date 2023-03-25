@@ -103,3 +103,10 @@ class CGSolve(LinearSolve):
             return w_half_X @ beta
 
         return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
+
+
+"""
+TODO: need a solver written in the format of gradient (Newton's method)
+to estimate dispersion parameter (alpha) in NB model together with reg coefs;
+i.e. append betas with alpha
+"""

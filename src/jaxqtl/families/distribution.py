@@ -226,6 +226,12 @@ class NegativeBinomial(ExponentialFamily):
         self.alpha = jnp.sum((resid ** 2 / mu - 1) / mu) / df
         return mu + self.alpha * mu ** 2
 
+    def init_eta(self, y: ArrayLike) -> Array:
+        """
+        TODO: Initialize with fitting poisson regression and estimate dispersion
+        """
+        pass
+
     # TODO: validation already occurred, we shouldn't need to redo it
     # def tree_flatten(self):
     #     children = (
