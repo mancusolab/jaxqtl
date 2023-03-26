@@ -102,6 +102,7 @@ class GLM:
         self.beta_se = self.sumstats()
         self.beta = jnp.reshape(beta, (self.X.shape[1],))
         self.TS, self.pval, self.df = self.WaldTest()
+        # disp = self.family.calc_dispersion(self.X, self.y, self.mu)
 
         return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
 

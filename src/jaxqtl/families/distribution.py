@@ -181,6 +181,13 @@ class Poisson(ExponentialFamily):
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu
 
+    def calc_dispersion(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+        resid = y - mu
+        df = y.shape[0] - X.shape[1]
+        # disp = np.sum((resid ** 2 / mu - 1) / mu) / df
+        disp = (jnp.sum(resid ** 2) / df - jnp.mean(mu)) / jnp.mean(mu ** 2)
+        return disp
+
 
 class NegativeBinomial(ExponentialFamily):
     """
@@ -195,8 +202,9 @@ class NegativeBinomial(ExponentialFamily):
         glink: Link = Log(),
         alpha: ArrayLike = 1.0,
     ):
-        self.alpha = alpha
+        # self.alpha = alpha
         super(NegativeBinomial, self).__init__(glink)
+        self.alpha = 1.204
 
     def random_gen(self, mu: jnp.ndarray) -> np.ndarray:
         r = 1 / self.alpha  # >= 1
@@ -209,7 +217,6 @@ class NegativeBinomial(ExponentialFamily):
 
     def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         r = 1 / self.alpha
-        # r = 1 / beta[-1]
         mu = self.glink.inverse(eta)
         p = mu / (mu + r)
         term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
@@ -221,16 +228,11 @@ class NegativeBinomial(ExponentialFamily):
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         # estimate alpha
-        resid = jnp.sum(jnp.square(mu - y))
+        resid = mu - y
         df = y.shape[0] - X.shape[1]
-        self.alpha = jnp.sum((resid ** 2 / mu - 1) / mu) / df
+        # self.alpha = jnp.sum((resid ** 2 / mu - 1) / mu) / df
+        self.alpha = (jnp.sum(resid ** 2) / df - jnp.mean(mu)) / jnp.mean(mu ** 2)
         return mu + self.alpha * mu ** 2
-
-    def init_eta(self, y: ArrayLike) -> Array:
-        """
-        TODO: Initialize with fitting poisson regression and estimate dispersion
-        """
-        pass
 
     # TODO: validation already occurred, we shouldn't need to redo it
     # def tree_flatten(self):

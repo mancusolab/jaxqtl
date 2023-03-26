@@ -22,7 +22,6 @@ family = NB(alpha=2.0)
 
 sim = SimData(n, family)
 X, y, beta = sim.gen_data()
-# X = np.append(X, np.ones((n, 1)), axis=1)
 
 sm_state = smPoisson(y, X).fit(disp=0)
 
@@ -32,21 +31,16 @@ jaxqtl_poisson = GLM(
     family=Poisson(),
     solver=CholeskySolve(),
     append=False,
-    maxiter=100,
+    maxiter=1000,
 )
 
 glm_state = jaxqtl_poisson.fit()
 
-# calculate residuals --> alpha
-# resid = jaxqtl_poisson.calc_resid(y, jaxqtl_poisson.mu)
-# df = y.shape[0] - X.shape[1]
-# alpha = np.sum((resid ** 2 / jaxqtl_poisson.mu - 1) / jaxqtl_poisson.mu) / df
-#
-#
-# sm_state = smPoisson(y, X).fit(disp=0)
-#
-# print(sm_state.summary())
-# print(glm_state)
+
+sm_state = smPoisson(y, X).fit(disp=0)
+
+print(sm_state.summary())
+print(glm_state)
 
 """
 time it in ipython:

@@ -47,3 +47,33 @@ def irls(
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged)
+
+
+# def irls(
+#     X: jnp.ndarray,
+#     y: jnp.ndarray,
+#     family: ExponentialFamily,
+#     solver: LinearSolve,
+#     eta: jnp.ndarray,
+#     max_iter: int = 1000,
+#     tol: float = 1e-3,
+# ) -> IRLSState:
+#
+#     init_beta = jnp.zeros((X.shape[1], 1))
+#     diff, num_iters, beta_o, eta_o = (10000.0, 0, init_beta, eta)
+#     converged = False
+#
+#     while jnp.fabs(diff) > tol and num_iters <= max_iter:
+#         beta = solver(X, y, eta_o, family)
+#         eta_n = X @ beta
+#         likelihood_o = family.likelihood(X, y, eta_o)
+#         likelihood_n = family.likelihood(X, y, eta_n)
+#         diff = likelihood_n - likelihood_o
+#
+#         if jnp.fabs(diff) < tol:
+#             converged = True
+#             break
+#         num_iters += 1
+#         eta_o = eta_n
+#
+#     return IRLSState(beta, num_iters, converged)
