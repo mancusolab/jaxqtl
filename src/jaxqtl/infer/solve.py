@@ -50,6 +50,7 @@ class QRSolve(LinearSolve):
         family: ExponentialFamily,
     ) -> jnp.ndarray:
 
+        family.alpha = family.calc_dispersion(y, family.glink.inverse(eta))
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -71,6 +72,8 @@ class CholeskySolve(LinearSolve):
         family: ExponentialFamily,
     ) -> jnp.ndarray:
 
+        # calculate dispersion only for NB model
+        family.alpha = family.calc_dispersion(y, family.glink.inverse(eta))
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -93,6 +96,7 @@ class CGSolve(LinearSolve):
         family: ExponentialFamily,
     ) -> jnp.ndarray:
 
+        family.alpha = family.calc_dispersion(y, family.glink.inverse(eta))
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)

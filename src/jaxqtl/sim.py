@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Optional
 
 import numpy as np
 
@@ -17,7 +17,7 @@ class SimData:
         self.pfeatures = 4
         self.family = family
 
-    def gen_data(self):
+    def gen_data(self, sim_alpha: Optional[float]):
         n = self.nobs
         p = self.pfeatures
         X_shape = (n, p)
@@ -45,6 +45,6 @@ class SimData:
 
         # TODO: need to call this function with diff parameters
         # y = self.family.random_gen(mu, sigma)
-        y = self.family.random_gen(mu)
+        y = self.family.random_gen(mu, sim_alpha)
 
         return SimState(X, y, beta)
