@@ -48,7 +48,7 @@ class ExponentialFamily(ABC):
         pass
 
     @abstractmethod
-    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         pass
 
     @abstractmethod
@@ -115,7 +115,7 @@ class Gaussian(ExponentialFamily):
         phi = resid / df
         return phi
 
-    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         mu = self.glink.inverse(eta)
         phi = self.scale(X, y, mu)
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
@@ -148,7 +148,7 @@ class Binomial(ExponentialFamily):
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         """
         this works if we're using sigmoid link
         -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
@@ -181,7 +181,7 @@ class Poisson(ExponentialFamily):
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return logprob
 
@@ -224,12 +224,12 @@ class NegativeBinomial(ExponentialFamily):
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.array([1.0])
 
-    def likelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
+    def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         r = 1 / self.alpha
         mu = self.glink.inverse(eta)
         p = mu / (mu + r)
         term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
-        term2 = r * jnp.log(1 - p) + y * jnp.log(p)
+        term2 = r * jnp.log1p(-p) + y * jnp.log(p)
         return jnp.sum(term1 + term2)
 
     def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
@@ -251,6 +251,7 @@ class NegativeBinomial(ExponentialFamily):
         term1 = alpha_inv ** 2 * jnp.log(alpha * mu + 1)
         term2 = (y - mu) / (mu * (alpha ** 2) + alpha)
         term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv ** 2
+
         return jnp.sum(term1 + term2 + term3)
 
     def alpha_hess(self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike) -> Array:

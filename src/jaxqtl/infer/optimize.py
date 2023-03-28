@@ -29,8 +29,8 @@ def irls(
         beta = solver(X, y, eta_o, family)
         # jax.debug.breakpoint()
         eta_n = X @ beta
-        likelihood_o = family.likelihood(X, y, eta_o)
-        likelihood_n = family.likelihood(X, y, eta_n)
+        likelihood_o = family.loglikelihood(X, y, eta_o)
+        likelihood_n = family.loglikelihood(X, y, eta_n)
         diff = likelihood_n - likelihood_o
 
         return diff, num_iter + 1, beta, eta_n

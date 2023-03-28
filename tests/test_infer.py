@@ -12,7 +12,7 @@ from jaxqtl.infer.solve import CholeskySolve
 
 config.update("jax_enable_x64", True)
 
-# load toy example data from statsmodels to compare
+# io toy example data from statsmodels to compare
 spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
 solver = CholeskySolve
@@ -79,7 +79,7 @@ def test_poisson():
 
 # -------------------------------------------------#
 
-# data = sm.datasets.scotland.load()
+# data = sm.datasets.scotland.io()
 # data.exog = sm.add_constant(data.exog)
 # gamma_model = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
 # gamma_results = gamma_model.fit()
@@ -96,7 +96,7 @@ def test_poisson():
 # test_Gamma.fit()
 # print(test_Gamma)
 
-# data = sm.datasets.scotland.load()
+# data = sm.datasets.scotland.io()
 # data.exog = sm.add_constant(data.exog)
 # NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
 # NB_results = NB_model.fit(maxiter=100)

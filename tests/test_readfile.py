@@ -2,7 +2,7 @@ import numpy.testing as nptest
 
 from jax.config import config
 
-from jaxqtl.load.readfile import read_data
+from jaxqtl.io.readfile import read_data
 
 config.update("jax_enable_x64", True)
 
