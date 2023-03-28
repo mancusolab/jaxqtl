@@ -1,14 +1,14 @@
 from abc import ABC, abstractmethod
-from typing import List, Tuple  # , Optional
+from functools import partial
+from typing import List, Tuple
 
 import numpy as np
 from typing_extensions import Self
 
-# import jax
-# from functools import partial
+import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array
+from jax import Array, lax
 from jax.scipy.special import digamma, gammaln, polygamma
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
@@ -59,7 +59,7 @@ class ExponentialFamily(ABC):
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         pass
 
-    def random_gen(self, loc: ArrayLike, scale: ArrayLike) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ArrayLike) -> Array:
         pass
 
     def calc_weight(
@@ -79,7 +79,9 @@ class ExponentialFamily(ABC):
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + y.mean()) / 2)
 
-    def calc_dispersion(self, y: ArrayLike, mu: ArrayLike) -> Array:
+    def calc_dispersion(
+        self, y: ArrayLike, mu: ArrayLike, alpha_old, tol=1e-3, max_iter=1000
+    ) -> Array:
         return jnp.array([0.0])
 
     def tree_flatten(self):
@@ -103,8 +105,8 @@ class Gaussian(ExponentialFamily):
     def __init__(self, glink: Link = Identity()):
         super(Gaussian, self).__init__(glink)
 
-    def random_gen(self, loc: ArrayLike, scale: ArrayLike) -> Array:
-        y = np.random.normal(loc, scale)
+    def random_gen(self, mu: ArrayLike, scale: ArrayLike) -> Array:
+        y = np.random.normal(mu, scale)
         return y
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -139,8 +141,8 @@ class Binomial(ExponentialFamily):
     def __init__(self, glink: Link = Logit()):
         super(Binomial, self).__init__(glink)
 
-    def random_gen(self, loc: None, p: ArrayLike) -> Array:
-        y = np.random.binomial(1, p)
+    def random_gen(self, mu: ArrayLike, scale=0.0) -> Array:
+        y = np.random.binomial(1, mu)
         return y
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -172,7 +174,7 @@ class Poisson(ExponentialFamily):
     def __init__(self, glink: Link = Log()):
         super(Poisson, self).__init__(glink)
 
-    def random_gen(self, loc: None, mu: ArrayLike) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ArrayLike) -> Array:
         y = np.random.poisson(mu)
         return y
 
@@ -255,7 +257,7 @@ class NegativeBinomial(ExponentialFamily):
         """
         trigammma(x) = polygamma(1,x)
         """
-        alpha_inv = 1 / self.alpha
+        alpha_inv = 1 / alpha
         term1 = -2 / (alpha ** 3) * jnp.log(alpha * mu + 1)
         term2 = -mu / (mu * (alpha ** 3) + alpha ** 2)
         term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha ** 2 * mu + alpha) ** 2
@@ -265,22 +267,47 @@ class NegativeBinomial(ExponentialFamily):
         )
         return jnp.sum(term1 + term2 + term3 + term4 + term5)
 
-    # @partial(jax.jit, static_argnames=["diff", "tol", 'idx'])
-    def calc_dispersion(self, y: ArrayLike, mu: ArrayLike) -> Array:
-        tol = 1e-3
-        diff = 1000
-        old = self.alpha
-        idx = 1
+    @partial(jax.jit, static_argnames=["tol", "max_iter"])
+    def calc_dispersion(
+        self, y: ArrayLike, mu: ArrayLike, alpha_old: ArrayLike, tol=1e-3, max_iter=1000
+    ) -> Array:
+        def body_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
+            score = self.alpha_score(y, mu, alpha_o)
+            hess = self.alpha_hess(y, mu, alpha_o)
+            alpha_n = alpha_o - score / hess
+            diff = alpha_n - alpha_o
 
-        while diff > tol:
-            score = self.alpha_score(y, mu, old)
-            hess = self.alpha_hess(y, mu, old)
-            new = old - score / hess
-            idx += 1
-            diff = jnp.abs(new - old)
-            old = new
+            return diff, num_iter + 1, alpha_n
 
-        return new
+        def cond_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
+            cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+            return cond_l
+
+        init_tuple = (10000.0, 0, alpha_old)
+        diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
+
+        return alpha
+
+    # def calc_dispersion(self, y: ArrayLike, mu: ArrayLike, alpha_old, tol=1e-3, max_iter=1000) -> Array:
+    #     diff = 1000
+    #     old = self.alpha
+    #     idx = 1
+    #
+    #     # while jnp.logical_and(diff > tol, idx <= max_iter):
+    #     while diff > tol:
+    #         score = self.alpha_score(y, mu, old)
+    #         hess = self.alpha_hess(y, mu, old)
+    #         new = old - score / hess
+    #         idx += 1
+    #         diff = jnp.abs(new - old)
+    #         old = new
+    #
+    #     return new
+
+    def _set_alpha(self, alpha_n):
+        self.alpha = alpha_n
 
     # TODO: validation already occurred, we shouldn't need to redo it
     # def tree_flatten(self):

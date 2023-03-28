@@ -2,8 +2,12 @@ from typing import NamedTuple
 
 import decoupler as dc
 import numpy as np
+
+# import pandas as pd
 import scanpy as sc
 from anndata._core.anndata import AnnData
+
+# from cyvcf2 import VCF
 from pandas_plink import read_plink1_bin
 
 import jax.numpy as jnp
@@ -94,6 +98,21 @@ def read_data(
     # print(G.sel(sample="1", variant="variant0").values)
     G = read_plink1_bin(bed_path, bim_path, fam_path, verbose=False)
     genotype = jnp.array(G.values)  # sample x variants
+
+    # # read VCF files
+    # vcf = VCF(geno_path, gts012=True)
+    # fam = pd.DataFrame(vcf.samples).rename(columns={0: "iid"})
+    # bim_list = []
+    # bed_list = []
+    #
+    # for var in vcf:
+    #     # var.ALT is a list of alternative allele
+    #     bim_list.append([var.CHROM, var.ID, var.POS, var.ALT[0], var.REF])
+    #     tmp_bed = 2 - var.gt_types
+    #     bed_list.append(tmp_bed)
+    #
+    # bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "pos", "a0", "a1"])
+    # bed = jnp.array(bed_list, dtype="float64").T
 
     dat = sc.read_h5ad(pheno_path)
     dat.obs["sex"] = np.where(dat.obs["sex"] == "female", 1, 0)

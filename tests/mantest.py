@@ -20,7 +20,7 @@ n = 1000
 family = NB()
 
 sim = SimData(n, family)
-X, y, beta = sim.gen_data(sim_alpha=2.0)
+X, y, beta = sim.gen_data(sim_alpha=2.0)  # sim_alpha=2.0
 
 # sm_state = smPoisson(y, X).fit(disp=0)
 #
@@ -39,7 +39,7 @@ X, y, beta = sim.gen_data(sim_alpha=2.0)
 # sm_state = smPoisson(y, X).fit(disp=0)
 #
 # print(sm_state.summary())
-# print(glm_state)
+# print(jaxqtl_poisson)
 
 """
 time it in ipython:
