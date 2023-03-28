@@ -50,9 +50,6 @@ class QRSolve(LinearSolve):
         family: ExponentialFamily,
     ) -> jnp.ndarray:
 
-        family.alpha = family.calc_dispersion(
-            y, family.glink.inverse(eta), family.alpha
-        )
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -75,9 +72,9 @@ class CholeskySolve(LinearSolve):
     ) -> jnp.ndarray:
 
         # calculate dispersion only for NB model
-        family.alpha = family.calc_dispersion(
-            y, family.glink.inverse(eta), family.alpha
-        )
+        # family.alpha = family.calc_dispersion(
+        #     y, family.glink.inverse(eta), family.alpha
+        # )
         # import jax; jax.debug.breakpoint()
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
@@ -101,9 +98,6 @@ class CGSolve(LinearSolve):
         family: ExponentialFamily,
     ) -> jnp.ndarray:
 
-        family.alpha = family.calc_dispersion(
-            y, family.glink.inverse(eta), family.alpha
-        )
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
@@ -114,10 +108,3 @@ class CGSolve(LinearSolve):
             return w_half_X @ beta
 
         return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
-
-
-"""
-TODO: need a solver written in the format of gradient (Newton's method)
-to estimate dispersion parameter (alpha) in NB model together with reg coefs;
-i.e. append betas with alpha
-"""

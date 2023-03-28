@@ -109,7 +109,6 @@ class GLM:
         jaxQTL
         beta: {self.beta}
         se: {self.beta_se}
-        alpha: {self.family.alpha}
         p: {self.pval}
         converged: {self.converged} in {self.n_iter}
                """

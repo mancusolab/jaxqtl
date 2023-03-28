@@ -1,9 +1,12 @@
 from abc import ABC, abstractmethod
 
+# import jax
 import jax.numpy as jnp
 from jax import Array
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
+
+from .utils import _clipped_expit, _grad_per_sample
 
 
 @register_pytree_node_class
@@ -66,10 +69,16 @@ class Power(Link):
         return jnp.power(eta, 1.0 / self.power)
 
     def deriv(self, mu: ArrayLike) -> Array:
-        return self.power * jnp.power(mu, self.power - 1)
+        """
+        self.power * jnp.power(mu, self.power - 1)
+        """
+        return _grad_per_sample(self, mu)
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
-        return jnp.power(eta, 1 / self.power - 1) / self.power
+        """
+        jnp.power(eta, 1 / self.power - 1) / self.power
+        """
+        return _grad_per_sample(self, eta)
 
     def tree_flatten(self):
         children = (self.power,)
@@ -99,19 +108,29 @@ class Logit(Link):
         """
         Power transform link function
         g(mu) = log(mu / (1-mu))
-        0 < mu < 1
+        need clip for mu: 0 < mu < 1
         """
         return jnp.log(mu / (1 - mu))
 
     def inverse(self, eta: ArrayLike) -> Array:
-        return jnp.exp(-jnp.log1p(jnp.exp(-eta)))
+        """
+        inverse of logistic sigmoid function
+        expit(x) = 1/(1+exp(-x))
+        """
+        return _clipped_expit(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
-        return jnp.exp(-jnp.log(mu) - jnp.log(1 - mu))
+        """
+        jnp.exp(-jnp.log(mu) - jnp.log(1 - mu))
+        """
+        return _grad_per_sample(self, mu)
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
+        """
         z = jnp.exp(eta)
         return z / (1 + z) ** 2
+        """
+        return _grad_per_sample(self.inverse, eta)
 
 
 class Log(Link):
@@ -122,10 +141,16 @@ class Log(Link):
         return jnp.exp(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
-        return 1.0 / mu
+        """
+        1/mu
+        """
+        return _grad_per_sample(self, mu)
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
-        return jnp.exp(eta)
+        """
+        jnp.exp(eta)
+        """
+        return _grad_per_sample(self.inverse, eta)
 
 
 class NBlink(Link):
@@ -134,24 +159,29 @@ class NBlink(Link):
         super(NBlink, self).__init__()
 
     def __call__(self, mu: ArrayLike) -> Array:
-        z = mu * self.alpha
-        return jnp.log(z / (z + 1))
+        # z = mu * self.alpha
+        return jnp.log(mu * self.alpha / (mu * self.alpha + 1))
 
     def inverse(self, eta: ArrayLike) -> Array:
-        z = jnp.exp(eta)
-        return z / (self.alpha * (1 - z))
+        # z = jnp.exp(eta)
+        return jnp.exp(eta) / (self.alpha * (1 - jnp.exp(eta)))
 
     def deriv(self, mu: ArrayLike) -> Array:
         """
         1/(mu * (mu * alpha + 1)), mu > 0
-        """
+
         term1 = -jnp.log(mu)
-        term2 = -jnp.log(mu * self.alpha + 1)
-        return jnp.exp(term1 + term2)
+        term2 = -jnp.log1p(mu * self.alpha)
+        jnp.exp(term1 + term2)
+        """
+        return _grad_per_sample(self, mu)
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
+        """
         z = jnp.exp(eta)
-        return jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
+        jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
+        """
+        return _grad_per_sample(self.inverse, eta)
 
     def tree_flatten(self):
         children = (self.alpha,)

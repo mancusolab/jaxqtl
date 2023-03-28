@@ -36,7 +36,6 @@ class ExponentialFamily(ABC):
         if not any([isinstance(glink, link) for link in self._links]):
             raise ValueError(f"Link {glink} is invalid for Family {self}")
         self.glink = glink
-        self.alpha = 1
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
@@ -245,10 +244,10 @@ class NegativeBinomial(ExponentialFamily):
 
     def alpha_score(self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike) -> Array:
         """
-        trigammma(x) = polygamma(2,x)
+        trigammma(x) = polygamma(1,x)
         """
         alpha_inv = 1 / alpha
-        term1 = alpha_inv ** 2 * jnp.log(alpha * mu + 1)
+        term1 = alpha_inv ** 2 * jnp.log1p(alpha * mu)
         term2 = (y - mu) / (mu * (alpha ** 2) + alpha)
         term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv ** 2
 
@@ -259,7 +258,7 @@ class NegativeBinomial(ExponentialFamily):
         trigammma(x) = polygamma(1,x)
         """
         alpha_inv = 1 / alpha
-        term1 = -2 / (alpha ** 3) * jnp.log(alpha * mu + 1)
+        term1 = -2 / (alpha ** 3) * jnp.log1p(alpha * mu)
         term2 = -mu / (mu * (alpha ** 3) + alpha ** 2)
         term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha ** 2 * mu + alpha) ** 2
         term4 = 2 / (alpha ** 3) * (digamma(y + alpha_inv) - digamma(alpha_inv))
