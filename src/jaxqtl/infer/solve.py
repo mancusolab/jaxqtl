@@ -108,3 +108,21 @@ class CGSolve(LinearSolve):
             return w_half_X @ beta
 
         return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
+
+
+def newton(X, y, init, score, hess, stepsize=1, tol=1e-3, max_iter=1000):
+    """ "perform naive gradient descent using Newton's method
+    we use this only for single parameter to avoid directly invert large hessian matrix
+    """
+    diff = 100000.0
+    old = init
+    num_iters = 0
+
+    while diff > tol and num_iters <= max_iter:
+        new = old - stepsize * score / hess
+        num_iters += 1
+        if diff < tol:
+            break
+        old = new
+
+    return new

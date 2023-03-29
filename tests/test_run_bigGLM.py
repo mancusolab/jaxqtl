@@ -2,24 +2,30 @@ import statsmodels.api as sm
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
-from util import assert_beta_array_eq
 
 import jax.numpy as jnp
 from jax.config import config
 
+from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.glm import GLMState
 from jaxqtl.infer.glm_wrapper import run_bigGLM
 from jaxqtl.io.readfile import CYVCF2, read_data
 
+from .util import assert_beta_array_eq
+
+# from util import assert_beta_array_eq
+
+
 config.update("jax_enable_x64", True)
 
-geno_path = "./tests/data/onek1k"
-pheno_path = "./tests/data/Countdata.h5ad"
+geno_path = "./example/data/chr22"
+pheno_path = "./example/data/Countdata.h5ad"
 covar_path = "./example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 cell_type = "CD14-positive monocyte"
 dat = read_data(CYVCF2(), geno_path, pheno_path, covar_path, cell_type)
+res = run_bigGLM(dat, family=Poisson(), test_run=10)
 
 
 def run_bigGLM_sm(dat, test_run):
