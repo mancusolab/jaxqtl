@@ -14,6 +14,8 @@ __pycache__/*
 */.ipynb_checkpoints/*
 .DS_Store
 
+example/data/*.vcf.gz
+
 # Project files
 .ropeproject
 .project

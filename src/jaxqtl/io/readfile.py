@@ -1,16 +1,25 @@
-from typing import NamedTuple
+from abc import ABC, abstractmethod
+from typing import List, NamedTuple, Optional
 
 import decoupler as dc
 import numpy as np
-
-# import pandas as pd
+import pandas as pd
 import scanpy as sc
 from anndata._core.anndata import AnnData
-
-# from cyvcf2 import VCF
+from cyvcf2 import VCF
 from pandas_plink import read_plink1_bin
 
 import jax.numpy as jnp
+from jax import Array
+from jax.tree_util import register_pytree_node, register_pytree_node_class
+
+pd.set_option("display.max_rows", 100000)
+
+
+class PlinkState(NamedTuple):
+    bed: np.ndarray  # need filtering and sorting afterwards
+    bim: pd.DataFrame
+    fam: pd.DataFrame
 
 
 class RawDataState(NamedTuple):
@@ -25,6 +34,101 @@ class CleanDataState(NamedTuple):
 
     genotype: jnp.ndarray
     count: AnnData
+    covar: jnp.ndarray
+
+
+@register_pytree_node_class
+class IO(ABC):
+    """
+    Read genotype or count data from different file format
+    """
+
+    def __init_subclass__(cls, **kwargs):
+        super().__init_subclass__(**kwargs)
+        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
+
+    @abstractmethod
+    def __call__(self, prefix: str) -> Array:
+        """
+        Read files
+        """
+        pass
+
+    def tree_flatten(self):
+        children = ()
+        aux = ()
+        return children, aux
+
+    @classmethod
+    def tree_unflatten(cls, aux, children):
+        return cls(*children)
+
+
+class Plink(IO):
+    """
+    bim:
+    """
+
+    def __call__(self, prefix: str) -> PlinkState:
+        # Append prefix with suffix
+        self.bed_path = prefix + ".bed"
+        self.bim_path = prefix + ".bim"
+        self.fam_path = prefix + ".fam"
+
+        # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
+        # print(G.a0.sel(variant="variant0").values)
+        # print(G.sel(sample="1", variant="variant0").values)
+        G = read_plink1_bin(self.bed_path, self.bim_path, self.fam_path, verbose=False)
+        genotype = np.array(G.values)  # sample x variants
+
+        var_info = pd.DataFrame()
+        sample_info = pd.DataFrame()
+
+        return PlinkState(genotype, var_info, sample_info)
+
+
+class CYVCF2(IO):
+    def __call__(self, prefix: str) -> PlinkState:
+        """
+        need genotype: sample ID, genotype in dose values
+        need number of variants
+        """
+        vcf_path = prefix + ".vcf.gz"
+        varnum_path = prefix + ".numvar"
+        # read VCF files
+        vcf = VCF(vcf_path, gts012=True)  # can add samples=[]
+        sample_info = pd.DataFrame(vcf.samples).rename(
+            columns={0: "iid"}
+        )  # individuals
+        nobs = len(vcf.samples)
+
+        # use "bcftools stats file.vcf > file.stats" to count this
+        # need a file to provide number of variants
+        num_var = pd.read_csv(varnum_path, header=None)
+        num_var = int(num_var[0].values)  # convert to int
+
+        genotype = np.ones((num_var, nobs)) * -9
+        var_list = [[]] * num_var  # type: List[List]
+
+        idx = 0
+        for var in vcf:
+            genotype[idx] = var.gt_types
+            # var.ALT is a list of alternative allele
+            var_list[idx] = [var.CHROM, var.ID, var.POS, var.ALT[0], var.REF]
+            idx += 1
+
+        vcf.close()
+
+        var_info = pd.DataFrame(var_list, columns=["chrom", "snp", "pos", "a0", "a1"])
+
+        # convert to REF dose
+        # genotype = 2 - genotype
+
+        # check_values = nobs * num_var == np.sum(np.isin(genotype, [0, 1, 2]))
+
+        genotype = pd.DataFrame(genotype.T).set_index([vcf.samples])
+
+        return PlinkState(genotype, var_info, sample_info)
 
 
 def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> AnnData:
@@ -75,11 +179,16 @@ def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> An
 
 
 def read_data(
-    geno_path: str, pheno_path: str, cell_type: str = "CD14-positive monocyte"
+    file_type: IO,
+    geno_path: str,
+    pheno_path: str,
+    covar_path: Optional[str],
+    cell_type: str = "CD14-positive monocyte",
 ):
     """
     Genotype data: plink file
     pheno_path: h5ad file path, including covariates
+    covar_path: covariates, must be coded in numerical forms
 
     Gene expression data: h5ad file
     - dat.X: cell x gene sparse matrix, where cell is indexed by unique barcode
@@ -88,34 +197,22 @@ def read_data(
 
     recode sex as: female = 1, male = 0
     """
-    # Append prefix with suffix
-    bed_path = geno_path + ".bed"
-    bim_path = geno_path + ".bim"
-    fam_path = geno_path + ".fam"
+    genotype, var_info, sample_info = file_type(geno_path)
+    covar = pd.read_csv(covar_path, delimiter="\t")  # use donor_id
 
-    # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
-    # print(G.a0.sel(variant="variant0").values)
-    # print(G.sel(sample="1", variant="variant0").values)
-    G = read_plink1_bin(bed_path, bim_path, fam_path, verbose=False)
-    genotype = jnp.array(G.values)  # sample x variants
-
-    # # read VCF files
-    # vcf = VCF(geno_path, gts012=True)
-    # fam = pd.DataFrame(vcf.samples).rename(columns={0: "iid"})
-    # bim_list = []
-    # bed_list = []
-    #
-    # for var in vcf:
-    #     # var.ALT is a list of alternative allele
-    #     bim_list.append([var.CHROM, var.ID, var.POS, var.ALT[0], var.REF])
-    #     tmp_bed = 2 - var.gt_types
-    #     bed_list.append(tmp_bed)
-    #
-    # bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "pos", "a0", "a1"])
-    # bed = jnp.array(bed_list, dtype="float64").T
+    sample_info["ro_rm"] = range(len(sample_info))
+    sample_info.set_index("iid", inplace=True)
+    covar.set_index("donor_id", inplace=True)
+    X = pd.merge(sample_info, covar, left_index=True, right_index=True)  # inner join
+    # dat.obs["sex"] = np.where(dat.obs["sex"] == "female", 1, 0)
 
     dat = sc.read_h5ad(pheno_path)
-    dat.obs["sex"] = np.where(dat.obs["sex"] == "female", 1, 0)
-    count = process_count(dat, cell_type=cell_type)  # count and covariates
+    count = process_count(dat, cell_type=cell_type)
+    donor_id = count.obs.donor_id.values
 
-    return CleanDataState(genotype, count)
+    # filter genotype and covariates, ordered?
+    X = X.filter(items=donor_id, axis=0)
+    genotype = genotype.filter(items=donor_id, axis=0)
+    covar = covar.filter(items=donor_id, axis=0)
+
+    return CleanDataState(jnp.asarray(genotype), count, jnp.asarray(covar))

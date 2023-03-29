@@ -7,17 +7,19 @@ from util import assert_beta_array_eq
 import jax.numpy as jnp
 from jax.config import config
 
-from jaxqtl.infer.glm import GLMState, run_bigGLM
-from jaxqtl.io.readfile import read_data
+from jaxqtl.infer.glm import GLMState
+from jaxqtl.infer.glm_wrapper import run_bigGLM
+from jaxqtl.io.readfile import CYVCF2, read_data
 
 config.update("jax_enable_x64", True)
 
 geno_path = "./tests/data/onek1k"
 pheno_path = "./tests/data/Countdata.h5ad"
+covar_path = "./example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 cell_type = "CD14-positive monocyte"
-dat = read_data(geno_path, pheno_path, cell_type)
+dat = read_data(CYVCF2(), geno_path, pheno_path, covar_path, cell_type)
 
 
 def run_bigGLM_sm(dat, test_run):
