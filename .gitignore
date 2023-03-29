@@ -15,6 +15,7 @@ __pycache__/*
 .DS_Store
 
 example/data/*.vcf.gz
+example/data/*.h5ad
 
 # Project files
 .ropeproject
