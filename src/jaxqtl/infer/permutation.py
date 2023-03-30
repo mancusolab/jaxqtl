@@ -7,6 +7,7 @@ from abc import ABC, abstractmethod
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, random
+from jax.config import config
 from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
@@ -14,6 +15,8 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.glm_wrapper import run_cis_GLM
 from jaxqtl.io.readfile import CleanDataState
+
+config.update("jax_enable_x64", True)
 
 
 @register_pytree_node_class
@@ -116,13 +119,23 @@ class BetaPerm(Permutation):
 
 
 def infer_beta(
-    p_perm: jnp.ndarray, init: jnp.ndarray, stepsize=1, tol=1e-3, max_iter=1000
+    p_perm: jnp.ndarray,
+    init: jnp.ndarray = jnp.array[1.0, 1.0],
+    stepsize=1,
+    tol=1e-3,
+    max_iter=1000,
 ) -> jnp.ndarray:
-    def loglik(k: float, n: float, p: ArrayLike, R: int = 1000) -> jnp.ndarray:
+    """
+    given p values from R permutations (strongest signals),
+    use newton's method to estimate beta distribution parameters:
+    p ~ Beta(k, n)
+    """
+
+    def loglik(k: float, n: float, p: ArrayLike, R: int) -> jnp.ndarray:
         return (
             (k - 1) * jnp.sum(jnp.log(p))
             + (n - 1) * jnp.sum(jnp.log1p(-p))
-            - R * (gammaln(k) + gammaln(n) + gammaln(k * n))
+            - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
         )
 
     score_k_fn = grad(loglik, 0)
@@ -134,16 +147,17 @@ def infer_beta(
     diff = 10000.0
     num_iters = 0
     old_k, old_n = init
+    r = len(p_perm)
 
     while diff > tol and num_iters <= max_iter:
-        new_k = old_k - stepsize * score_k_fn(
-            old_k, old_n, p_perm, max_iter
-        ) / hess_k_fn(old_k, old_n, p_perm, max_iter)
-        new_n = old_n - stepsize * score_n_fn(
-            old_k, old_n, p_perm, max_iter
-        ) / hess_n_fn(old_k, old_n, p_perm, max_iter)
-        old_lik = loglik(old_k, old_n, p_perm, R=max_iter)
-        new_lik = loglik(new_k, new_n, p_perm, R=max_iter)
+        new_k = old_k - stepsize * score_k_fn(old_k, old_n, p_perm, r) / hess_k_fn(
+            old_k, old_n, p_perm, r
+        )
+        new_n = old_n - stepsize * score_n_fn(old_k, old_n, p_perm, r) / hess_n_fn(
+            old_k, old_n, p_perm, r
+        )
+        old_lik = loglik(old_k, old_n, p_perm, r)
+        new_lik = loglik(new_k, new_n, p_perm, r)
         diff = jnp.abs(old_lik - new_lik)
 
         if diff < tol:
