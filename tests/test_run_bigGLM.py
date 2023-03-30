@@ -1,22 +1,25 @@
-import statsmodels.api as sm
+from typing import NamedTuple
+
+import numpy as np
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
+from util import assert_beta_array_eq
 
-import jax.numpy as jnp
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.glm import GLMState
 from jaxqtl.infer.glm_wrapper import run_bigGLM
 from jaxqtl.io.readfile import CYVCF2, read_data
 
-from .util import assert_beta_array_eq
-
-# from util import assert_beta_array_eq
-
-
 config.update("jax_enable_x64", True)
+
+
+class smState(NamedTuple):
+    beta: np.array
+    se: np.array
+    p: np.array
+
 
 geno_path = "./example/data/chr22"
 pheno_path = "./example/data/Countdata.h5ad"
@@ -25,42 +28,41 @@ covar_path = "./example/data/donor_features.tsv"
 
 cell_type = "CD14-positive monocyte"
 dat = read_data(CYVCF2(), geno_path, pheno_path, covar_path, cell_type)
-res = run_bigGLM(dat, family=Poisson(), test_run=10)
+# res = run_bigGLM(dat, family=Poisson(), test_run=10)
 
 
 def run_bigGLM_sm(dat, test_run):
-    # TODO: order of genotype is not same as count matrix
-    # TODO: use donor_id as family id when creating plink file
-    # G = dat.genotype  # n x p variants
-    Xmat = dat.count.obs[["sex", "age"]].astype("float64")
-    Xmat = sm.add_constant(Xmat, prepend=True)  # X
+    G = dat.genotype  # n x p variants
+    covar = dat.covar
+    nobs, pvar = G.shape
 
-    num_params = Xmat.shape[1]  # features + intercept
+    num_params = covar.shape[1] + 2  # covariate features + one SNP + intercept
     num_genes = test_run if test_run is not None else dat.count.X.shape[1]
 
     # num_var = 1000  # G.shape[1]
-    all_beta = jnp.zeros((num_params, num_genes))
-    all_se = jnp.zeros((num_params, num_genes))
-    all_pval = jnp.zeros((num_params, num_genes))
-    all_num_iters = jnp.zeros((num_genes,))
-    all_converged = jnp.zeros((num_genes,))
+    all_beta = np.zeros((num_params, num_genes))
+    all_se = np.zeros((num_params, num_genes))
+    all_pval = np.zeros((num_params, num_genes))
+
+    # Xmat: intercept, SNP, cov1, cov2, ...
+    Xmat = np.ones((nobs, num_params))
+    Xmat[:, 2:] = covar
 
     for idx in range(num_genes):
-        # Xmat["variant"] = G[:, idx] # append X with genotype
-        ycount = dat.count.X[:, idx].astype("float64")
+        Xmat[:, 1] = G[:, idx]  # append X with genotype
+        ycount = np.array(dat.count.X[:, idx].astype("float64"))
+
         glmstate = smPoisson(ycount, Xmat).fit(disp=0, full_output=True)
 
         all_beta[:, idx] = glmstate.params
         all_se[:, idx] = glmstate.bse
         all_pval[:, idx] = glmstate.pvalues
-        # all_num_iters[idx] = glmstate.num_iters
-        # all_converged[idx] = glmstate.converged
 
-    return GLMState(all_beta, all_se, all_pval, all_num_iters, all_converged)
+    return smState(all_beta, all_se, all_pval)
 
 
 def test_run_bigGLM():
     # 940 samples x 12733 genes
     smstate = run_bigGLM_sm(dat, test_run=10)
-    glmstate = run_bigGLM(dat, test_run=100)
+    glmstate = run_bigGLM(dat, family=Poisson(), test_run=10)
     assert_beta_array_eq(glmstate, smstate)
