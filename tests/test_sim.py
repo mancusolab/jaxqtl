@@ -2,7 +2,7 @@ import numpy as np
 from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
     Poisson as smPoisson,
 )
-from util import assert_betas_eq
+from utils import assert_betas_eq
 
 from jax.config import config
 

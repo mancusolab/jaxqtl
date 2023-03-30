@@ -1,38 +1,38 @@
 # TODO: add permutation
 # 1) Direct permutation
-# 2) Adpative permutation
-# 3) beta distribution
+# 2) beta distribution
 
 from abc import ABC, abstractmethod
-from typing import Tuple
 
 import jax.numpy as jnp
+import jax.scipy.stats as jaxstats
 from jax import Array, grad, random
 from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.glm_wrapper import run_cis_GLM
+from jaxqtl.io.readfile import CleanDataState
 
 
 @register_pytree_node_class
 class Permutation(ABC):
     """
-    Define parent class for all solvers
-    eta = X @ beta, the linear component
+    For a given cis-window around a gene (L variants), perform permutation test to
+    identify (one candidate) eQTL for this gene.
     """
 
     @abstractmethod
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
+        dat: CleanDataState,
         family: ExponentialFamily,
         key_init,
-        obs_pval,
+        gene_idx: int,
+        W: int = 1000000,
         sig_level: float = 0.05,
-        max_perm=10000,
+        max_perm=1000,
     ) -> jnp.ndarray:
         pass
 
@@ -40,8 +40,19 @@ class Permutation(ABC):
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
-    def calc_permp(self, obs_pval: ArrayLike, pval: ArrayLike) -> Array:
+    def calc_adjp_naive(self, obs_pval: ArrayLike, pval: ArrayLike) -> Array:
+        """
+        obs_pval: the strongest nominal p value
+        """
         return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
+
+    def calc_adjp_beta(self, p_obs: ArrayLike, params: ArrayLike) -> Array:
+        """
+        p_obs is a vector of nominal p value in cis window
+        """
+        k, n = params
+        p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
+        return p_adj
 
     def tree_flatten(self):
         children = ()
@@ -54,26 +65,31 @@ class Permutation(ABC):
 
 
 class DirectPerm(Permutation):
+    """
+    For a given cis-window with L variants, permutate phenotype for R times,
+    each time, take the strongest signal -> R samples
+    calculate adjusted p = P(perm_p < obs_p) = (r+1)/(R+1), r = # stronger signals
+    """
+
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
+        dat: CleanDataState,
         family: ExponentialFamily,
         key_init,
-        obs_pval,
+        gene_idx: int,
+        W: int = 1000000,
         sig_level: float = 0.05,
-        max_perm=10000,
+        max_perm=1000,
     ) -> jnp.ndarray:
-        """ "Permutation with fixed number of perm iters"""
 
         # pseudo code
         pvals = []
         key_init, key_perm = random.split(key_init)
         for idx in range(max_perm):
-            Xperm = random.permutation(key_perm, X, axis=0)
+            dat = random.permutation(key_perm, dat.count.X[:, gene_idx], axis=0)
             # not sure if we want to start new instance of GLM family
-            glmstate = GLM.fit(Xperm)
-            pvals.append(glmstate.p)
+            glmstate = run_cis_GLM(dat, family, gene_idx, W)  # cis-scan
+            pvals.append(jnp.min(glmstate.p))  # take strongest signal
 
         return pvals
 
@@ -81,25 +97,28 @@ class DirectPerm(Permutation):
 class BetaPerm(Permutation):
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
+        dat: CleanDataState,
         family: ExponentialFamily,
         key_init,
-        obs_pval,
+        gene_idx: int,
+        W: int = 1000000,
         sig_level: float = 0.05,
         max_perm=1000,
     ) -> jnp.ndarray:
-
+        """
+        we perform R permutation, where R is around 50, 100, 1000
+        """
         # pseudo code
-        # DirectPerm(X, y ,family, key_init.)
-
-        return
+        # p_perm = DirectPerm(dat, family, key_init, gene_idx, W)
+        # init_k, init_n = jnp.array([1, 1])
+        # k, n = infer_beta(max_perm, p_perm, (init_k, init_n))
+        # return jnp.array([k, n])
 
 
 def infer_beta(
-    R, perm_p, init: Tuple, stepsize=1, tol=1e-3, max_iter=1000
-) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    def loglik(k: float, n: float, R: int, p: ArrayLike) -> jnp.ndarray:
+    p_perm: jnp.ndarray, init: jnp.ndarray, stepsize=1, tol=1e-3, max_iter=1000
+) -> jnp.ndarray:
+    def loglik(k: float, n: float, p: ArrayLike, R: int = 1000) -> jnp.ndarray:
         return (
             (k - 1) * jnp.sum(jnp.log(p))
             + (n - 1) * jnp.sum(jnp.log1p(-p))
@@ -110,24 +129,28 @@ def infer_beta(
     score_n_fn = grad(loglik, 1)
 
     hess_k_fn = grad(score_k_fn, 0)
-    hess_n_fn = grad(score_n_fn, 0)
+    hess_n_fn = grad(score_n_fn, 1)
 
     diff = 10000.0
     num_iters = 0
     old_k, old_n = init
 
     while diff > tol and num_iters <= max_iter:
-        new_k = old_k - stepsize * score_k_fn(old_k, old_n, R, perm_p) / hess_k_fn(
-            old_k, old_n, R, perm_p
-        )
-        new_n = old_n - stepsize * score_n_fn(old_k, old_n, R, perm_p) / hess_n_fn(
-            old_k, old_n, R, perm_p
-        )
-        diff = jnp.array([new_k, new_n]) - jnp.array([old_k, old_n])
+        new_k = old_k - stepsize * score_k_fn(
+            old_k, old_n, p_perm, max_iter
+        ) / hess_k_fn(old_k, old_n, p_perm, max_iter)
+        new_n = old_n - stepsize * score_n_fn(
+            old_k, old_n, p_perm, max_iter
+        ) / hess_n_fn(old_k, old_n, p_perm, max_iter)
+        old_lik = loglik(old_k, old_n, p_perm, R=max_iter)
+        new_lik = loglik(new_k, new_n, p_perm, R=max_iter)
+        diff = jnp.abs(old_lik - new_lik)
 
-        if diff < 0:
+        if diff < tol:
             break
 
-        old_k, old_n = new_k, new_n
+        old_k = new_k
+        old_n = new_n
+        num_iters += 1
 
-    return new_k, new_n
+    return jnp.array([new_k, new_n])
