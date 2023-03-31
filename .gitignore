@@ -14,8 +14,7 @@ __pycache__/*
 */.ipynb_checkpoints/*
 .DS_Store
 
-example/data/*.vcf.gz
-example/data/*.h5ad
+example/data/*
 
 # Project files
 .ropeproject

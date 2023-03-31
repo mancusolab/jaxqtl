@@ -6,9 +6,9 @@ from jaxqtl.io.readfile import CYVCF2, read_data
 
 config.update("jax_enable_x64", True)
 
-geno_path = "./example/data/chr22"
-pheno_path = "./example/data/Countdata.h5ad"
-covar_path = "./example/data/donor_features.tsv"
+geno_path = "../example/data/chr22"
+pheno_path = "../example/data/Countdata.h5ad"
+covar_path = "../example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 
