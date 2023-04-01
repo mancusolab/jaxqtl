@@ -78,7 +78,7 @@ class Power(Link):
         """
         jnp.power(eta, 1 / self.power - 1) / self.power
         """
-        return _grad_per_sample(self, eta)
+        return _grad_per_sample(self.inverse, eta)
 
     def tree_flatten(self):
         children = (self.power,)

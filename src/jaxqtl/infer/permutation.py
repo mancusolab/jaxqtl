@@ -3,6 +3,7 @@
 # 2) beta distribution
 
 from abc import ABC, abstractmethod
+from typing import Tuple
 
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
@@ -13,8 +14,7 @@ from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.glm_wrapper import run_cis_GLM
-from jaxqtl.io.readfile import CleanDataState
+from jaxqtl.infer.utils import cis_GLM
 
 config.update("jax_enable_x64", True)
 
@@ -29,19 +29,46 @@ class Permutation(ABC):
     @abstractmethod
     def __call__(
         self,
-        dat: CleanDataState,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
         family: ExponentialFamily,
         key_init,
         gene_idx: int,
-        W: int = 1000000,
+        cis_idx: int,
         sig_level: float = 0.05,
-        max_perm=1000,
-    ) -> jnp.ndarray:
+        max_perm_direct=1000,
+        max_perm_beta=1000,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         pass
 
     def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
+
+    def direct_perm(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
+        family: ExponentialFamily,
+        key_init,
+        cis_idx: int,
+        max_perm_direct=1000,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+
+        pvals = jnp.zeros((max_perm_direct,))
+        for idx in range(max_perm_direct):
+            key_init, key_perm = random.split(key_init)
+            y = random.permutation(key_perm, y, axis=0)
+            glmstate = cis_GLM(X, y, G, family, cis_idx)  # cis-scan
+            pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
+
+        adj_p = self.calc_adjp_naive(obs_p, pvals)
+
+        return pvals, adj_p
 
     def calc_adjp_naive(self, obs_pval: ArrayLike, pval: ArrayLike) -> Array:
         """
@@ -67,104 +94,115 @@ class Permutation(ABC):
         return cls()
 
 
-class DirectPerm(Permutation):
-    """
-    For a given cis-window with L variants, permutate phenotype for R times,
-    each time, take the strongest signal -> R samples
-    calculate adjusted p = P(perm_p < obs_p) = (r+1)/(R+1), r = # stronger signals
-    """
-
-    def __call__(
-        self,
-        dat: CleanDataState,
-        family: ExponentialFamily,
-        key_init,
-        gene_idx: int,
-        W: int = 1000000,
-        sig_level: float = 0.05,
-        max_perm=1000,
-    ) -> jnp.ndarray:
-
-        # pseudo code
-        pvals = []
-        key_init, key_perm = random.split(key_init)
-        for idx in range(max_perm):
-            dat = random.permutation(key_perm, dat.count.X[:, gene_idx], axis=0)
-            # not sure if we want to start new instance of GLM family
-            glmstate = run_cis_GLM(dat, family, gene_idx, W)  # cis-scan
-            pvals.append(jnp.min(glmstate.p))  # take strongest signal
-
-        return pvals
+# class DirectPerm(Permutation):
+#     """
+#     For a given cis-window with L variants, permutate phenotype for R times,
+#     each time, take the strongest signal -> R samples
+#     calculate adjusted p = P(perm_p < obs_p) = (r+1)/(R+1), r = # stronger signals
+#     """
+#
+#     def __call__(
+#         self,
+#         X: ArrayLike,
+#         y: ArrayLike,
+#         G: ArrayLike,
+#         obs_p: ArrayLike,
+#         family: ExponentialFamily,
+#         key_init,
+#         gene_idx: int,
+#         cis_idx: int,
+#         sig_level: float = 0.05,
+#         max_perm_direct=1000,
+#         max_perm_beta=1000,
+#     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#
+#         pvals = jnp.zeros((max_perm_direct, ))
+#         for idx in range(max_perm_direct):
+#             key_init, key_perm = random.split(key_init)
+#             y = random.permutation(key_perm, y, axis=0)
+#             glmstate = cis_GLM(X, y, G, family, cis_idx)  # cis-scan
+#             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
+#
+#         adj_p = self.calc_adjp_naive(obs_p, pvals)
+#
+#         return pvals, adj_p
 
 
 class BetaPerm(Permutation):
     def __call__(
         self,
-        dat: CleanDataState,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
         family: ExponentialFamily,
         key_init,
         gene_idx: int,
-        W: int = 1000000,
+        cis_idx: int,
         sig_level: float = 0.05,
-        max_perm=1000,
-    ) -> jnp.ndarray:
+        max_perm_direct=1000,
+        max_perm_beta=1000,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
         """
         we perform R permutation, where R is around 50, 100, 1000
         """
         # pseudo code
-        # p_perm = DirectPerm(dat, family, key_init, gene_idx, W)
-        # init_k, init_n = jnp.array([1, 1])
-        # k, n = infer_beta(max_perm, p_perm, (init_k, init_n))
-        # return jnp.array([k, n])
-
-
-def infer_beta(
-    p_perm: jnp.ndarray,
-    init: jnp.ndarray = jnp.array[1.0, 1.0],
-    stepsize=1,
-    tol=1e-3,
-    max_iter=1000,
-) -> jnp.ndarray:
-    """
-    given p values from R permutations (strongest signals),
-    use newton's method to estimate beta distribution parameters:
-    p ~ Beta(k, n)
-    """
-
-    def loglik(k: float, n: float, p: ArrayLike, R: int) -> jnp.ndarray:
-        return (
-            (k - 1) * jnp.sum(jnp.log(p))
-            + (n - 1) * jnp.sum(jnp.log1p(-p))
-            - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
+        p_perm, _ = self.direct_perm(
+            X, y, G, obs_p, family, key_init, cis_idx, max_perm_direct
         )
+        init = jnp.array([1.0, 1.0])
+        k, n = self._infer_beta(p_perm, init, max_iter=max_perm_beta)
+        adj_p = self.calc_adjp_beta(obs_p, jnp.array([k, n]))
+        return jnp.array([k, n]), adj_p, k, n
 
-    score_k_fn = grad(loglik, 0)
-    score_n_fn = grad(loglik, 1)
+    @staticmethod
+    def _infer_beta(
+        p_perm: ArrayLike,
+        init: ArrayLike,
+        stepsize=1,
+        tol=1e-3,
+        max_iter=1000,
+    ) -> jnp.ndarray:
+        """
+        given p values from R permutations (strongest signals),
+        use newton's method to estimate beta distribution parameters:
+        p ~ Beta(k, n)
+        """
 
-    hess_k_fn = grad(score_k_fn, 0)
-    hess_n_fn = grad(score_n_fn, 1)
+        def loglik(k: float, n: float, p: ArrayLike, R: int) -> jnp.ndarray:
+            return (
+                (k - 1) * jnp.sum(jnp.log(p))
+                + (n - 1) * jnp.sum(jnp.log1p(-p))
+                - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
+            )
 
-    diff = 10000.0
-    num_iters = 0
-    old_k, old_n = init
-    r = len(p_perm)
+        score_k_fn = grad(loglik, 0)
+        score_n_fn = grad(loglik, 1)
 
-    while diff > tol and num_iters <= max_iter:
-        new_k = old_k - stepsize * score_k_fn(old_k, old_n, p_perm, r) / hess_k_fn(
-            old_k, old_n, p_perm, r
-        )
-        new_n = old_n - stepsize * score_n_fn(old_k, old_n, p_perm, r) / hess_n_fn(
-            old_k, old_n, p_perm, r
-        )
-        old_lik = loglik(old_k, old_n, p_perm, r)
-        new_lik = loglik(new_k, new_n, p_perm, r)
-        diff = jnp.abs(old_lik - new_lik)
+        hess_k_fn = grad(score_k_fn, 0)
+        hess_n_fn = grad(score_n_fn, 1)
 
-        if diff < tol:
-            break
+        diff = 10000.0
+        num_iters = 0
+        old_k, old_n = init
+        r = len(p_perm)
 
-        old_k = new_k
-        old_n = new_n
-        num_iters += 1
+        while diff > tol and num_iters <= max_iter:
+            new_k = old_k - stepsize * score_k_fn(old_k, old_n, p_perm, r) / hess_k_fn(
+                old_k, old_n, p_perm, r
+            )
+            new_n = old_n - stepsize * score_n_fn(old_k, old_n, p_perm, r) / hess_n_fn(
+                old_k, old_n, p_perm, r
+            )
+            old_lik = loglik(old_k, old_n, p_perm, r)
+            new_lik = loglik(new_k, new_n, p_perm, r)
+            diff = jnp.abs(old_lik - new_lik)
 
-    return jnp.array([new_k, new_n])
+            if diff < tol:
+                break
+
+            old_k = new_k
+            old_n = new_n
+            num_iters += 1
+
+        return jnp.array([new_k, new_n])
