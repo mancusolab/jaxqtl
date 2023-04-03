@@ -21,6 +21,7 @@ def run_cis_GLM(
 ):
     X, y = _setup_X_y(dat, gene_idx)
     G = dat.genotype
+    # TODO: prepare index list in cis window
     glmres = cis_GLM(X, y, G, family, cis_idx)
 
     _, adj_p, beta_k, beta_n = perm(

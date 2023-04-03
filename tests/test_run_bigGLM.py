@@ -25,7 +25,7 @@ class smState(NamedTuple):
 
 
 geno_path = "./example/data/chr22"
-pheno_path = "./example/data/Countdata.h5ad"
+pheno_path = "./example/data/Countdata_n10.h5ad"
 covar_path = "./example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
@@ -35,7 +35,7 @@ key = random.PRNGKey(1)
 key, key_init = random.split(key, 2)
 
 glmstate, p, k, n = run_cis_GLM(
-    dat, family=Poisson(), key_init=key_init, cis_idx=20, max_perm_direct=50
+    dat, family=Poisson(), key_init=key_init, cis_idx=100, max_perm_direct=100
 )
 
 # def run_cis_GLM_sm(dat, gene_idx=0):

@@ -64,20 +64,20 @@ def _update_X(X: ArrayLike, G: ArrayLike, var_idx: int) -> jnp.ndarray:
 
 
 def cis_GLM(
-    X: ArrayLike, y: ArrayLike, G: ArrayLike, family: ExponentialFamily, cis_window
+    X: ArrayLike, y: ArrayLike, G: ArrayLike, family: ExponentialFamily, cis_list
 ):
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
 
-    all_beta = jnp.zeros((cis_window,))
-    all_se = jnp.zeros((cis_window,))
-    all_pval = jnp.zeros((cis_window,))
-    all_num_iters = jnp.zeros((cis_window,))
-    all_converged = jnp.zeros((cis_window,))
+    all_beta = jnp.zeros((cis_list,))
+    all_se = jnp.zeros((cis_list,))
+    all_pval = jnp.zeros((cis_list,))
+    all_num_iters = jnp.zeros((cis_list,))
+    all_converged = jnp.zeros((cis_list,))
 
-    for idx in range(cis_window):
+    for idx in range(cis_list):
         X = X.at[:, 1].set(G[:, idx])
         glmstate = GLM(
             X=X,
