@@ -1,48 +1,96 @@
-# import genomicranges
-from typing import Tuple
+from typing import List, NamedTuple, Tuple
 
+# import genomicranges
 import pandas as pd
 
 from jax import numpy as jnp
-from jax._src.basearray import ArrayLike
+
+# from jax._src.basearray import ArrayLike
+from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.glm import GLM, GLMState
+from jaxqtl.infer.glm import GLM
 from jaxqtl.io.readfile import CleanDataState
 
 
-# TODO: find strand of imputed variant
-# TODO: use which gene database, eg. emsembl? (onek1k has this identifier)
-def cis_window_cutter(W, gene_start, gene_end, var_list):
+class CisGLMState(NamedTuple):
+    beta: jnp.ndarray
+    se: jnp.ndarray
+    p: jnp.ndarray
+    num_iters: jnp.ndarray
+    converged: jnp.ndarray
+    var: List
+
+
+def cis_window_cutter(G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, W: int):
     """
     return variant list in cis for given gene
+    Map is a pandas data frame
+
+    plink bim file is 1-based
+    the map file is hg19,
+    emsemble use 1-based
+    vcf file is one-based
+
+    gene_name = 'ENSG00000250479'
     """
-    gene_info = "./example/data/list_genes_qc.all.txt"
-    df = pd.read_csv(gene_info, delimiter="\t")
-    df = df[
-        [
-            "chr",
-            "ensembl.start",
-            "ensembl.end",
-            "ensembl.strand",
-            "name",
-            "ensembl.ENSG",
-        ]
+    gene_info = "./example/data/ensembl_allgenes.txt"
+    gene_map = pd.read_csv(gene_info, delimiter="\t")
+    gene_map.columns = [
+        "chr",
+        "gene_start",
+        "gene_end",
+        "symbol",
+        "tss_start",
+        "strand",
+        "gene_type",
+        "ensemble_id",
+        "refseq_id",
     ]
+    gene_map["tss_left_end"] = gene_map["tss_start"] - W  # it's ok to be negative
+    gene_map["tss_right_end"] = gene_map["tss_start"] + W  # it's ok to be negative
+
+    # gene_map = gene_map[
+    #     [
+    #         "chr",
+    #         "tss_left_end",
+    #         "tss_right_end",
+    #         "strand",
+    #         "ensemble_id",
+    #     ]
+    # ]
     # format it as: seqnames, starts, end, strand
-    df.columns = ["seqnames", "starts", "ends", "old_strand", "symbol", "ensembl_id"]
-    gr_strand = ["+", "+", "-", "-", "*", "*", "*"]
-    df_strand = ["1", "1|1", "-1", "-1|-1", "-1|1", "1|-1", "1|1|-1"]
+    # gene_map.columns = ["seqnames", "starts", "ends", "strand", "ensembl_id"]
 
-    df["strand"] = df["old_strand"].replace(df_strand, gr_strand)
+    gr_strand = ["+", "-"]
+    df_strand = [1, -1]
 
-    # gr = genomicranges.fromPandas(df)  # convert to gr object
+    gene_map["strand"] = gene_map["strand"].replace(df_strand, gr_strand)
 
-    return
+    query = gene_map[gene_map.ensemble_id == gene_name]
+    starts_min = query["tss_left_end"].min()
+    starts_max = query["tss_right_end"].max()
+
+    cis_var_info = var_info.loc[
+        (var_info["pos"] >= starts_min) & (var_info["pos"] <= starts_max)
+    ]
+
+    # https://biocpy.github.io/GenomicRanges/
+    # gene_map_gr = genomicranges.fromPandas(gene_map)  # convert to gr object
+
+    # remove snps not in genotype matrix
+    cis_list = cis_var_info["ID"]
+    cis_list = cis_list[cis_list.isin(G.columns)]
+
+    return cis_list.to_list()[0:100]
 
 
-def _setup_X_y(dat: CleanDataState, gene_idx: int) -> Tuple[jnp.ndarray, jnp.ndarray]:
-    G = dat.genotype  # n x p variants
+def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    """
+    prepare allocation for X and y
+    example: gene_name = 'ENSG00000030582'
+    """
+    G = dat.genotype  # n x p variants data frame
     covar = dat.covar
     nobs, _ = G.shape
     num_params = covar.shape[1] + 2  # covariate features + one SNP + intercept
@@ -51,34 +99,33 @@ def _setup_X_y(dat: CleanDataState, gene_idx: int) -> Tuple[jnp.ndarray, jnp.nda
     Xmat = jnp.ones((nobs, num_params))
     Xmat = Xmat.at[:, 2:].set(covar)
 
-    ycount = dat.count.X[:, gene_idx].astype("float64")
+    # get count vector for this gene
+    ycount = dat.count.X[:, dat.count.var.index == gene_name].astype("float64")
 
     return Xmat, ycount
 
 
-def _update_X(X: ArrayLike, G: ArrayLike, var_idx: int) -> jnp.ndarray:
-    """ "
-    create design matrix for a variant, i.e. replace variant column
-    """
-    return X.at[:, 1].set(G[:, var_idx])
-
-
 def cis_GLM(
-    X: ArrayLike, y: ArrayLike, G: ArrayLike, family: ExponentialFamily, cis_list
+    X: ArrayLike,
+    y: ArrayLike,
+    G: pd.DataFrame,
+    family: ExponentialFamily,
+    cis_list: List,
 ):
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
+    cis_num = len(cis_list)
 
-    all_beta = jnp.zeros((cis_list,))
-    all_se = jnp.zeros((cis_list,))
-    all_pval = jnp.zeros((cis_list,))
-    all_num_iters = jnp.zeros((cis_list,))
-    all_converged = jnp.zeros((cis_list,))
+    all_beta = jnp.zeros((cis_num,))
+    all_se = jnp.zeros((cis_num,))
+    all_pval = jnp.zeros((cis_num,))
+    all_num_iters = jnp.zeros((cis_num,))
+    all_converged = jnp.zeros((cis_num,))
 
-    for idx in range(cis_list):
-        X = X.at[:, 1].set(G[:, idx])
+    for idx in range(len(cis_list)):
+        X = X.at[:, 1].set(G[cis_list[idx]])
         glmstate = GLM(
             X=X,
             y=y,
@@ -93,4 +140,6 @@ def cis_GLM(
         all_num_iters = all_num_iters.at[idx].set(glmstate.num_iters)
         all_converged = all_converged.at[idx].set(glmstate.converged)
 
-    return GLMState(all_beta, all_se, all_pval, all_num_iters, all_converged)
+    return CisGLMState(
+        all_beta, all_se, all_pval, all_num_iters, all_converged, cis_list
+    )

@@ -5,6 +5,8 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
+import pandas as pd
+
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, lax, random
@@ -34,11 +36,10 @@ class Permutation(ABC):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: ArrayLike,
+        G: pd.DataFrame,
         obs_p: ArrayLike,
         family: ExponentialFamily,
         key_init,
-        gene_idx: int,
         cis_list: List,
         sig_level: float = 0.05,
         max_perm_direct=1000,
@@ -54,11 +55,11 @@ class Permutation(ABC):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: ArrayLike,
+        G: pd.DataFrame,
         obs_p: ArrayLike,
         family: ExponentialFamily,
         key_init,
-        cis_idx: List,
+        cis_list: List,
         max_perm_direct=1000,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
 
@@ -66,7 +67,7 @@ class Permutation(ABC):
         for idx in range(max_perm_direct):
             key_init, key_perm = random.split(key_init)
             y = random.permutation(key_perm, y, axis=0)
-            glmstate = cis_GLM(X, y, G, family, cis_idx)  # cis-scan
+            glmstate = cis_GLM(X, y, G, family, cis_list)  # cis-scan
             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
 
         adj_p = self.calc_adjp_naive(obs_p, pvals)
@@ -102,11 +103,10 @@ class BetaPerm(Permutation):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: ArrayLike,
+        G: pd.DataFrame,
         obs_p: ArrayLike,
         family: ExponentialFamily,
         key_init,
-        gene_idx: int,
         cis_list: List,
         sig_level: float = 0.05,
         max_perm_direct=1000,

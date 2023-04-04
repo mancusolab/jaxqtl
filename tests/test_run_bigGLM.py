@@ -35,7 +35,11 @@ key = random.PRNGKey(1)
 key, key_init = random.split(key, 2)
 
 glmstate, p, k, n = run_cis_GLM(
-    dat, family=Poisson(), key_init=key_init, cis_idx=100, max_perm_direct=100
+    dat,
+    family=Poisson(),
+    gene_name="ENSG00000250479",
+    key_init=key_init,
+    max_perm_direct=100,
 )
 
 # def run_cis_GLM_sm(dat, gene_idx=0):

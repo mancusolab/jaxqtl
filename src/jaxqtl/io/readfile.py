@@ -17,14 +17,9 @@ pd.set_option("display.max_rows", 100000)
 
 
 class PlinkState(NamedTuple):
-    bed: np.ndarray  # need filtering and sorting afterwards
+    bed: np.ndarray
     bim: pd.DataFrame
     fam: pd.DataFrame
-
-
-class RawDataState(NamedTuple):
-    genotype: jnp.ndarray
-    count: AnnData
 
 
 class CleanDataState(NamedTuple):
@@ -32,9 +27,10 @@ class CleanDataState(NamedTuple):
     count: filtered cells and genes for given cell type, contains sample features
     """
 
-    genotype: jnp.ndarray
-    count: AnnData
-    covar: jnp.ndarray
+    genotype: pd.DataFrame  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
+    var_info: pd.DataFrame
+    count: AnnData  # nxG for one cell type, count.var has gene names
+    covar: jnp.ndarray  # nxcovar, covariates for the same individuals
 
 
 @register_pytree_node_class
@@ -119,14 +115,26 @@ class CYVCF2(IO):
 
         vcf.close()
 
-        var_info = pd.DataFrame(var_list, columns=["chrom", "snp", "pos", "a0", "a1"])
-
-        # convert to REF dose
-        # genotype = 2 - genotype
-
-        # check_values = nobs * num_var == np.sum(np.isin(genotype, [0, 1, 2]))
+        var_info = pd.DataFrame(
+            var_list, columns=["chrom", "chr_pos", "pos", "alt", "ref"]
+        )
+        var_info["ID"] = var_info.chr_pos + ":" + var_info.ref + ":" + var_info.alt
 
         genotype = pd.DataFrame(genotype.T).set_index([vcf.samples])
+        genotype.columns = var_info.ID.values
+
+        # drop multi-allelic SNPs: not sure if need do this
+        var_info_nodup = var_info.drop_duplicates(["chr_pos", "ref"], keep=False)
+
+        # drop SNPs in genotype but not in var_info (only bi-allelic)
+        genotype = genotype.drop(
+            columns=list(set(genotype.columns) - set(var_info_nodup.ID.values))
+        )
+
+        # check order
+        # allsorted = np.sum(genotype.columns == var_info_nodup.ID) == genotype.shape[1]
+        # convert to REF dose
+        # genotype = 2 - genotype
 
         return PlinkState(genotype, var_info, sample_info)
 
@@ -199,20 +207,21 @@ def read_data(
     """
     genotype, var_info, sample_info = file_type(geno_path)
     covar = pd.read_csv(covar_path, delimiter="\t")  # use donor_id
+    covar = covar.set_index("donor_id")
 
-    sample_info["ro_rm"] = range(len(sample_info))
-    sample_info.set_index("iid", inplace=True)
-    covar.set_index("donor_id", inplace=True)
-    X = pd.merge(sample_info, covar, left_index=True, right_index=True)  # inner join
-    # dat.obs["sex"] = np.where(dat.obs["sex"] == "female", 1, 0)
+    # inner join and keep the order of left df
+    # X = pd.merge(sample_info, covar, left_index=True, right_index=True)  # inner join
 
     dat = sc.read_h5ad(pheno_path)
     count = process_count(dat, cell_type=cell_type)
     donor_id = count.obs.donor_id.values
 
     # filter genotype and covariates, ordered?
-    X = X.filter(items=donor_id, axis=0)
     genotype = genotype.filter(items=donor_id, axis=0)
     covar = covar.filter(items=donor_id, axis=0)
 
-    return CleanDataState(jnp.asarray(genotype), count, jnp.asarray(covar))
+    check_genotype_order = np.sum(genotype.index == donor_id) == len(donor_id)
+    check_covar_order = np.sum(covar.index == donor_id) == len(donor_id)
+
+    if check_genotype_order and check_covar_order:
+        return CleanDataState(genotype, var_info, count, jnp.asarray(covar))
