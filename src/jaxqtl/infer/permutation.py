@@ -5,20 +5,17 @@
 from abc import ABC, abstractmethod
 from typing import List, Tuple
 
-import pandas as pd
+from jaxlib.xla_extension import ArrayImpl
 
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import grad, lax, random
-from jax.config import config
 from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.utils import cis_scan
-
-config.update("jax_enable_x64", True)
 
 
 @register_pytree_node_class
@@ -36,10 +33,11 @@ class Permutation(ABC):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: pd.DataFrame,
+        G: ArrayLike,
+        bim: List,
         obs_p: ArrayLike,
         family: ExponentialFamily,
-        key_init,
+        key_init: ArrayImpl,
         cis_list: List,
         sig_level: float = 0.05,
         max_perm_direct=1000,
@@ -55,10 +53,11 @@ class Permutation(ABC):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: pd.DataFrame,
+        G: ArrayLike,
+        bim: List,
         obs_p: ArrayLike,
         family: ExponentialFamily,
-        key_init,
+        key_init: ArrayImpl,
         cis_list: List,
         max_perm_direct=1000,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -67,7 +66,7 @@ class Permutation(ABC):
         for idx in range(max_perm_direct):
             key_init, key_perm = random.split(key_init)
             y = random.permutation(key_perm, y, axis=0)
-            glmstate = cis_scan(X, y, G, family, cis_list)  # cis-scan
+            glmstate = cis_scan(X, y, G, bim, family, cis_list)  # cis-scan
             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
 
         adj_p = self._calc_adjp_naive(obs_p, pvals)
@@ -96,7 +95,8 @@ class Permutation(ABC):
 #             self,
 #             X: ArrayLike,
 #             y: ArrayLike,
-#             G: pd.DataFrame,
+#             G: ArrayLike,
+#             bim: List,
 #             obs_p: ArrayLike,
 #             family: ExponentialFamily,
 #             key_init,
@@ -130,10 +130,11 @@ class BetaPerm(Permutation):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        G: pd.DataFrame,
+        G: ArrayLike,
+        bim: List,
         obs_p: ArrayLike,
         family: ExponentialFamily,
-        key_init,
+        key_init: ArrayImpl,
         cis_list: List,
         sig_level: float = 0.05,
         max_direct_perm=1000,
@@ -148,7 +149,7 @@ class BetaPerm(Permutation):
             adjusted p value for lead SNP
         """
         _, p_perm = self.direct_perm(
-            X, y, G, obs_p, family, key_init, cis_list, max_direct_perm
+            X, y, G, bim, obs_p, family, key_init, cis_list, max_direct_perm
         )
         init = jnp.array([1.0, 1.0])
         k, n, converged = self._infer_beta(p_perm, init, max_iter=max_iter_beta)

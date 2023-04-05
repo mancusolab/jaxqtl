@@ -4,8 +4,6 @@ from typing import List, NamedTuple, Tuple
 import pandas as pd
 
 from jax import numpy as jnp
-
-# from jax._src.basearray import ArrayLike
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -22,9 +20,7 @@ class CisGLMState(NamedTuple):
     var: List
 
 
-def cis_window_cutter(
-    G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, window: int
-):
+def _cis_window_cutter(gene_name: str, var_info: pd.DataFrame, window: int) -> List:
     """
     return variant list in cis for given gene
     Map is a pandas data frame
@@ -58,6 +54,7 @@ def cis_window_cutter(
 
     gene_map["strand"] = gene_map["strand"].replace(df_strand, gr_strand)
 
+    # TODO: need check if gene exist in both strand
     query = gene_map[gene_map.ensemble_id == gene_name]
     starts_min = query["tss_left_end"].min()
     starts_max = query["tss_right_end"].max()
@@ -78,7 +75,7 @@ def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.nd
     example: gene_name = 'ENSG00000030582'
     """
     G = dat.genotype  # n x p variants data frame
-    covar = dat.covar
+    covar = jnp.asarray(dat.covar)
     nobs, _ = G.shape
     num_params = covar.shape[1] + 2  # covariate features + one SNP + intercept
 
@@ -95,10 +92,11 @@ def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.nd
 def cis_scan(
     X: ArrayLike,
     y: ArrayLike,
-    G: pd.DataFrame,
+    G: ArrayLike,
+    bim: List,
     family: ExponentialFamily,
     cis_list: List,
-):
+) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
@@ -112,7 +110,7 @@ def cis_scan(
     all_converged = jnp.zeros((cis_num,))
 
     for idx in range(len(cis_list)):
-        X = X.at[:, 1].set(G[cis_list[idx]])
+        X = X.at[:, 1].set(G[:, bim.index(cis_list[idx])])
         glmstate = GLM(
             X=X,
             y=y,

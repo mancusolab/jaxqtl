@@ -69,7 +69,7 @@ class GLM:
         self.solver = solver
         self.init = init if init is not None else family.init_eta(self.y)
 
-    def WaldTest(self) -> Tuple[Array, Array, int]:
+    def WaldTest(self) -> Tuple[jnp.ndarray, jnp.ndarray, int]:
         """
         beta_MLE ~ N(beta, I^-1), for large sample size
         """
@@ -83,13 +83,13 @@ class GLM:
 
         return TS, pval, df
 
-    def sumstats(self):
+    def sumstats(self) -> jnp.ndarray:
         _, _, weight = self.family.calc_weight(self.X, self.y, self.eta)
         infor = (self.X * weight).T @ self.X
         beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
         return beta_se
 
-    def fit(self):
+    def fit(self) -> GLMState:
         beta, self.n_iter, self.converged = irls(
             self.X, self.y, self.family, self.solver, self.init, self.maxiter, self.tol
         )
@@ -101,7 +101,7 @@ class GLM:
 
         return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
 
-    def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> Array:
+    def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> jnp.ndarray:
         return jnp.square(y - mu)
 
     def __str__(self) -> str:

@@ -11,7 +11,7 @@ from .solve import LinearSolve
 class IRLSState(NamedTuple):
     beta: jnp.ndarray
     num_iters: int
-    converged: bool
+    converged: jnp.ndarray
 
 
 @partial(jax.jit, static_argnames=["max_iter", "tol"])

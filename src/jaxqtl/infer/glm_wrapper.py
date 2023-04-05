@@ -2,7 +2,7 @@ from jax import numpy as jnp
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.permutation import BetaPerm, Permutation
-from jaxqtl.infer.utils import _setup_X_y, cis_scan, cis_window_cutter
+from jaxqtl.infer.utils import _cis_window_cutter, _setup_X_y, cis_scan
 from jaxqtl.io.readfile import CleanDataState
 
 
@@ -24,16 +24,20 @@ def map_cis(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
+    # convert df to jnp.array
     X, y = _setup_X_y(dat, gene_name)
-    G = dat.genotype
-    cis_list = cis_window_cutter(G, gene_name, dat.var_info, window)
-    cisglmstate = cis_scan(X, y, G, family, cis_list)
+    G = jnp.asarray(dat.genotype)
+    bim = dat.bim.ID.to_list()
+
+    cis_list = _cis_window_cutter(gene_name, dat.bim, window)
+    cisglmstate = cis_scan(X, y, G, bim, family, cis_list)
 
     # TODO: need write direct perm as child class
     adj_p, beta_res = perm(
         X,
         y,
         G,
+        bim,
         jnp.min(cisglmstate.p),
         family,
         key_init,

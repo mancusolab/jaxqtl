@@ -4,17 +4,15 @@ import numpy as np
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
+from utils import assert_array_eq
 
 from jax import random
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.glm_wrapper import map_cis
-from jaxqtl.infer.utils import _setup_X_y, cis_window_cutter
-from jaxqtl.io.readfile import CYVCF2, CleanDataState, read_data
-
-# from utils import assert_beta_array_eq
-
+from jaxqtl.infer.utils import _cis_window_cutter, _setup_X_y
+from jaxqtl.io.readfile import CleanDataState, Plink, read_data
 
 config.update("jax_enable_x64", True)
 
@@ -31,19 +29,21 @@ covar_path = "./example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 cell_type = "CD14-positive monocyte"
-dat = read_data(CYVCF2(), geno_path, pheno_path, covar_path, cell_type)
+dat = read_data(
+    Plink(), geno_path, pheno_path, covar_path, cell_type
+)  # Plink(), CYVCF2()
 key = random.PRNGKey(1)
 key, key_init = random.split(key, 2)
 
 
 # TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
-glmstate, p, k, n = map_cis(
-    dat,
-    family=Poisson(),
-    gene_name="ENSG00000250479",
-    key_init=key_init,
-    max_perm_direct=100,
-)
+# glmstate, p, k, n = map_cis(
+#     dat,
+#     family=Poisson(),
+#     gene_name="ENSG00000250479",
+#     key_init=key_init,
+#     max_perm_direct=0,
+# )
 
 
 def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 1000000):
@@ -51,7 +51,7 @@ def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 1000000):
     X, y = _setup_X_y(dat, gene_name)
     G = dat.genotype
     y = np.array(y)
-    cis_list = cis_window_cutter(G, gene_name, dat.var_info, window)
+    cis_list = _cis_window_cutter(gene_name, dat.bim, window)
     cis_num = len(cis_list)
 
     all_beta = np.zeros((cis_num,))
@@ -71,11 +71,18 @@ def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 1000000):
 
 
 # TODO: not sure why some estimates are very different
-smstate = run_cis_GLM_sm(dat, gene_name="ENSG00000250479")
+# smstate = run_cis_GLM_sm(dat, gene_name="ENSG00000250479")
 
 
-# def test_run_cis_GLM():
-#     # 940 samples x 12733 genes
-#     smstate = run_cis_GLM_sm(dat)
-#     glmstate = run_cis_GLM(dat, family=Poisson())
-#     assert_beta_array_eq(glmstate, smstate)
+def test_run_cis_GLM():
+    # 940 samples x 12733 genes
+    smstate = run_cis_GLM_sm(dat, gene_name="ENSG00000250479")
+    glmstate, p, k, n = map_cis(
+        dat,
+        family=Poisson(),
+        gene_name="ENSG00000250479",
+        key_init=key_init,
+        max_perm_direct=0,
+    )
+
+    assert_array_eq(glmstate.p, smstate.p)
