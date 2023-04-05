@@ -1,8 +1,6 @@
 from typing import List, NamedTuple, Tuple
 
-# import genomicranges
-import pandas as pd
-
+import jax.lax as lax
 from jax import numpy as jnp
 from jax.typing import ArrayLike
 
@@ -20,7 +18,7 @@ class CisGLMState(NamedTuple):
     var: List
 
 
-def _cis_window_cutter(gene_name: str, var_info: pd.DataFrame, window: int) -> List:
+def _cis_window_cutter(dat: CleanDataState, chrom: str, start: int, end: int) -> List:
     """
     return variant list in cis for given gene
     Map is a pandas data frame
@@ -33,40 +31,37 @@ def _cis_window_cutter(gene_name: str, var_info: pd.DataFrame, window: int) -> L
     gene_name = 'ENSG00000250479'
     GenomicRanges example: https://biocpy.github.io/GenomicRanges/
     """
-    gene_info = "./example/data/ensembl_allgenes.txt"
-    gene_map = pd.read_csv(gene_info, delimiter="\t")
-    gene_map.columns = [
-        "chr",
-        "gene_start",
-        "gene_end",
-        "symbol",
-        "tss_start",
-        "strand",
-        "gene_type",
-        "ensemble_id",
-        "refseq_id",
-    ]
-    gene_map["tss_left_end"] = gene_map["tss_start"] - window  # it's ok to be negative
-    gene_map["tss_right_end"] = gene_map["tss_start"] + window
+    # gene_info = "./example/data/ensembl_allgenes.txt"
+    # gene_map = pd.read_csv(gene_info, delimiter="\t")
+    # gene_map.columns = [
+    #     "chr",
+    #     "gene_start",
+    #     "gene_end",
+    #     "symbol",
+    #     "tss_start",
+    #     "strand",
+    #     "gene_type",
+    #     "ensemble_id",
+    #     "refseq_id",
+    # ]
+    # gene_map["tss_left_end"] = gene_map["tss_start"] - window  # it's ok to be negative
+    # gene_map["tss_right_end"] = gene_map["tss_start"] + window
+    #
+    #
+    # # TODO: need check if gene exist in both strand
+    # query = gene_map[gene_map.ensemble_id == gene_name]
+    # starts_min = query["tss_left_end"].min()
+    # starts_max = query["tss_right_end"].max()
 
-    gr_strand = ["+", "-"]
-    df_strand = [1, -1]
-
-    gene_map["strand"] = gene_map["strand"].replace(df_strand, gr_strand)
-
-    # TODO: need check if gene exist in both strand
-    query = gene_map[gene_map.ensemble_id == gene_name]
-    starts_min = query["tss_left_end"].min()
-    starts_max = query["tss_right_end"].max()
-
+    var_info = dat.bim
     cis_var_info = var_info.loc[
-        (var_info["pos"] >= starts_min) & (var_info["pos"] <= starts_max)
+        (var_info["chrom"] == chrom)
+        & (var_info["pos"] >= start)
+        & (var_info["pos"] <= end)
     ]
 
-    # remove snps not in genotype matrix
-    cis_list = cis_var_info["ID"]
-
-    return cis_list.to_list()[0:100]
+    # return column indices
+    return dat.genotype[:, cis_var_info.i]
 
 
 def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -89,42 +84,41 @@ def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.nd
     return Xmat, ycount
 
 
+def _setup_G_y(dat: CleanDataState, gene_name: str, chrom: str, start: int, end: int):
+    G = _cis_window_cutter(dat, chrom, start, end)
+    ycount = dat.count[gene_name]
+
+    return G, ycount
+
+
 def cis_scan(
     X: ArrayLike,
-    y: ArrayLike,
     G: ArrayLike,
-    bim: List,
+    y: ArrayLike,
     family: ExponentialFamily,
-    cis_list: List,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    cis_num = len(cis_list)
 
-    all_beta = jnp.zeros((cis_num,))
-    all_se = jnp.zeros((cis_num,))
-    all_pval = jnp.zeros((cis_num,))
-    all_num_iters = jnp.zeros((cis_num,))
-    all_converged = jnp.zeros((cis_num,))
-
-    for idx in range(len(cis_list)):
-        X = X.at[:, 1].set(G[:, bim.index(cis_list[idx])])
+    def _func(carry, snp):
+        M = jnp.hstack((X, snp[:, jnp.newaxis]))
         glmstate = GLM(
-            X=X,
+            X=M,
             y=y,
             family=family,
             append=False,
-            maxiter=1000,
+            maxiter=100,
         ).fit()
+        return carry, CisGLMState(
+            beta=glmstate.beta[-1],
+            se=glmstate.se[-1],
+            p=glmstate.p[-1],
+            num_iters=glmstate.num_iters,
+            converged=glmstate.converged,
+        )
 
-        all_beta = all_beta.at[idx].set(glmstate.beta[1])
-        all_se = all_se.at[idx].set(glmstate.se[1])
-        all_pval = all_pval.at[idx].set(glmstate.p[1])
-        all_num_iters = all_num_iters.at[idx].set(glmstate.num_iters)
-        all_converged = all_converged.at[idx].set(glmstate.converged)
+    state = lax.scan(_func, 0.0, G.T)
 
-    return CisGLMState(
-        all_beta, all_se, all_pval, all_num_iters, all_converged, cis_list
-    )
+    return state

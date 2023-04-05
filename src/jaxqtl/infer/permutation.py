@@ -3,13 +3,14 @@
 # 2) beta distribution
 
 from abc import ABC, abstractmethod
-from typing import List, Tuple
+from typing import Tuple
 
-from jaxlib.xla_extension import ArrayImpl
-
+import jax.debug
 import jax.numpy as jnp
+import jax.numpy.linalg as jnla
+import jax.random as rdm
 import jax.scipy.stats as jaxstats
-from jax import grad, lax, random
+from jax import Array, grad, hessian, jit, lax, random
 from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
@@ -34,14 +35,10 @@ class Permutation(ABC):
         X: ArrayLike,
         y: ArrayLike,
         G: ArrayLike,
-        bim: List,
         obs_p: ArrayLike,
         family: ExponentialFamily,
-        key_init: ArrayImpl,
-        cis_list: List,
+        key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
-        max_perm_direct=1000,
-        max_perm_beta=1000,
     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         pass
 
@@ -49,97 +46,137 @@ class Permutation(ABC):
         super().__init_subclass__(**kwargs)
         register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
-    def direct_perm(
-        self,
-        X: ArrayLike,
-        y: ArrayLike,
-        G: ArrayLike,
-        bim: List,
-        obs_p: ArrayLike,
-        family: ExponentialFamily,
-        key_init: ArrayImpl,
-        cis_list: List,
-        max_perm_direct=1000,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-
-        pvals = jnp.zeros((max_perm_direct,))
-        for idx in range(max_perm_direct):
-            key_init, key_perm = random.split(key_init)
-            y = random.permutation(key_perm, y, axis=0)
-            glmstate = cis_scan(X, y, G, bim, family, cis_list)  # cis-scan
-            pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
-
-        adj_p = self._calc_adjp_naive(obs_p, pvals)
-
-        return adj_p, pvals
-
-    @staticmethod
-    def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> jnp.ndarray:
-        """
-        obs_pval: the strongest nominal p value
-        """
-        return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
-
+    @abstractmethod
     def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
+        pass
 
     @classmethod
     def tree_unflatten(cls, aux, children):
-        return cls()
+        return cls(*children)
 
 
-# class DirectPerm(Permutation):
-#     def __call__(
-#             self,
-#             X: ArrayLike,
-#             y: ArrayLike,
-#             G: ArrayLike,
-#             bim: List,
-#             obs_p: ArrayLike,
-#             family: ExponentialFamily,
-#             key_init,
-#             cis_list: List,
-#             sig_level: float = 0.05,
-#             max_perm_direct=1000,
-#             max_perm_beta=1000,
-#     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
-#
-#         pvals = jnp.zeros((max_perm_direct,))
-#         for idx in range(max_perm_direct):
-#             key_init, key_perm = random.split(key_init)
-#             y = random.permutation(key_perm, y, axis=0)
-#             glmstate = cis_scan(X, y, G, family, cis_list)  # cis-scan
-#             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
-#
-#         adj_p = self._calc_adjp_naive(obs_p, pvals)
-#
-#         return adj_p, pvals
-#
-#     @staticmethod
-#     def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> jnp.ndarray:
-#         """
-#         obs_pval: the strongest nominal p value
-#         """
-#         return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
+class DirectPerm(Permutation):
+    def __init__(self, max_perm_direct: int = 100):
+        self.max_perm_direct = max_perm_direct
 
-
-class BetaPerm(Permutation):
     def __call__(
         self,
         X: ArrayLike,
         y: ArrayLike,
         G: ArrayLike,
-        bim: List,
         obs_p: ArrayLike,
         family: ExponentialFamily,
-        key_init: ArrayImpl,
-        cis_list: List,
+        key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
-        max_direct_perm=1000,
-        max_iter_beta=1000,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> Tuple[Array, Array]:
+        def _func(key, x):
+            key, p_key = rdm.split(key)
+            y_p = random.permutation(p_key, y, axis=0)
+            glmstate = cis_scan(X, G, y_p, family)
+            return key, glmstate.p[-1]
+
+        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+
+        adj_p = _calc_adjp_naive(obs_p, pvals)
+
+        return adj_p, pvals
+
+    def tree_flatten(self):
+        children = (self.max_perm_direct,)
+        aux = ()
+        return children, aux
+
+
+@jit
+def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
+    """
+    obs_pval: the strongest nominal p value
+    """
+    return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
+
+
+@jit
+def infer_beta(
+    p_perm: ArrayLike,
+    init: ArrayLike,
+    stepsize=1.0,
+    tol=1e-3,
+    max_iter=100,
+) -> Tuple[Array, Array]:
+    """
+    given p values from R permutations (strongest signals),
+    use newton's method to estimate beta distribution parameters:
+    p ~ Beta(k, n)
+    """
+
+    # this -might- be sensitive to step size; if we get bad estimates due to step size
+    # we can adjust using results from https://arxiv.org/abs/2002.10060
+    def loglik(params: ArrayLike, p: ArrayLike, R: int) -> jnp.ndarray:
+        k, n = params
+        return (
+            (k - 1) * jnp.sum(jnp.log(p))
+            + (n - 1) * jnp.sum(jnp.log1p(-p))
+            - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
+        )
+
+    score_fn = grad(loglik)
+    hess_fn = hessian(loglik)
+
+    r = len(p_perm)
+
+    def body_fun(val: Tuple):
+        old_lik, diff, num_iter, old_param = val
+        direction = jnla.solve(
+            hess_fn(old_param, p_perm, r), score_fn(old_param, p_perm, r)
+        )
+        new_param = old_param - stepsize * direction
+
+        new_lik = loglik(new_param, p_perm, r)
+        diff = old_lik - new_lik
+
+        return new_lik, diff, num_iter + 1, new_param
+
+    def cond_fun(val: Tuple):
+        old_lik, diff, num_iter, old_param = val
+        cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+        return cond_l
+
+    init_tuple = (10000.0, 1000.0, 0, init)
+    lik, diff, num_iters, params = lax.while_loop(cond_fun, body_fun, init_tuple)
+    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(
+        float
+    )
+    jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
+
+    return params, jnp.asarray(converged)
+
+
+@jit
+def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
+    """
+    p_obs is a vector of nominal p value in cis window
+    """
+    k, n = params
+    p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
+
+    return p_adj
+
+
+class BetaPerm(DirectPerm):
+    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
+        self.max_iter_beta = max_iter_beta
+        super().__init__(max_perm_direct)
+
+    def __call__(  # type: ignore
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
+        family: ExponentialFamily,
+        key_init: rdm.PRNGKey,
+        sig_level: float = 0.05,
+    ) -> Tuple[Array, Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
         Estimate Beta(k,n) using Newton's gradient descent, step size = 1
@@ -148,76 +185,25 @@ class BetaPerm(Permutation):
             k, n estimates
             adjusted p value for lead SNP
         """
-        _, p_perm = self.direct_perm(
-            X, y, G, bim, obs_p, family, key_init, cis_list, max_direct_perm
+        _, p_perm = super().__call__(
+            X,
+            y,
+            G,
+            obs_p,
+            family,
+            key_init,
         )
-        init = jnp.array([1.0, 1.0])
-        k, n, converged = self._infer_beta(p_perm, init, max_iter=max_iter_beta)
-        adj_p = self._calc_adjp_beta(obs_p, jnp.array([k, n]))
-        return adj_p, jnp.array([k, n, converged])
+        init = jnp.ones(2)
+        params, converged = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
-    @staticmethod
-    def _infer_beta(
-        p_perm: ArrayLike,
-        init: ArrayLike,
-        stepsize=1,
-        tol=1e-3,
-        max_iter=1000,
-    ) -> jnp.ndarray:
-        """
-        given p values from R permutations (strongest signals),
-        use newton's method to estimate beta distribution parameters:
-        p ~ Beta(k, n)
-        """
+        adj_p = _calc_adjp_beta(obs_p, params)
 
-        def loglik(k: float, n: float, p: ArrayLike, R: int) -> jnp.ndarray:
-            return (
-                (k - 1) * jnp.sum(jnp.log(p))
-                + (n - 1) * jnp.sum(jnp.log1p(-p))
-                - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
-            )
+        return adj_p, params, converged
 
-        score_k_fn = grad(loglik, 0)
-        score_n_fn = grad(loglik, 1)
-
-        hess_k_fn = grad(score_k_fn, 0)
-        hess_n_fn = grad(score_n_fn, 1)
-
-        r = len(p_perm)
-
-        def body_fun(val: Tuple):
-            diff, num_iter, old_k, old_n = val
-            new_k = old_k - stepsize * score_k_fn(old_k, old_n, p_perm, r) / hess_k_fn(
-                old_k, old_n, p_perm, r
-            )
-            new_n = old_n - stepsize * score_n_fn(old_k, old_n, p_perm, r) / hess_n_fn(
-                old_k, old_n, p_perm, r
-            )
-            # jax.debug.breakpoint()
-            old_lik = loglik(old_k, old_n, p_perm, r)
-            new_lik = loglik(new_k, new_n, p_perm, r)
-            diff = old_lik - new_lik
-
-            return diff, num_iter + 1, new_k, new_n
-
-        def cond_fun(val: Tuple):
-            diff, num_iter, old_k, old_n = val
-            cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
-            return cond_l
-
-        init_k, init_n = init
-        init_tuple = (10000.0, 0, init_k, init_n)
-
-        diff, num_iters, new_k, new_n = lax.while_loop(cond_fun, body_fun, init_tuple)
-        converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
-
-        return jnp.array([new_k, new_n, converged])
-
-    @staticmethod
-    def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> jnp.ndarray:
-        """
-        p_obs is a vector of nominal p value in cis window
-        """
-        k, n = params
-        p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
-        return p_adj
+    def tree_flatten(self):
+        children = (
+            self.max_perm_direct,
+            self.max_iter_beta,
+        )
+        aux = ()
+        return children, aux

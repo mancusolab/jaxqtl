@@ -10,9 +10,9 @@ from jax import random
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.glm_wrapper import map_cis
-from jaxqtl.infer.utils import _cis_window_cutter, _setup_X_y
-from jaxqtl.io.readfile import CleanDataState, Plink, read_data
+from jaxqtl.infer.utils import _setup_G_y
+from jaxqtl.io.readfile import CleanDataState, PlinkReader, read_data
+from jaxqtl.map import map_cis
 
 config.update("jax_enable_x64", True)
 
@@ -30,7 +30,7 @@ covar_path = "./example/data/donor_features.tsv"
 
 cell_type = "CD14-positive monocyte"
 dat = read_data(
-    Plink(), geno_path, pheno_path, covar_path, cell_type
+    PlinkReader(), geno_path, pheno_path, covar_path, cell_type
 )  # Plink(), CYVCF2()
 key = random.PRNGKey(1)
 key, key_init = random.split(key, 2)
@@ -46,26 +46,26 @@ key, key_init = random.split(key, 2)
 # )
 
 
-def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 1000000):
+def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 500000):
 
-    X, y = _setup_X_y(dat, gene_name)
-    G = dat.genotype
-    y = np.array(y)
-    cis_list = _cis_window_cutter(gene_name, dat.bim, window)
-    cis_num = len(cis_list)
+    n, k = dat.covar.shape
+    X = np.hstack((np.ones((n, 1), dat.covar)))
+    lstart = min(0, 23765834 - window)
+    rend = 23767972 + window
+    G, y = _setup_G_y(dat, gene_name, "22", lstart, rend)
 
+    cis_num = G.shape[1]
     all_beta = np.zeros((cis_num,))
     all_se = np.zeros((cis_num,))
     all_pval = np.zeros((cis_num,))
 
-    for idx in range(len(cis_list)):
-        print(idx)
-        X = X.at[:, 1].set(G[cis_list[idx]])  # append X with genotype
-        smstate = smPoisson(y, np.array(X)).fit(disp=0, full_output=True)
+    for idx, snp in enumerate(G.T):
+        M = np.hstack((X, snp[:, np.newaxis]))
+        smstate = smPoisson(y, M).fit(disp=0, full_output=True)
 
-        all_beta[idx] = smstate.params[1]
-        all_se[idx] = smstate.bse[1]
-        all_pval[idx] = smstate.pvalues[1]
+        all_beta[idx] = smstate.params[-1]
+        all_se[idx] = smstate.bse[-1]
+        all_pval[idx] = smstate.pvalues[-1]
 
     return smState(all_beta, all_se, all_pval)
 

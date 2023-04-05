@@ -2,7 +2,7 @@
 
 from jax.config import config
 
-from jaxqtl.io.readfile import CYVCF2, read_data
+from jaxqtl.io.readfile import VCFReader, read_data
 
 config.update("jax_enable_x64", True)
 
@@ -11,7 +11,7 @@ pheno_path = "../example/data/Countdata_n10.h5ad"
 covar_path = "../example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
-dat = read_data(CYVCF2(), geno_path, pheno_path, covar_path)
+dat = read_data(VCFReader(), geno_path, pheno_path, covar_path)
 
 # # Check shape of data loaded, i.e. sample size is the same
 # def assert_sampleN_eq(Data, rtol=1e-10):

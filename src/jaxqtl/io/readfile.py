@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from typing import List, NamedTuple
+from typing import NamedTuple
 
 import decoupler as dc
 import numpy as np
@@ -9,13 +9,15 @@ from anndata._core.anndata import AnnData
 from cyvcf2 import VCF
 from pandas_plink import read_plink
 
+import jax.numpy as jnp
+from jax import Array
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 
 pd.set_option("display.max_rows", 100000)
 
 
 class PlinkState(NamedTuple):
-    genotype: pd.DataFrame
+    genotype: Array
     bim: pd.DataFrame
     fam: pd.DataFrame
 
@@ -25,7 +27,7 @@ class CleanDataState(NamedTuple):
     count: filtered cells and genes for given cell type, contains sample features
     """
 
-    genotype: pd.DataFrame  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
+    genotype: Array  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
     bim: pd.DataFrame  # variant on rows
     count: AnnData  # nxG for one cell type, count.var has gene names
     covar: pd.DataFrame  # nxcovar, covariates for the same individuals
@@ -56,7 +58,7 @@ class IO(ABC):
         return cls(*children)
 
 
-class Plink(IO):
+class PlinkReader(IO):
     """Read genotype data from plink triplets
     prefix: chr22.bed, also accept chr*.bed (read everything)
 
@@ -71,76 +73,46 @@ class Plink(IO):
 
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         bim, fam, bed = read_plink(prefix, verbose=False)
-        G = bed.compute()
+        G = jnp.asarray(bed.compute())
 
-        bim = bim.drop(labels=["cm", "i"], axis=1)  # remove unwanted columns
-        bim.columns = ["chrom", "chr_pos", "pos", "alt", "ref"]
-        bim["ID"] = bim.chr_pos + ":" + bim.ref + ":" + bim.alt
+        # TODO: add imputation etc...
 
-        genotype = pd.DataFrame(G.T, columns=bim.ID)  # sample x variants
-        genotype = genotype.set_index(fam.iid)
-
-        # drop multi-allelic SNPs: not sure if need do this
-        bim_nodup = bim.drop_duplicates(["chr_pos", "ref"], keep=False)
-
-        # drop SNPs in genotype but not in bim_nodup (only bi-allelic)
-        genotype = genotype.drop(
-            columns=list(set(genotype.columns) - set(bim_nodup.ID.values))
-        )
-        return PlinkState(genotype, bim_nodup, fam)
+        return PlinkState(G, bim, fam)
 
 
-class CYVCF2(IO):
-    def __call__(self, prefix: str) -> PlinkState:
+class VCFReader(IO):
+    def __call__(self, vcf_path: str) -> PlinkState:
         """
         need genotype: sample ID, genotype in dose values
         need number of variants
         """
-        vcf_path = prefix + ".vcf.gz"
-        varnum_path = prefix + ".numvar"
 
         # read VCF files
         vcf = VCF(vcf_path, gts012=True)  # can add samples=[]
         fam = pd.DataFrame(vcf.samples).rename(columns={0: "iid"})  # individuals
-        nobs = len(vcf.samples)
 
-        # use "bcftools stats file.vcf > file.stats" to count this
-        # need a file to provide number of variants
-        num_var = pd.read_csv(varnum_path, header=None)
-        num_var = int(num_var[0].values)  # convert to int
+        genotype = []
+        bim_list = []
 
-        genotype = np.ones((num_var, nobs)) * -9
-        bim_list = [[]] * num_var  # type: List[List]
-
-        idx = 0
-        for var in vcf:
-            genotype[idx] = var.gt_types
+        for idx, var in enumerate(vcf):
+            genotype.append(var.gt_types)
             # var.ALT is a list of alternative allele
-            bim_list[idx] = [var.CHROM, var.ID, var.POS, var.ALT[0], var.REF]
-            idx += 1
+            bim_list.append([var.CHROM, var.ID, 0.0, var.POS, var.ALT[0], var.REF, idx])
 
         vcf.close()
 
-        bim = pd.DataFrame(bim_list, columns=["chrom", "chr_pos", "pos", "alt", "ref"])
-        bim["ID"] = bim.chr_pos + ":" + bim.ref + ":" + bim.alt
+        # convert to jax array
+        genotype = jnp.asarray(genotype)
 
-        genotype = pd.DataFrame(genotype.T).set_index([vcf.samples])
-        genotype.columns = bim.ID.values
-
-        # drop multi-allelic SNPs: not sure if need do this
-        bim_nodup = bim.drop_duplicates(["chr_pos", "ref"], keep=False)
-
-        # drop SNPs in genotype but not in var_info (only bi-allelic)
-        genotype = genotype.drop(
-            columns=list(set(genotype.columns) - set(bim_nodup.ID.values))
-        )
+        #  chrom        snp       cm     pos a0 a1  i
+        bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "pos", "alt", "ref"])
 
         # check order
         # allsorted = np.sum(genotype.columns == var_info_nodup.ID) == genotype.shape[1]
         # convert to REF dose
         # genotype = 2 - genotype
 
-        return PlinkState(genotype, bim_nodup, fam)
+        return PlinkState(genotype, bim, fam)
 
 
 def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> AnnData:
