@@ -22,7 +22,9 @@ class CisGLMState(NamedTuple):
     var: List
 
 
-def cis_window_cutter(G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, W: int):
+def cis_window_cutter(
+    G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, window: int
+):
     """
     return variant list in cis for given gene
     Map is a pandas data frame
@@ -33,6 +35,7 @@ def cis_window_cutter(G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, W
     vcf file is one-based
 
     gene_name = 'ENSG00000250479'
+    GenomicRanges example: https://biocpy.github.io/GenomicRanges/
     """
     gene_info = "./example/data/ensembl_allgenes.txt"
     gene_map = pd.read_csv(gene_info, delimiter="\t")
@@ -47,20 +50,8 @@ def cis_window_cutter(G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, W
         "ensemble_id",
         "refseq_id",
     ]
-    gene_map["tss_left_end"] = gene_map["tss_start"] - W  # it's ok to be negative
-    gene_map["tss_right_end"] = gene_map["tss_start"] + W  # it's ok to be negative
-
-    # gene_map = gene_map[
-    #     [
-    #         "chr",
-    #         "tss_left_end",
-    #         "tss_right_end",
-    #         "strand",
-    #         "ensemble_id",
-    #     ]
-    # ]
-    # format it as: seqnames, starts, end, strand
-    # gene_map.columns = ["seqnames", "starts", "ends", "strand", "ensembl_id"]
+    gene_map["tss_left_end"] = gene_map["tss_start"] - window  # it's ok to be negative
+    gene_map["tss_right_end"] = gene_map["tss_start"] + window
 
     gr_strand = ["+", "-"]
     df_strand = [1, -1]
@@ -75,12 +66,8 @@ def cis_window_cutter(G: pd.DataFrame, gene_name: str, var_info: pd.DataFrame, W
         (var_info["pos"] >= starts_min) & (var_info["pos"] <= starts_max)
     ]
 
-    # https://biocpy.github.io/GenomicRanges/
-    # gene_map_gr = genomicranges.fromPandas(gene_map)  # convert to gr object
-
     # remove snps not in genotype matrix
     cis_list = cis_var_info["ID"]
-    cis_list = cis_list[cis_list.isin(G.columns)]
 
     return cis_list.to_list()[0:100]
 
@@ -105,7 +92,7 @@ def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.nd
     return Xmat, ycount
 
 
-def cis_GLM(
+def cis_scan(
     X: ArrayLike,
     y: ArrayLike,
     G: pd.DataFrame,

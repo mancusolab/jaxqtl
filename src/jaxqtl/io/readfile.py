@@ -136,7 +136,7 @@ class CYVCF2(IO):
         # convert to REF dose
         # genotype = 2 - genotype
 
-        return PlinkState(genotype, var_info, sample_info)
+        return PlinkState(genotype, var_info_nodup, sample_info)
 
 
 def process_count(dat: AnnData, cell_type: str = "CD14-positive monocyte") -> AnnData:
@@ -193,8 +193,8 @@ def read_data(
     covar_path: Optional[str],
     cell_type: str = "CD14-positive monocyte",
 ):
-    """
-    Genotype data: plink file
+    """Read genotype, phenotype and covariates, including interaction terms
+    Genotype data: plink triplet, vcf
     pheno_path: h5ad file path, including covariates
     covar_path: covariates, must be coded in numerical forms
 

@@ -9,14 +9,14 @@ import pandas as pd
 
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array, grad, lax, random
+from jax import grad, lax, random
 from jax.config import config
 from jax.scipy.special import gammaln
 from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.utils import cis_GLM
+from jaxqtl.infer.utils import cis_scan
 
 config.update("jax_enable_x64", True)
 
@@ -44,7 +44,7 @@ class Permutation(ABC):
         sig_level: float = 0.05,
         max_perm_direct=1000,
         max_perm_beta=1000,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
         pass
 
     def __init_subclass__(cls, **kwargs):
@@ -67,26 +67,19 @@ class Permutation(ABC):
         for idx in range(max_perm_direct):
             key_init, key_perm = random.split(key_init)
             y = random.permutation(key_perm, y, axis=0)
-            glmstate = cis_GLM(X, y, G, family, cis_list)  # cis-scan
+            glmstate = cis_scan(X, y, G, family, cis_list)  # cis-scan
             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
 
-        adj_p = self.calc_adjp_naive(obs_p, pvals)
+        adj_p = self._calc_adjp_naive(obs_p, pvals)
 
-        return pvals, adj_p
+        return adj_p, pvals
 
-    def calc_adjp_naive(self, obs_pval: ArrayLike, pval: ArrayLike) -> Array:
+    @staticmethod
+    def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> jnp.ndarray:
         """
         obs_pval: the strongest nominal p value
         """
         return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
-
-    def calc_adjp_beta(self, p_obs: ArrayLike, params: ArrayLike) -> Array:
-        """
-        p_obs is a vector of nominal p value in cis window
-        """
-        k, n = params
-        p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
-        return p_adj
 
     def tree_flatten(self):
         children = ()
@@ -96,6 +89,40 @@ class Permutation(ABC):
     @classmethod
     def tree_unflatten(cls, aux, children):
         return cls()
+
+
+# class DirectPerm(Permutation):
+#     def __call__(
+#             self,
+#             X: ArrayLike,
+#             y: ArrayLike,
+#             G: pd.DataFrame,
+#             obs_p: ArrayLike,
+#             family: ExponentialFamily,
+#             key_init,
+#             cis_list: List,
+#             sig_level: float = 0.05,
+#             max_perm_direct=1000,
+#             max_perm_beta=1000,
+#     ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+#
+#         pvals = jnp.zeros((max_perm_direct,))
+#         for idx in range(max_perm_direct):
+#             key_init, key_perm = random.split(key_init)
+#             y = random.permutation(key_perm, y, axis=0)
+#             glmstate = cis_scan(X, y, G, family, cis_list)  # cis-scan
+#             pvals.at[idx].set(jnp.min(glmstate.p))  # take strongest signal
+#
+#         adj_p = self._calc_adjp_naive(obs_p, pvals)
+#
+#         return adj_p, pvals
+#
+#     @staticmethod
+#     def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> jnp.ndarray:
+#         """
+#         obs_pval: the strongest nominal p value
+#         """
+#         return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
 
 
 class BetaPerm(Permutation):
@@ -109,20 +136,24 @@ class BetaPerm(Permutation):
         key_init,
         cis_list: List,
         sig_level: float = 0.05,
-        max_perm_direct=1000,
-        max_perm_beta=1000,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray, jnp.ndarray, jnp.ndarray]:
+        max_direct_perm=1000,
+        max_iter_beta=1000,
+    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+        """Perform permutation to estimate beta distribution parameters
+        Repeat direct_perm for max_direct_perm times --> vector of lead p values
+        Estimate Beta(k,n) using Newton's gradient descent, step size = 1
+
+        Returns:
+            k, n estimates
+            adjusted p value for lead SNP
         """
-        we perform R permutation, where R is around 50, 100, 1000
-        """
-        # pseudo code
-        p_perm, _ = self.direct_perm(
-            X, y, G, obs_p, family, key_init, cis_list, max_perm_direct
+        _, p_perm = self.direct_perm(
+            X, y, G, obs_p, family, key_init, cis_list, max_direct_perm
         )
         init = jnp.array([1.0, 1.0])
-        k, n, converged = self._infer_beta(p_perm, init, max_iter=max_perm_beta)
-        adj_p = self.calc_adjp_beta(obs_p, jnp.array([k, n]))
-        return jnp.array([k, n]), adj_p, k, n
+        k, n, converged = self._infer_beta(p_perm, init, max_iter=max_iter_beta)
+        adj_p = self._calc_adjp_beta(obs_p, jnp.array([k, n]))
+        return adj_p, jnp.array([k, n, converged])
 
     @staticmethod
     def _infer_beta(
@@ -180,3 +211,12 @@ class BetaPerm(Permutation):
         converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
         return jnp.array([new_k, new_n, converged])
+
+    @staticmethod
+    def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> jnp.ndarray:
+        """
+        p_obs is a vector of nominal p value in cis window
+        """
+        k, n = params
+        p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
+        return p_adj
