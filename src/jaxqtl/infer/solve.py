@@ -1,5 +1,6 @@
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 
+import equinox as eqx
 import jaxopt.linear_solve as ls
 
 import jax.numpy as jnp
@@ -10,15 +11,8 @@ from jax.typing import ArrayLike
 
 from ..families.distribution import ExponentialFamily
 
-# from abc import ABCMeta, abstractmethod
-# import equinox as eqx
 
-
-# from jax.tree_util import register_pytree_node, register_pytree_node_class
-
-
-# @register_pytree_node_class
-class LinearSolve(ABC):
+class LinearSolve(eqx.Module, metaclass=ABCMeta):
     """
     Define parent class for all solvers
     eta = X @ beta, the linear component
@@ -36,11 +30,6 @@ class LinearSolve(ABC):
 
 
 class QRSolve(LinearSolve):
-    # X: ArrayLike
-    # y: ArrayLike
-    # eta: ArrayLike
-    # family: ExponentialFamily
-
     def __call__(
         self,
         X: ArrayLike,
@@ -62,11 +51,6 @@ class QRSolve(LinearSolve):
 
 
 class CholeskySolve(LinearSolve):
-    # X: ArrayLike
-    # y: ArrayLike
-    # eta: ArrayLike
-    # family: ExponentialFamily
-
     def __call__(
         self,
         X: jnp.ndarray,
@@ -94,11 +78,6 @@ class CholeskySolve(LinearSolve):
 
 
 class CGSolve(LinearSolve):
-    # X: ArrayLike
-    # y: ArrayLike
-    # eta: ArrayLike
-    # family: ExponentialFamily
-
     def __call__(
         self,
         X: ArrayLike,

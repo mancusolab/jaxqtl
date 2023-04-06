@@ -167,8 +167,3 @@ class NBlink(Link):
         jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
         """
         return _grad_per_sample(self.inverse, eta)
-
-    def tree_flatten(self):
-        children = (self.alpha,)
-        aux = None
-        return children, aux

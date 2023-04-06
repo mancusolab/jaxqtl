@@ -84,7 +84,6 @@ class Gaussian(ExponentialFamily):
     we can treat normal distribution as one-parameter EF
     """
 
-    glink: Link
     _links = [Identity, Log, Power]
 
     def __init__(self, glink: Link = Identity()):
@@ -121,7 +120,6 @@ class Binomial(ExponentialFamily):
     glink_der = 1/(p*(1-p)) # use log trick to calculate this
     """
 
-    glink: Link
     _links = [Logit, Log, Identity]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
     def __init__(self, glink: Link = Logit()):
@@ -150,7 +148,6 @@ class Binomial(ExponentialFamily):
 
 
 class Poisson(ExponentialFamily):
-    glink: Link
     _links = [Identity, Log]  # Sqrt
 
     def __init__(self, glink: Link = Log()):
@@ -180,7 +177,6 @@ class NegativeBinomial(ExponentialFamily):
     Assume alpha = 1/r = 1.
     """
 
-    glink: Link
     alpha: float
     _links = [Identity, Log, NBlink, Power]  # CLogLog
 
