@@ -33,25 +33,6 @@ def _cis_window_cutter(dat: CleanDataState, chrom: str, start: int, end: int) ->
     """
     # gene_info = "./example/data/ensembl_allgenes.txt"
     # gene_map = pd.read_csv(gene_info, delimiter="\t")
-    # gene_map.columns = [
-    #     "chr",
-    #     "gene_start",
-    #     "gene_end",
-    #     "symbol",
-    #     "tss_start",
-    #     "strand",
-    #     "gene_type",
-    #     "ensemble_id",
-    #     "refseq_id",
-    # ]
-    # gene_map["tss_left_end"] = gene_map["tss_start"] - window  # it's ok to be negative
-    # gene_map["tss_right_end"] = gene_map["tss_start"] + window
-    #
-    #
-    # # TODO: need check if gene exist in both strand
-    # query = gene_map[gene_map.ensemble_id == gene_name]
-    # starts_min = query["tss_left_end"].min()
-    # starts_max = query["tss_right_end"].max()
 
     var_info = dat.bim
     cis_var_info = var_info.loc[
