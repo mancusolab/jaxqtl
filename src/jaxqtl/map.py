@@ -20,12 +20,14 @@ def map_cis(
 ):
     n, k = dat.covar.shape
 
+    # append genotype as the last column
     X = jnp.hstack((jnp.ones(n, 1), dat.covar))
-    key = rdm.PRNG(seed)
+    key = rdm.PRNGKey(seed)
 
     for gene in gene_info:
-        name, chrom, start, rend = gene
-        lstart = min(0, start - window)
+        name, chrom, start_min, end_max = gene
+        lstart = min(0, start_min - window)
+        rend = end_max + window
         G, y = _setup_G_y(dat, name, chrom, lstart, rend)
         key, g_key = rdm.split(key)
 
@@ -66,7 +68,6 @@ def map_cis_single(
 
     cisglmstate = cis_scan(X, G, y, family)
 
-    # TODO: need write direct perm as child class
     adj_p, beta_res = perm(
         X,
         y,

@@ -61,7 +61,7 @@ def _cis_window_cutter(dat: CleanDataState, chrom: str, start: int, end: int) ->
     ]
 
     # return column indices
-    return dat.genotype[:, cis_var_info.i]
+    return cis_var_info.i
 
 
 def _setup_X_y(dat: CleanDataState, gene_name: str) -> Tuple[jnp.ndarray, jnp.ndarray]:
@@ -119,6 +119,6 @@ def cis_scan(
             converged=glmstate.converged,
         )
 
-    state = lax.scan(_func, 0.0, G.T)
+    _, state = lax.scan(_func, 0.0, G.T)
 
     return state
