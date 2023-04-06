@@ -5,12 +5,19 @@ import jaxopt.linear_solve as ls
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
-from jax.tree_util import register_pytree_node, register_pytree_node_class
+from jax import Array
+from jax.typing import ArrayLike
 
 from ..families.distribution import ExponentialFamily
 
+# from abc import ABCMeta, abstractmethod
+# import equinox as eqx
 
-@register_pytree_node_class
+
+# from jax.tree_util import register_pytree_node, register_pytree_node_class
+
+
+# @register_pytree_node_class
 class LinearSolve(ABC):
     """
     Define parent class for all solvers
@@ -20,35 +27,27 @@ class LinearSolve(ABC):
     @abstractmethod
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        eta: jnp.ndarray,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
         family: ExponentialFamily,
-    ) -> jnp.ndarray:
+    ) -> Array:
         pass
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
-
-    def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls()
 
 
 class QRSolve(LinearSolve):
+    # X: ArrayLike
+    # y: ArrayLike
+    # eta: ArrayLike
+    # family: ExponentialFamily
+
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        eta: jnp.ndarray,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
         family: ExponentialFamily,
-    ) -> jnp.ndarray:
+    ) -> Array:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
@@ -63,13 +62,18 @@ class QRSolve(LinearSolve):
 
 
 class CholeskySolve(LinearSolve):
+    # X: ArrayLike
+    # y: ArrayLike
+    # eta: ArrayLike
+    # family: ExponentialFamily
+
     def __call__(
         self,
         X: jnp.ndarray,
         y: jnp.ndarray,
         eta: jnp.ndarray,
         family: ExponentialFamily,
-    ) -> jnp.ndarray:
+    ) -> Array:
 
         # calculate dispersion only for NB model
         # family.alpha = family.calc_dispersion(
@@ -90,13 +94,18 @@ class CholeskySolve(LinearSolve):
 
 
 class CGSolve(LinearSolve):
+    # X: ArrayLike
+    # y: ArrayLike
+    # eta: ArrayLike
+    # family: ExponentialFamily
+
     def __call__(
         self,
-        X: jnp.ndarray,
-        y: jnp.ndarray,
-        eta: jnp.ndarray,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
         family: ExponentialFamily,
-    ) -> jnp.ndarray:
+    ) -> Array:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
@@ -108,21 +117,3 @@ class CGSolve(LinearSolve):
             return w_half_X @ beta
 
         return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
-
-
-def newton(X, y, init, score, hess, stepsize=1, tol=1e-3, max_iter=1000):
-    """ "perform naive gradient descent using Newton's method
-    we use this only for single parameter to avoid directly invert large hessian matrix
-    """
-    diff = 100000.0
-    old = init
-    num_iters = 0
-
-    while diff > tol and num_iters <= max_iter:
-        new = old - stepsize * score / hess
-        num_iters += 1
-        if diff < tol:
-            break
-        old = new
-
-    return new

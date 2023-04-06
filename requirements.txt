@@ -1,5 +1,10 @@
+cyvcf2
+decoupler
+equinox
 jax
 jaxlib
 jaxopt
 numpy
+pandas_plink
+scanpy
 typing_extensions

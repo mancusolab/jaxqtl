@@ -1,23 +1,18 @@
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 
-# import jax
+import equinox as eqx
+
 import jax.numpy as jnp
 from jax import Array
-from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from .utils import _clipped_expit, _grad_per_sample
 
 
-@register_pytree_node_class
-class Link(ABC):
+class Link(eqx.Module, metaclass=ABCMeta):
     """
     Parent class for different link function g(mu) = eta
     """
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
     def __call__(self, mu: ArrayLike) -> Array:
@@ -47,17 +42,10 @@ class Link(ABC):
         """
         pass
 
-    def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children)
-
 
 class Power(Link):
+    power: float
+
     def __init__(self, power=1.0):
         self.power = power
         super(Power, self).__init__()
@@ -79,11 +67,6 @@ class Power(Link):
         jnp.power(eta, 1 / self.power - 1) / self.power
         """
         return _grad_per_sample(self.inverse, eta)
-
-    def tree_flatten(self):
-        children = (self.power,)
-        aux = ()
-        return children, aux
 
 
 class Identity(Link):
@@ -154,6 +137,8 @@ class Log(Link):
 
 
 class NBlink(Link):
+    alpha: float
+
     def __init__(self, alpha: float = 1.0):
         self.alpha = alpha
         super(NBlink, self).__init__()

@@ -1,7 +1,7 @@
-from functools import partial
 from typing import NamedTuple, Tuple
 
-import jax
+import equinox as eqx
+
 from jax import lax, numpy as jnp
 
 from ..families.distribution import ExponentialFamily
@@ -14,7 +14,8 @@ class IRLSState(NamedTuple):
     converged: jnp.ndarray
 
 
-@partial(jax.jit, static_argnames=["max_iter", "tol"])
+# @partial(jax.jit, static_argnames=["max_iter", "tol"])
+@eqx.filter_jit
 def irls(
     X: jnp.ndarray,
     y: jnp.ndarray,

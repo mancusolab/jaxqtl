@@ -1,23 +1,20 @@
-from abc import ABC, abstractmethod
-from functools import partial
+from abc import ABCMeta, abstractmethod
 from typing import List, Tuple
 
+import equinox as eqx
 import numpy as np
 from typing_extensions import Self
 
-import jax
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 from jax import Array, lax
 from jax.scipy.special import digamma, gammaln, polygamma
-from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from .links import Identity, Link, Log, Logit, NBlink, Power
 
 
-@register_pytree_node_class
-class ExponentialFamily(ABC):
+class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
     """
     Define parent class for exponential family distribution (One parameter EF for now).
     Provide all required link function relevant to generalized linear model (GLM).
@@ -30,16 +27,13 @@ class ExponentialFamily(ABC):
     : log_prob : log joint density of all observations
     """
 
+    glink: Link
     _links: List[Self]  # type: ignore
 
     def __init__(self, glink: Link):
         if not any([isinstance(glink, link) for link in self._links]):
             raise ValueError(f"Link {glink} is invalid for Family {self}")
         self.glink = glink
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -83,15 +77,6 @@ class ExponentialFamily(ABC):
     ) -> Array:
         return jnp.array([0.0])
 
-    def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children)
-
 
 class Gaussian(ExponentialFamily):
     """
@@ -99,6 +84,7 @@ class Gaussian(ExponentialFamily):
     we can treat normal distribution as one-parameter EF
     """
 
+    glink: Link
     _links = [Identity, Log, Power]
 
     def __init__(self, glink: Link = Identity()):
@@ -135,6 +121,7 @@ class Binomial(ExponentialFamily):
     glink_der = 1/(p*(1-p)) # use log trick to calculate this
     """
 
+    glink: Link
     _links = [Logit, Log, Identity]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
     def __init__(self, glink: Link = Logit()):
@@ -161,13 +148,9 @@ class Binomial(ExponentialFamily):
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
-    # def init_eta(self, y: ArrayLike) -> Array:
-    #     """recommended but still work without this"""
-    #     return self.glink((y + 0.5) / 2)
-
 
 class Poisson(ExponentialFamily):
-
+    glink: Link
     _links = [Identity, Log]  # Sqrt
 
     def __init__(self, glink: Link = Log()):
@@ -190,13 +173,6 @@ class Poisson(ExponentialFamily):
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu
 
-    # def calc_dispersion(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-    #     resid = y - mu
-    #     df = y.shape[0] - X.shape[1]
-    #     # disp = np.sum((resid ** 2 / mu - 1) / mu) / df
-    #     disp = (jnp.sum(resid ** 2) / df - jnp.mean(mu)) / jnp.mean(mu ** 2)
-    #     return disp
-
 
 class NegativeBinomial(ExponentialFamily):
     """
@@ -204,12 +180,14 @@ class NegativeBinomial(ExponentialFamily):
     Assume alpha = 1/r = 1.
     """
 
+    glink: Link
+    alpha: float
     _links = [Identity, Log, NBlink, Power]  # CLogLog
 
     def __init__(
         self,
         glink: Link = Log(),
-        alpha: ArrayLike = 1.0,
+        alpha: float = 1.0,
     ):
         super(NegativeBinomial, self).__init__(glink)
         self.alpha = alpha
@@ -235,11 +213,6 @@ class NegativeBinomial(ExponentialFamily):
         pass
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        # estimate alpha
-        # resid = mu - y
-        # df = y.shape[0] - X.shape[1]
-        # self.alpha = jnp.sum((resid ** 2 / mu - 1) / mu) / df
-        # self.alpha = (jnp.sum(resid ** 2) / df - jnp.mean(mu)) / jnp.mean(mu ** 2)
         return mu + self.alpha * mu ** 2
 
     def alpha_score(self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike) -> Array:
@@ -267,7 +240,6 @@ class NegativeBinomial(ExponentialFamily):
         )
         return jnp.sum(term1 + term2 + term3 + term4 + term5)
 
-    @partial(jax.jit, static_argnames=["tol", "max_iter"])
     def calc_dispersion(
         self, y: ArrayLike, mu: ArrayLike, alpha_old: ArrayLike, tol=1e-3, max_iter=1000
     ) -> Array:
@@ -308,16 +280,6 @@ class NegativeBinomial(ExponentialFamily):
 
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n
-
-    # TODO: validation already occurred, we shouldn't need to redo it
-    # def tree_flatten(self):
-    #     children = (
-    #         self.glink,
-    #         self.alpha,
-    #         # False,
-    #     )  # validation already occurred, we shouldn't need to redo it
-    #     aux = ()
-    #     return children, aux
 
 
 # class Gamma(AbstractExponential):
