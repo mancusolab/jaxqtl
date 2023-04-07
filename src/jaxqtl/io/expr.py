@@ -34,7 +34,9 @@ class GeneMetaData:
     data: pd.DataFrame
 
     def __init__(
-        self, gene_list: List, gene_path: str = "../example/data/ensembl_allgenes.txt"
+        self,
+        gene_list: List,
+        gene_path: str = "../example/data/ensembl_allgenes.chr22.txt",
     ):
         gene_map = pd.read_csv(gene_path, delimiter="\t")
         gene_map.columns = [
@@ -56,9 +58,7 @@ class GeneMetaData:
         # Merge genes from dat with this gene map
         gene_map["found"] = np.where(gene_map.ensemble_id.isin(gene_list), 1, 0)
         # eQTL scan only for genes with known tss
-        gene_map = gene_map.loc[
-            gene_map.ensemble_id.isin(gene_list) & gene_map.found == 1
-        ]
+        gene_map = gene_map.loc[gene_map.found == 1]
 
         self.gene_map = gene_map
         self.gene_notfound = set(gene_list) - set(gene_map.ensemble_id)

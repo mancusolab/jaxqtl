@@ -29,18 +29,21 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
 
     gene_name = 'ENSG00000250479'
     GenomicRanges example: https://biocpy.github.io/GenomicRanges/
+
+    Returns:
+        Genotype matrix for cis-variants
     """
     var_info = dat.bim
-    chrom = "22"
+
     cis_var_info = var_info.loc[
-        (var_info["chrom"] == chrom)
+        (var_info["chrom"] == str(chrom))
         & (var_info["pos"] >= start)
         & (var_info["pos"] <= end)
     ]
 
-    G = jnp.take(dat.geno, jnp.array(cis_var_info.i), axis=1)
+    # Note: here only test for first 10 cis variants
+    G = jnp.take(dat.geno, jnp.array(cis_var_info.i[0:10]), axis=1)
 
-    # return column indices
     return G
 
 
@@ -83,30 +86,3 @@ def cis_scan(
 
     _, state = lax.scan(_func, 0.0, G.T)
     return state
-
-    # beta = []
-    # se = []
-    # p = []
-    # num_iters = []
-    # converged = []
-    #
-    # for snp in G.T:
-    #     M = jnp.hstack((X, snp[:, jnp.newaxis]))
-    #     glmstate = GLM(
-    #         X=M,
-    #         y=y,
-    #         family=family,
-    #         append=False,
-    #         maxiter=100,
-    #     ).fit()
-    #     beta.append(glmstate.beta[-1])
-    #     se.append(glmstate.se[-1])
-    #     p.append(glmstate.p[-1])
-    #     num_iters.append(glmstate.num_iters)
-    #     converged.append(glmstate.converged)
-    #
-    # return CisGLMState(jnp.array(beta),
-    #                    jnp.array(se),
-    #                    jnp.array(p),
-    #                    jnp.array(num_iters),
-    #                    jnp.array(converged))

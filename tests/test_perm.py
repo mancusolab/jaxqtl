@@ -18,8 +18,10 @@ def test_betaperm():
     true_n = 5.0
     expected = jnp.array([true_k, true_n])
     p_perm = random.beta(key_random, a=true_k, b=true_n, shape=(sample_n,))
-    observed, converged = infer_beta(p_perm, jnp.ones(2), stepsize=0.5)
+    res = infer_beta(p_perm, jnp.ones(2), stepsize=0.5)
 
+    observed = res[0:2]
+    converged = res[2]
     assert_array_eq(converged, jnp.asarray(1.0))
     assert_array_eq(
         observed, expected, rtol=5.2e-2

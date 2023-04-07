@@ -14,10 +14,12 @@ from jaxqtl.io.readfile import ReadyDataState
 class MapCis_SingleState(NamedTuple):
     cisglm: CisGLMState
     adj_p: Array
-    beta_param: Array
+    beta_res: Array
 
 
 class MapCis_OutState(NamedTuple):
+    effect_beta: List
+    beta_se: List
     nominal_p: List
     adj_p: List
     beta_param: List
@@ -39,6 +41,8 @@ def map_cis(
     X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
     key = rdm.PRNGKey(seed)
 
+    effect_beta = []
+    beta_se = []
     nominal_p = []
     adj_p = []
     beta_param = []
@@ -49,7 +53,9 @@ def map_cis(
         rend = end_max + window
 
         # pull cis G and y for this gene
-        G, y = _setup_G_y(dat, gene_name, chrom, lstart, rend)
+        G, y = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+        if G.shape[1] == 0:
+            continue
         key, g_key = rdm.split(key)
 
         result = map_cis_single(
@@ -62,17 +68,24 @@ def map_cis(
             perm,
         )
         # filter results based on user speicification (e.g., report all, report top, etc)
-        print(result)
 
         # combine results
+        effect_beta.append(result.cisglm.beta)
+        beta_se.append(result.cisglm.se)
         nominal_p.append(result.cisglm.p)
         adj_p.append(result.adj_p)
-        beta_param.append(result.beta_param)
+        beta_param.append(result.beta_res)
 
-        if len(adj_p) > 10:
+        if len(adj_p) > 3:
             break
 
-    return MapCis_OutState(nominal_p=nominal_p, adj_p=adj_p, beta_param=beta_param)
+    return MapCis_OutState(
+        effect_beta=effect_beta,
+        beta_se=beta_se,
+        nominal_p=nominal_p,
+        adj_p=adj_p,
+        beta_param=beta_param,
+    )
 
 
 def map_cis_single(
@@ -94,7 +107,7 @@ def map_cis_single(
 
     cisglmstate = cis_scan(X, G, y, family)
 
-    adj_p, beta_param = perm(
+    adj_p, beta_res = perm(
         X,
         y,
         G,
@@ -104,4 +117,4 @@ def map_cis_single(
         sig_level,
     )
 
-    return MapCis_SingleState(cisglm=cisglmstate, adj_p=adj_p, beta_param=beta_param)
+    return MapCis_SingleState(cisglm=cisglmstate, adj_p=adj_p, beta_res=beta_res)

@@ -7,8 +7,6 @@ import equinox as eqx
 import pandas as pd
 import scanpy as sc
 
-# from jaxqtl.io.expr import ExpressionData
-
 # from anndata import AnnData
 
 

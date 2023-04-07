@@ -2,25 +2,25 @@
 # 1) Direct permutation
 # 2) beta distribution
 
-from abc import ABC, abstractmethod
-from typing import Tuple
+from abc import ABCMeta, abstractmethod
+from typing import Tuple  # , NamedTuple
 
-import jax.debug
+import equinox as eqx
+
+# import jax.debug
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
-from jax import Array, grad, hessian, jit, lax, random
+from jax import Array, grad, hessian, jit, lax
 from jax.scipy.special import gammaln
-from jax.tree_util import register_pytree_node, register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.utils import cis_scan
 
 
-@register_pytree_node_class
-class Permutation(ABC):
+class Permutation(eqx.Module, metaclass=ABCMeta):
     """
     For a given cis-window around a gene (L variants), perform permutation test to
     identify (one candidate) eQTL for this gene.
@@ -39,23 +39,13 @@ class Permutation(ABC):
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
-    ) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    ) -> Array:
         pass
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
-
-    @abstractmethod
-    def tree_flatten(self):
-        pass
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children)
 
 
 class DirectPerm(Permutation):
+    max_perm_direct: int
+
     def __init__(self, max_perm_direct: int = 100):
         self.max_perm_direct = max_perm_direct
 
@@ -71,7 +61,7 @@ class DirectPerm(Permutation):
     ) -> Tuple[Array, Array]:
         def _func(key, x):
             key, p_key = rdm.split(key)
-            y_p = random.permutation(p_key, y, axis=0)
+            y_p = rdm.permutation(p_key, y, axis=0)
             glmstate = cis_scan(X, G, y_p, family)
             return key, glmstate.p[-1]
 
@@ -80,11 +70,6 @@ class DirectPerm(Permutation):
         adj_p = _calc_adjp_naive(obs_p, pvals)
 
         return adj_p, pvals
-
-    def tree_flatten(self):
-        children = (self.max_perm_direct,)
-        aux = ()
-        return children, aux
 
 
 @jit
@@ -102,7 +87,7 @@ def infer_beta(
     stepsize=1.0,
     tol=1e-3,
     max_iter=100,
-) -> Tuple[Array, Array]:
+) -> Array:
     """
     given p values from R permutations (strongest signals),
     use newton's method to estimate beta distribution parameters:
@@ -146,9 +131,9 @@ def infer_beta(
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(
         float
     )
-    jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
+    # jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
 
-    return params, jnp.asarray(converged)
+    return jnp.array([params[0], params[1], converged])
 
 
 @jit
@@ -163,6 +148,9 @@ def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
 
 
 class BetaPerm(DirectPerm):
+    max_perm_direct: int
+    max_iter_beta: int
+
     def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
         self.max_iter_beta = max_iter_beta
         super().__init__(max_perm_direct)
@@ -176,7 +164,7 @@ class BetaPerm(DirectPerm):
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
-    ) -> Tuple[Array, Array, Array]:
+    ) -> Tuple[Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
         Estimate Beta(k,n) using Newton's gradient descent, step size = 1
@@ -194,16 +182,8 @@ class BetaPerm(DirectPerm):
             key_init,
         )
         init = jnp.ones(2)
-        params, converged = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
+        beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
-        adj_p = _calc_adjp_beta(obs_p, params)
+        adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
 
-        return adj_p, params, converged
-
-    def tree_flatten(self):
-        children = (
-            self.max_perm_direct,
-            self.max_iter_beta,
-        )
-        aux = ()
-        return children, aux
+        return adj_p, beta_res

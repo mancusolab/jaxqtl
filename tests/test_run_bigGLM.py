@@ -34,12 +34,13 @@ cell_type = "CD14-positive monocyte"
 dat = read_data(
     geno_path, pheno_path, covar_path, cell_type, geno_reader=PlinkReader()
 )  # Plink(), CYVCF2()
-# TODO: filter by cell type
+
+# filter by cell type
 dat_CD14 = dat.get_celltype(cell_type)
 
 # TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat_CD14, dat_CD14.gene_meta, family=Poisson(), seed=123)
-
+print(mapcis_out.effect_beta)
 
 # def run_cis_GLM_sm(dat: AllDataState, gene_name: str, window: int = 500000):
 #
