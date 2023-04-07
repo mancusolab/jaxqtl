@@ -1,18 +1,21 @@
-from abc import ABC, abstractmethod
-from typing import Any, NamedTuple
+from abc import ABCMeta, abstractmethod
+from dataclasses import dataclass
+from typing import Any
 
 import decoupler as dc
-import numpy as np
+import equinox as eqx
+import pandas as pd
 import scanpy as sc
 
-from jax._src.tree_util import register_pytree_node, register_pytree_node_class
-
-from jaxqtl.io.expr import ExpressionData
+# from jaxqtl.io.expr import ExpressionData
 
 # from anndata import AnnData
 
 
-class SingleCellFilter(NamedTuple):
+@dataclass
+class SingleCellFilter:
+    """Filtering metric for single cell data"""
+
     min_cells: int
     min_genes: int
     n_genes: int
@@ -26,48 +29,31 @@ class SingleCellFilter(NamedTuple):
     bulk_min_count: int = 0
 
 
-@register_pytree_node_class
-class PhenoIO(ABC):
+class PhenoIO(eqx.Module, metaclass=ABCMeta):
     """Read genotype or count data from different file format"""
-
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
 
     @abstractmethod
     def __call__(self, pheno_path: str):
         pass
 
     @abstractmethod
-    def process(self, filter_opt: SingleCellFilter) -> Any:
+    def process(self, dat: Any, filter_opt: SingleCellFilter) -> Any:
         pass
-
-    def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children)
 
 
 class H5AD(PhenoIO):
     def __call__(self, pheno_path: str):
-        self.rawdat = sc.read_h5ad(pheno_path)
+        return sc.read_h5ad(pheno_path)
 
-    def process(self, filter_opt: SingleCellFilter) -> ExpressionData:
+    def process(self, dat, filter_opt) -> pd.DataFrame:
         """
-        dat: n_obs (cell) x n_vars (genes)
+        dat.X: n_obs (cell) x n_vars (genes)
         dat.var_name = 'ensembl_id'
-
-        No log transformation on the count data!
-        should we include preprocessing here or expect user to provide clean data
-        ready to run GLM
-
         ref: https://scanpy-tutorials.readthedocs.io/en/latest/pbmc3k.html
+
+        Returns:
+            pseudo bulk RNA seq data for all cell types
         """
-        dat = self.rawdat
         # filter cells by min number of genes expressed (in place)
         sc.pp.filter_cells(dat, min_genes=200)
         # filter genes by min number of cells expressed (in place)
@@ -95,9 +81,8 @@ class H5AD(PhenoIO):
             min_counts=0,  # filter sample
         )
 
-        # subset to one cell type
-        dat_onetype = dat.bulk[dat.bulk.obs["cell_type"] == filter_opt.cell_type]
-        # filter out genes with zeros reads
-        dat_onetype = dat_onetype[:, np.sum(dat_onetype.X, axis=0) > 0]
-
-        return dat_onetype
+        # create pd.Dataframe
+        count = pd.DataFrame(dat.bulk.X)  # sample_cell x gene
+        count = count.set_index([dat.bulk.obs["donor_id"], dat.bulk.obs["cell_type"]])
+        count.columns = dat.bulk.var.index
+        return count

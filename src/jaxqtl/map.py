@@ -1,19 +1,34 @@
+from typing import List, NamedTuple
+
 import jax.random as rdm
-from jax import numpy as jnp
+from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.permutation import BetaPerm, Permutation
-from jaxqtl.infer.utils import _setup_G_y, cis_scan
+from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.expr import GeneMetaData
-from jaxqtl.io.readfile import CleanDataState
+from jaxqtl.io.readfile import ReadyDataState
 
 
+class MapCis_SingleState(NamedTuple):
+    cisglm: CisGLMState
+    adj_p: Array
+    beta_param: Array
+
+
+class MapCis_OutState(NamedTuple):
+    nominal_p: List
+    adj_p: List
+    beta_param: List
+
+
+# write this assuming this is bulk data
 def map_cis(
-    dat: CleanDataState,
+    dat: ReadyDataState,
     gene_info: GeneMetaData,
     family: ExponentialFamily,
-    seed: int,
+    seed: int = 123,
     window: int = 500000,
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
@@ -21,14 +36,20 @@ def map_cis(
     n, k = dat.covar.shape
 
     # append genotype as the last column
-    X = jnp.hstack((jnp.ones(n, 1), dat.covar))
+    X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
     key = rdm.PRNGKey(seed)
 
+    nominal_p = []
+    adj_p = []
+    beta_param = []
+
     for gene in gene_info:
-        name, chrom, start_min, end_max = gene
+        gene_name, chrom, start_min, end_max = gene
         lstart = min(0, start_min - window)
         rend = end_max + window
-        G, y = _setup_G_y(dat, name, chrom, lstart, rend)
+
+        # pull cis G and y for this gene
+        G, y = _setup_G_y(dat, gene_name, chrom, lstart, rend)
         key, g_key = rdm.split(key)
 
         result = map_cis_single(
@@ -43,10 +64,15 @@ def map_cis(
         # filter results based on user speicification (e.g., report all, report top, etc)
         print(result)
 
-    # combine results somehow
-    # return results
+        # combine results
+        nominal_p.append(result.cisglm.p)
+        adj_p.append(result.adj_p)
+        beta_param.append(result.beta_param)
 
-    pass
+        if len(adj_p) > 10:
+            break
+
+    return MapCis_OutState(nominal_p=nominal_p, adj_p=adj_p, beta_param=beta_param)
 
 
 def map_cis_single(
@@ -68,7 +94,7 @@ def map_cis_single(
 
     cisglmstate = cis_scan(X, G, y, family)
 
-    adj_p, beta_res = perm(
+    adj_p, beta_param = perm(
         X,
         y,
         G,
@@ -78,4 +104,4 @@ def map_cis_single(
         sig_level,
     )
 
-    return cisglmstate, adj_p, beta_res[0], beta_res[1]
+    return MapCis_SingleState(cisglm=cisglmstate, adj_p=adj_p, beta_param=beta_param)

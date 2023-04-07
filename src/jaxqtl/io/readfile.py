@@ -1,35 +1,77 @@
 from typing import NamedTuple
 
 import pandas as pd
-from anndata._core.anndata import AnnData
 
+import jax.numpy as jnp
 from jax import Array
 
-from jaxqtl.io.geno import GenoIO
-from jaxqtl.io.pheno import PhenoIO, SingleCellFilter
+from jaxqtl.io.expr import ExpressionData, GeneMetaData
+from jaxqtl.io.geno import GenoIO, PlinkReader
+from jaxqtl.io.pheno import H5AD, PhenoIO, SingleCellFilter
 
 pd.set_option("display.max_rows", 100000)
 
 
-class CleanDataState(NamedTuple):
+class ReadyDataState(NamedTuple):
+    geno: Array
+    bim: pd.DataFrame
+    pheno: ExpressionData
+    gene_meta: GeneMetaData
+    covar: Array
+
+
+class AllDataState:
     """
     count: filtered cells and genes for given cell type, contains sample features
     """
 
-    genotype: Array  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
-    bim: pd.DataFrame  # variant on rows
-    count: AnnData  # nxG for one cell type, count.var has gene names
-    covar: pd.DataFrame  # nxcovar, covariates for the same individuals
+    def __init__(
+        self,
+        genotype: pd.DataFrame,
+        bim: pd.DataFrame,
+        count: pd.DataFrame,
+        covar: pd.DataFrame,
+    ):
+        self.geno = genotype  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
+        self.bim = bim  # variant on rows
+        self.pheno = count  # nxG for one cell type, count.var has gene names
+        self.covar = covar  # nxcovar, covariates for the same individuals
+
+    def get_celltype(self, cell_type: str = "CD14-positive monocyte"):
+        # check orders of samples in count and genotype
+        pheno_onetype = self.pheno[
+            self.pheno.index.get_level_values("cell_type") == cell_type
+        ]
+        # drop genes with all zero expressions
+        pheno_onetype = pheno_onetype.loc[:, (pheno_onetype != 0).any(axis=0)]
+        gene_list = pheno_onetype.columns.values
+
+        sample_id = pheno_onetype.index.get_level_values("donor_id").to_list()
+        # filter genotype and covariates, ordered?
+        genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
+            level=sample_id
+        )
+        covar = self.covar.loc[self.covar.index.isin(sample_id)].sort_index(
+            level=sample_id
+        )
+
+        return ReadyDataState(
+            geno=jnp.float64(genotype),
+            bim=self.bim,
+            pheno=ExpressionData(pheno_onetype),
+            gene_meta=GeneMetaData(gene_list),
+            covar=jnp.float64(covar),
+        )
 
 
 def read_data(
     geno_path: str,
     pheno_path: str,
     covar_path: str,
-    filter_opt: SingleCellFilter,
-    geno_reader: GenoIO,
-    pheno_reader: PhenoIO,
-) -> CleanDataState:
+    filter_opt=SingleCellFilter,
+    geno_reader: GenoIO = PlinkReader(),
+    pheno_reader: PhenoIO = H5AD(),
+) -> AllDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
     pheno_path: h5ad file path, including covariates
@@ -42,16 +84,14 @@ def read_data(
 
     recode sex as: female = 1, male = 0
     """
+    # unfiltered genotype data
     genotype, var_info, sample_info = geno_reader(geno_path)
+
     covar = pd.read_csv(covar_path, delimiter="\t")
     covar = covar.set_index("donor_id")
 
     rawdat = pheno_reader(pheno_path)
-    count = rawdat.process(filter_opt)
-    donor_id = count.obs.donor_id.values
+    count = pheno_reader.process(rawdat, filter_opt)
 
-    # filter genotype and covariates, ordered?
-    genotype = genotype.filter(items=donor_id, axis=0)
-    covar = covar.filter(items=donor_id, axis=0)
-
-    return CleanDataState(genotype, var_info, count, covar)
+    # return all data in dataframe (easier for next filtering/merging)
+    return AllDataState(genotype, var_info, count, covar)

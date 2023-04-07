@@ -1,54 +1,47 @@
-# from typing import NamedTuple
-#
-# import numpy as np
+from typing import NamedTuple
+
+import numpy as np
+
+# from jax import random
+from jax.config import config
+
+from jaxqtl.families.distribution import Poisson
+from jaxqtl.io.geno import PlinkReader  # , VCFReader
+from jaxqtl.io.readfile import read_data
+from jaxqtl.map import map_cis
+
 # from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
 #     Poisson as smPoisson,
 # )
 # from utils import assert_array_eq
-#
-# from jax import random
-# from jax.config import config
-#
-# from jaxqtl.families.distribution import Poisson
-# from jaxqtl.infer.utils import _setup_G_y
-#
-# # from jaxqtl.io.geno import PlinkReader
-# # from jaxqtl.io.readfile import CleanDataState, read_data
-# from jaxqtl.map import map_cis
-#
-# config.update("jax_enable_x64", True)
-#
-#
-# class smState(NamedTuple):
-#     beta: np.array
-#     se: np.array
-#     p: np.array
-#
-#
-# geno_path = "./example/data/chr22"
-# pheno_path = "./example/data/Countdata_n100.h5ad"
-# covar_path = "./example/data/donor_features.tsv"
-# # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
-#
-# cell_type = "CD14-positive monocyte"
-# # dat = read_data(
-# #     PlinkReader(), geno_path, pheno_path, covar_path, cell_type
-# # )  # Plink(), CYVCF2()
-# key = random.PRNGKey(1)
-# key, key_init = random.split(key, 2)
-#
-#
-# # TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
-# # glmstate, p, k, n = map_cis(
-# #     dat,
-# #     family=Poisson(),
-# #     gene_name="ENSG00000250479",
-# #     key_init=key_init,
-# #     max_perm_direct=0,
-# # )
-#
-#
-# def run_cis_GLM_sm(dat: CleanDataState, gene_name: str, window: int = 500000):
+
+
+config.update("jax_enable_x64", True)
+
+
+class smState(NamedTuple):
+    beta: np.array
+    se: np.array
+    p: np.array
+
+
+geno_path = "../example/data/chr22.bed"
+pheno_path = "../example/data/Countdata_n100.h5ad"
+covar_path = "../example/data/donor_features.tsv"
+# pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
+
+cell_type = "CD14-positive monocyte"
+dat = read_data(
+    geno_path, pheno_path, covar_path, cell_type, geno_reader=PlinkReader()
+)  # Plink(), CYVCF2()
+# TODO: filter by cell type
+dat_CD14 = dat.get_celltype(cell_type)
+
+# TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
+mapcis_out = map_cis(dat_CD14, dat_CD14.gene_meta, family=Poisson(), seed=123)
+
+
+# def run_cis_GLM_sm(dat: AllDataState, gene_name: str, window: int = 500000):
 #
 #     n, k = dat.covar.shape
 #     X = np.hstack((np.ones((n, 1), dat.covar)))

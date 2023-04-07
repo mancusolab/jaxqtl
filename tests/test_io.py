@@ -2,17 +2,19 @@
 
 from jax.config import config
 
-# from jaxqtl.io.geno import VCFReader
+from jaxqtl.io.geno import PlinkReader  # , VCFReader
+
 # from jaxqtl.io.readfile import read_data
 
 config.update("jax_enable_x64", True)
 
-geno_path = "../example/data/chr22"
+geno_path = "../example/data/chr22.bed"
 pheno_path = "../example/data/Countdata_n10.h5ad"
 covar_path = "../example/data/donor_features.tsv"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
-# dat = read_data(VCFReader(), geno_path, pheno_path, covar_path)
+reader = PlinkReader()
+dat = reader(geno_path)
 
 # # Check shape of data loaded, i.e. sample size is the same
 # def assert_sampleN_eq(Data, rtol=1e-10):

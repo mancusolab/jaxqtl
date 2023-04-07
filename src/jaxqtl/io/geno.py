@@ -1,43 +1,27 @@
-from abc import ABC, abstractmethod
+from abc import ABCMeta, abstractmethod
 from typing import NamedTuple
 
+import equinox as eqx
 import pandas as pd
 from cyvcf2 import VCF
 from pandas_plink import read_plink
 
-from jax import Array, numpy as jnp
-from jax._src.tree_util import register_pytree_node, register_pytree_node_class
-
 
 class PlinkState(NamedTuple):
-    genotype: Array
+    genotype: pd.DataFrame
     bim: pd.DataFrame
     fam: pd.DataFrame
 
 
-@register_pytree_node_class
-class GenoIO(ABC):
+class GenoIO(eqx.Module, metaclass=ABCMeta):
     """Read genotype or count data from different file format"""
 
-    def __init_subclass__(cls, **kwargs):
-        super().__init_subclass__(**kwargs)
-        register_pytree_node(cls, cls.tree_flatten, cls.tree_unflatten)
-
     @abstractmethod
-    def __call__(self, prefix: str) -> PlinkState:
+    def __call__(self, path: str) -> PlinkState:
         """
         Read files
         """
         pass
-
-    def tree_flatten(self):
-        children = ()
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children)
 
 
 class PlinkReader(GenoIO):
@@ -45,15 +29,20 @@ class PlinkReader(GenoIO):
     prefix: chr22.bed, also accept chr*.bed (read everything)
 
     Note: read bed file is much faster than VCF file (parser)
+
+    bim: chrom          snp   cm       pos a0 a1  i
+    fam: fid  iid father mother gender trait  i
     """
 
     def __call__(self, bed_path: str) -> PlinkState:
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         bim, fam, bed = read_plink(bed_path, verbose=False)
-        G = jnp.asarray(bed.compute())
+        G = pd.DataFrame(bed.compute().T)  # nxp
 
         # TODO: add imputation for missing genotype etc...
+        # G = G.fillna(G.mean())  # really slow
 
+        G = G.set_index(fam.iid)
         return PlinkState(G, bim, fam)
 
 
@@ -78,15 +67,17 @@ class VCFReader(GenoIO):
 
         vcf.close()
 
-        # convert to jax array
-        genotype = jnp.asarray(genotype)
-
         #  chrom        snp       cm     pos a0 a1  i
         bim = pd.DataFrame(
             bim_list, columns=["chrom", "snp", "cm", "pos", "alt", "ref", "i"]
         )
 
+        G = pd.DataFrame(genotype).T
+        # G = G.fillna(G.mean())  # really slow
+
+        G = G.set_index(fam.iid)
+
         # convert to REF dose
         # genotype = 2 - genotype
 
-        return PlinkState(genotype, bim, fam)
+        return PlinkState(G, bim, fam)
