@@ -41,7 +41,7 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
         & (var_info["pos"] <= end)
     ]
 
-    # Note: here only test for first 10 cis variants
+    # Unit test: only test for first 10 cis variants
     G = jnp.take(dat.geno, jnp.array(cis_var_info.i[0:10]), axis=1)
 
     return G

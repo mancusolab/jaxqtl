@@ -1,6 +1,3 @@
-# from typing import List
-
-# import numpy as np
 import pandas as pd
 
 import jax.numpy as jnp
@@ -38,7 +35,7 @@ class GeneMetaData:
         self,
         pos_df: pd.DataFrame,
     ):
-        """
+        """position df for genes
         chr   start   end  phenotype_id
 
         Note: start = end (tss position)
@@ -53,33 +50,3 @@ class GeneMetaData:
             start_min = gene.start  # gene.tss_start_min
             end_max = gene.end  # gene.tss_start_max
             yield gene_name, chrom, start_min, end_max
-
-    # def __init__(
-    #     self,
-    #     gene_list: List,
-    #     gene_path: str = "./example/data/ensembl_allgenes.chr22.txt",
-    # ):
-    #     gene_map = pd.read_csv(gene_path, delimiter="\t")
-    #     gene_map.columns = [
-    #         "chr",
-    #         "gene_start",
-    #         "gene_end",
-    #         "symbol",
-    #         "tss_start_min",
-    #         "strand",
-    #         "gene_type",
-    #         "ensemble_id",
-    #         "refseq_id",
-    #     ]
-    #     gene_map["tss_start_max"] = gene_map["tss_start_min"]
-    #
-    #     gene_map = gene_map.groupby(
-    #         ["chr", "ensemble_id", "strand"], as_index=False
-    #     ).agg({"tss_start_min": "min", "tss_start_max": "max"})
-    #     # Merge genes from dat with this gene map
-    #     gene_map["found"] = np.where(gene_map.ensemble_id.isin(gene_list), 1, 0)
-    #     # eQTL scan only for genes with known tss
-    #     gene_map = gene_map.loc[gene_map.found == 1]
-    #
-    #     self.gene_map = gene_map
-    #     self.gene_notfound = set(gene_list) - set(gene_map.ensemble_id)

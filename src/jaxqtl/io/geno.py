@@ -52,9 +52,9 @@ class PlinkReader(GenoIO):
 
 class VCFReader(GenoIO):
     def __call__(self, vcf_path: str) -> PlinkState:
-        """
-        need genotype: sample ID, genotype in dose values
-        need number of variants
+        """read genotype from VCF file
+        Note: slower than PlinkReader()
+        Recommend converting VCF file to bed file first
         """
 
         # read VCF files
@@ -91,7 +91,10 @@ class VCFReader(GenoIO):
 def gtf_to_tss_bed(
     annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id="gene_id"
 ):
-    """Parse genes and TSSs from GTF and return DataFrame for BED output"""
+    """Parse genes and TSSs from GTF and return DataFrame for BED output
+    This function is from: https://github.com/broadinstitute/pyqtl/blob/master/qtl/io.py
+    """
+
     chrom = []
     start = []
     end = []

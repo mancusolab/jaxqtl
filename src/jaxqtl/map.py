@@ -7,7 +7,6 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.permutation import BetaPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
-from jaxqtl.io.expr import GeneMetaData
 from jaxqtl.io.readfile import ReadyDataState
 
 
@@ -23,19 +22,20 @@ class MapCis_OutState(NamedTuple):
     nominal_p: List
     adj_p: List
     beta_param: List
+    converged: List
 
 
 # write this assuming this is bulk data
 def map_cis(
     dat: ReadyDataState,
-    gene_info: GeneMetaData,
     family: ExponentialFamily,
     seed: int = 123,
     window: int = 500000,
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
-):
+) -> MapCis_OutState:
     n, k = dat.covar.shape
+    gene_info = dat.pheno_meta
 
     # append genotype as the last column
     X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
@@ -46,6 +46,7 @@ def map_cis(
     nominal_p = []
     adj_p = []
     beta_param = []
+    converged = []
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
@@ -54,8 +55,11 @@ def map_cis(
 
         # pull cis G and y for this gene
         G, y = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+
+        # skip if no cis SNPs found
         if G.shape[1] == 0:
             continue
+
         key, g_key = rdm.split(key)
 
         result = map_cis_single(
@@ -67,7 +71,6 @@ def map_cis(
             sig_level,
             perm,
         )
-        # filter results based on user speicification (e.g., report all, report top, etc)
 
         # combine results
         effect_beta.append(result.cisglm.beta)
@@ -75,9 +78,13 @@ def map_cis(
         nominal_p.append(result.cisglm.p)
         adj_p.append(result.adj_p)
         beta_param.append(result.beta_res)
+        converged.append(result.cisglm.converged)
 
+        # unit test for 4 genes
         if len(adj_p) > 3:
             break
+
+    # filter results based on user speicification (e.g., report all, report top, etc)
 
     return MapCis_OutState(
         effect_beta=effect_beta,
@@ -85,6 +92,7 @@ def map_cis(
         nominal_p=nominal_p,
         adj_p=adj_p,
         beta_param=beta_param,
+        converged=converged,
     )
 
 
@@ -96,7 +104,7 @@ def map_cis_single(
     key_init,
     sig_level=0.05,
     perm: Permutation = BetaPerm(),
-):
+) -> MapCis_SingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
 

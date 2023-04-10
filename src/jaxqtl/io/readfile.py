@@ -13,17 +13,15 @@ pd.set_option("display.max_rows", 100000)
 
 
 class ReadyDataState(NamedTuple):
-    geno: Array
+    geno: Array  # sample x genes
     bim: pd.DataFrame
     pheno: ExpressionData
-    gene_meta: GeneMetaData
-    covar: Array
+    pheno_meta: GeneMetaData
+    covar: Array  # sample x covariate
 
 
 class AllDataState:
-    """
-    count: filtered cells and genes for given cell type, contains sample features
-    """
+    """Raw data state in data frame"""
 
     def __init__(
         self,
@@ -32,45 +30,19 @@ class AllDataState:
         count: pd.DataFrame,
         covar: pd.DataFrame,
     ):
-        self.geno = genotype  # nxp, index by sample iid, column names are variant names chr:pos:ref:alt
+        self.geno = genotype  # nxp, index by sample iid, column names are variants chr:pos:ref:alt
         self.bim = bim  # variant on rows
-        self.pheno = count  # nxG for one cell type, count.var has gene names
-        self.covar = covar  # nxcovar, covariates for the same individuals
+        self.pheno = count  # nxG
+        self.covar = covar  # nxcovar
 
-    def get_celltype(self, cell_type: str = "CD14-positive monocyte"):
-        # check orders of samples in count and genotype
-        pheno_onetype = self.pheno[
-            self.pheno.index.get_level_values("cell_type") == cell_type
-        ]
-        # drop genes with all zero expressions
-        pheno_onetype = pheno_onetype.loc[:, (pheno_onetype != 0).any(axis=0)]
-        gene_list = pheno_onetype.columns.values
-
-        sample_id = pheno_onetype.index.get_level_values("donor_id").to_list()
-        # filter genotype and covariates
-        genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
-            level=sample_id
-        )
-        covar = self.covar.loc[self.covar.index.isin(sample_id)].sort_index(
-            level=sample_id
-        )
-
-        return ReadyDataState(
-            geno=jnp.float64(genotype),
-            bim=self.bim,
-            pheno=ExpressionData(pheno_onetype),
-            gene_meta=GeneMetaData(gene_list),
-            covar=jnp.float64(covar),
-        )
-
-    def format_readydata(self):
-        # check order
+    def create_ReadyData(self) -> ReadyDataState:
         pos_df = self.pheno[["chr", "start", "end"]].reset_index()
         self.pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
 
         # transpose to sample x genes
         count = self.pheno.T
         sample_id = count.index.to_list()
+
         # filter genotype and covariates
         genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
             level=sample_id
@@ -79,6 +51,7 @@ class AllDataState:
             level=sample_id
         )
 
+        # ensure sample order in genotype and covar are same as count
         assert (
             genotype.index == count.index
         ).all(), "samples are not sorted in genotype and count matrix"
@@ -91,7 +64,7 @@ class AllDataState:
             geno=jnp.float64(genotype),
             bim=self.bim,
             pheno=ExpressionData(count),
-            gene_meta=GeneMetaData(pos_df),
+            pheno_meta=GeneMetaData(pos_df),
             covar=jnp.float64(covar),
         )
 
@@ -106,7 +79,7 @@ def read_data(
 ) -> AllDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
-    pheno_path: h5ad file path, including covariates
+    pheno_path: bed file
     covar_path: covariates, must be coded in numerical forms
 
     Gene expression data: h5ad file
@@ -116,14 +89,15 @@ def read_data(
 
     recode sex as: female = 1, male = 0
     """
-    # unfiltered genotype data
+    # raw genotype data
     genotype, var_info, sample_info = geno_reader(geno_path)
 
     covar = pd.read_csv(covar_path, delimiter="\t")
     covar = covar.set_index("iid")
 
     rawdat = pheno_reader(pheno_path)
+
+    # TODO: use this for filtering
     count = pheno_reader.process(rawdat, filter_opt)
 
-    # return all data in dataframe (easier for next filtering/merging)
     return AllDataState(genotype, var_info, count, covar)
