@@ -7,6 +7,7 @@ from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
+from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import read_data
 from jaxqtl.map import map_cis
 
@@ -25,18 +26,25 @@ class smState(NamedTuple):
     p: np.array
 
 
-geno_path = "../example/data/chr22.bed"
-pheno_path = "../example/data/Countdata_n100.h5ad"
-covar_path = "../example/data/donor_features.tsv"
+geno_path = "./example/data/chr22.bed"
+# pheno_path = "./example/data/Countdata_n100.h5ad"
+covar_path = "./example/data/donor_features.tsv"
+pheno_path = "./example/data/CD14_positive_monocyte.bed.gz"
 # pheno_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 cell_type = "CD14-positive monocyte"
 dat = read_data(
-    geno_path, pheno_path, covar_path, cell_type, geno_reader=PlinkReader()
+    geno_path,
+    pheno_path,
+    covar_path,
+    cell_type,
+    geno_reader=PlinkReader(),
+    pheno_reader=PheBedReader(),
 )  # Plink(), CYVCF2()
 
 # filter by cell type
-dat_CD14 = dat.get_celltype(cell_type)
+# dat_CD14 = dat.get_celltype(cell_type)
+dat_CD14 = dat.format_readydata()
 
 # TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat_CD14, dat_CD14.gene_meta, family=Poisson(), seed=123)

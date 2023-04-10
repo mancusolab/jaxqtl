@@ -7,7 +7,7 @@ from jax import Array
 
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
 from jaxqtl.io.geno import GenoIO, PlinkReader
-from jaxqtl.io.pheno import H5AD, PhenoIO, SingleCellFilter
+from jaxqtl.io.pheno import PheBedReader, PhenoIO, SingleCellFilter  # , H5AD
 
 pd.set_option("display.max_rows", 100000)
 
@@ -47,7 +47,7 @@ class AllDataState:
         gene_list = pheno_onetype.columns.values
 
         sample_id = pheno_onetype.index.get_level_values("donor_id").to_list()
-        # filter genotype and covariates, ordered?
+        # filter genotype and covariates
         genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
             level=sample_id
         )
@@ -63,6 +63,38 @@ class AllDataState:
             covar=jnp.float64(covar),
         )
 
+    def format_readydata(self):
+        # check order
+        pos_df = self.pheno[["chr", "start", "end"]].reset_index()
+        self.pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
+
+        # transpose to sample x genes
+        count = self.pheno.T
+        sample_id = count.index.to_list()
+        # filter genotype and covariates
+        genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
+            level=sample_id
+        )
+        covar = self.covar.loc[self.covar.index.isin(sample_id)].sort_index(
+            level=sample_id
+        )
+
+        assert (
+            genotype.index == count.index
+        ).all(), "samples are not sorted in genotype and count matrix"
+
+        assert (
+            covar.index == count.index
+        ).all(), "samples are not sorted in covariate and count matrix"
+
+        return ReadyDataState(
+            geno=jnp.float64(genotype),
+            bim=self.bim,
+            pheno=ExpressionData(count),
+            gene_meta=GeneMetaData(pos_df),
+            covar=jnp.float64(covar),
+        )
+
 
 def read_data(
     geno_path: str,
@@ -70,7 +102,7 @@ def read_data(
     covar_path: str,
     filter_opt=SingleCellFilter,
     geno_reader: GenoIO = PlinkReader(),
-    pheno_reader: PhenoIO = H5AD(),
+    pheno_reader: PhenoIO = PheBedReader(),
 ) -> AllDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
@@ -88,7 +120,7 @@ def read_data(
     genotype, var_info, sample_info = geno_reader(geno_path)
 
     covar = pd.read_csv(covar_path, delimiter="\t")
-    covar = covar.set_index("donor_id")
+    covar = covar.set_index("iid")
 
     rawdat = pheno_reader(pheno_path)
     count = pheno_reader.process(rawdat, filter_opt)
