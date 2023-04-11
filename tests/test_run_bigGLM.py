@@ -1,11 +1,20 @@
+# import numpy as np
+# from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
+#     Poisson as smPoisson,
+# )
+#
+# import jax.numpy as jnp
+# from jax import lax, random as rdm
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.permutation import BetaPerm  # , DirectPerm,
+
+# from jaxqtl.infer.utils import CisGLMState, _setup_G_y
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
-from jaxqtl.map import map_cis
+from jaxqtl.map import map_cis, map_cis_nominal  # , MapCis_OutState
 
 config.update("jax_enable_x64", True)
 
@@ -20,7 +29,7 @@ pheno_path = "./example/data/CD14_positive_monocyte.bed.gz"
 # pheno_reader = H5AD()
 # rawcount = pheno_reader(raw_count_path)
 # count_df = pheno_reader.process(rawcount, SingleCellFilter)
-#
+
 # cell_type = "CD14-positive monocyte"
 # pheno_reader.write_bed(
 #     count_df,
@@ -44,5 +53,91 @@ mapcis_out = map_cis(dat_CD14, family=Poisson(), perm=BetaPerm())
 print(mapcis_out.effect_beta)
 
 
+mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
+print(mapcis_out.effect_beta)
+
+
+# def cis_scan_sm(X, G, y):
+#     """
+#     run GLM across variants in a flanking window of given gene
+#     cis-widow: plus and minus W base pairs, total length 2*cis_window
+#     """
+#     beta = []
+#     se = []
+#     p = []
+#
+#     for snp in np.array(G.T):
+#         M = np.hstack((np.array(X), snp[:, np.newaxis]))
+#         glmstate = smPoisson(y, M).fit(disp=0)
+#         beta.append(glmstate.params[-1])
+#         se.append(glmstate.bse[-1])
+#         p.append(glmstate.pvalues[-1])
+#
+#     return CisGLMState(
+#         beta=np.asarray(beta),
+#         se=np.asarray(se),
+#         p=np.asarray(p),
+#         num_iters=np.array([-9]),
+#         converged=np.array([-9]),
+#     )
+#
+#
+# def map_cis_nominal_sm(
+#     dat,
+#     seed: int = 123,
+#     window: int = 500000,
+# ):
+#     n, k = dat.covar.shape
+#     gene_info = dat.pheno_meta
+#
+#     # append genotype as the last column
+#     X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
+#     key = rdm.PRNGKey(seed)
+#
+#     effect_beta = []
+#     beta_se = []
+#     nominal_p = []
+#
+#     for gene in gene_info:
+#         gene_name, chrom, start_min, end_max = gene
+#         lstart = min(0, start_min - window)
+#         rend = end_max + window
+#
+#         # pull cis G and y for this gene
+#         G, y = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+#
+#         # skip if no cis SNPs found
+#         if G.shape[1] == 0:
+#             continue
+#
+#         key, g_key = rdm.split(key)
+#
+#         result = cis_scan_sm(np.array(X), np.array(G), np.array(y))
+#
+#         # combine results
+#         effect_beta.append(result.beta)
+#         beta_se.append(result.se)
+#         nominal_p.append(result.p)
+#
+#         # unit test for 4 genes
+#         if len(nominal_p) > 3:
+#             break
+#
+#     return MapCis_OutState(
+#         effect_beta=effect_beta,
+#         beta_se=beta_se,
+#         nominal_p=nominal_p,
+#         adj_p=[],
+#         beta_param=[],
+#         converged=[],
+#     )
+
+
+# %timeit -n1 -r1 mapcis_out_jaxqtl = map_cis_nominal(dat_CD14, family=Poisson())
+# %timeit -n1 -r1 mapcis_out_sm = map_cis_nominal_sm(dat_CD14)
+
+
 def test_run_cis_GLM():
+    # mapcis_out_jaxqtl = map_cis_nominal(dat_CD14, family=Poisson())
+    # mapcis_out_sm = map_cis_nominal_sm(dat_CD14)
     pass

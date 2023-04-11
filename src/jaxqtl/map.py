@@ -126,3 +126,57 @@ def map_cis_single(
     )
 
     return MapCis_SingleState(cisglm=cisglmstate, adj_p=adj_p, beta_res=beta_res)
+
+
+def map_cis_nominal(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    seed: int = 123,
+    window: int = 500000,
+) -> MapCis_OutState:
+    n, k = dat.covar.shape
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
+    key = rdm.PRNGKey(seed)
+
+    effect_beta = []
+    beta_se = []
+    nominal_p = []
+
+    for gene in gene_info:
+        gene_name, chrom, start_min, end_max = gene
+        lstart = min(0, start_min - window)
+        rend = end_max + window
+
+        # pull cis G and y for this gene
+        G, y = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+
+        # skip if no cis SNPs found
+        if G.shape[1] == 0:
+            continue
+
+        key, g_key = rdm.split(key)
+
+        result = cis_scan(X, G, y, family)
+
+        # combine results
+        effect_beta.append(result.beta)
+        beta_se.append(result.se)
+        nominal_p.append(result.p)
+
+        # unit test for 4 genes
+        if len(nominal_p) > 3:
+            break
+
+    # filter results based on user speicification (e.g., report all, report top, etc)
+
+    return MapCis_OutState(
+        effect_beta=effect_beta,
+        beta_se=beta_se,
+        nominal_p=nominal_p,
+        adj_p=[],
+        beta_param=[],
+        converged=[],
+    )
