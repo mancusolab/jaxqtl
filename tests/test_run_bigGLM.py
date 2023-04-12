@@ -18,7 +18,7 @@ from jaxqtl.infer.permutation import BetaPerm  # , DirectPerm,
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
-from jaxqtl.map import map_cis, map_cis_nominal, prepare_cis_output
+from jaxqtl.map import map_cis, map_cis_nominal, prepare_cis_output, write_nominal
 
 # from utils import assert_beta_array_eq
 
@@ -61,7 +61,7 @@ mapcis_out = map_cis(dat_CD14, family=Poisson(), perm=BetaPerm())
 print(mapcis_out.slope)
 
 mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
-print(mapcis_out.slope)
+write_nominal(mapcis_out, dat_CD14, "../example/result", "datCD14_n94")
 
 mapcis_df = prepare_cis_output(dat_CD14, mapcis_out)
 print(mapcis_df)

@@ -247,14 +247,14 @@ def map_cis_nominal(
     )
 
 
-def write_nominal(res: MapCis_OutState, out_dir: str, prefix):
+def write_nominal(res: MapCis_OutState, dat: ReadyDataState, out_dir: str, prefix):
     """write to parquet file by chrom for efficient data storage and retrieval"""
 
     start_row = 0
     end_row = 0
     outdf = res.var_leading_df
     outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
-    outdf = outdf.drop(["cm", "i", "a0", "a1", "tss"], axis=1)
+    outdf = outdf.drop(["cm", "a0", "a1", "tss"], axis=1)
 
     outdf["af"] = np.NaN
     outdf["ma_samples"] = np.NaN
@@ -262,6 +262,27 @@ def write_nominal(res: MapCis_OutState, out_dir: str, prefix):
     outdf["pval_nominal"] = np.NaN
     outdf["slope"] = np.NaN
     outdf["slope_se"] = np.NaN
+
+    # calculate genotype info
+    G = dat.geno
+    G = G[:, outdf.i.tolist()]
+
+    n2 = 2 * G.shape[0]
+
+    for idx in range(len(G.T)):
+        g = G.T[idx]
+        af = np.sum(g) / n2
+        outdf["af"][idx] = af
+        if af <= 0.5:
+            outdf["ma_samples"][idx] = np.sum(
+                g > 0.5
+            )  # Number of samples carrying at least on minor allele
+            outdf["ma_count"][idx] = np.sum(g[g > 0.5])  # Number of minor alleles
+        else:
+            outdf["ma_samples"][idx] = np.sum(g < 1.5)
+            outdf["ma_count"][idx] = n2 - np.sum(g[g > 0.5])
+
+    outdf = outdf.drop(["i"], axis=1)
 
     # TODO: add genotype info including af, ma_samples, ma_count
     for idx, _ in res.gene_mapped_list.iterrows():
