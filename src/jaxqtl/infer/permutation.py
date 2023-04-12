@@ -9,6 +9,8 @@ import equinox as eqx
 
 # import jax.debug
 import jax.numpy as jnp
+
+# import jax.scipy.optimize as jso
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
@@ -46,7 +48,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
 class DirectPerm(Permutation):
     max_perm_direct: int
 
-    def __init__(self, max_perm_direct: int = 100):
+    def __init__(self, max_perm_direct: int = 10000):
         self.max_perm_direct = max_perm_direct
 
     def __call__(
@@ -132,8 +134,19 @@ def infer_beta(
         float
     )
     # jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
-
     return jnp.array([params[0], params[1], converged])
+
+    # def negloglik(p: ArrayLike, k: float, n: float) -> jnp.ndarray:
+    #     return -(
+    #         (k - 1) * jnp.sum(jnp.log(p))
+    #         + (n - 1) * jnp.sum(jnp.log1p(-p))
+    #         - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
+    #     )
+    #
+    # R = max_iter
+    #
+    # res = jso.minimize(lambda s: negloglik(p_perm, s[0], s[1]), init, method='BFGS', tol=tol)
+    # return jnp.array([res.x[0], res.x[1], res.success])
 
 
 @jit
@@ -181,7 +194,12 @@ class BetaPerm(DirectPerm):
             family,
             key_init,
         )
-        init = jnp.ones(2)
+        # init = jnp.ones(2)  # initialize with 1
+        p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+        k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
+        n_init = k_init * (1 / p_mean - 1)
+        init = jnp.array([k_init, n_init])
+
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
         adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])

@@ -25,14 +25,16 @@ class AllDataState:
 
     def __init__(
         self,
-        genotype: pd.DataFrame,
+        geno: pd.DataFrame,
         bim: pd.DataFrame,
-        count: pd.DataFrame,
+        pheno: pd.DataFrame,
         covar: pd.DataFrame,
     ):
-        self.geno = genotype  # nxp, index by sample iid, column names are variants chr:pos:ref:alt
+        self.geno = (
+            geno  # nxp, index by sample iid, column names are variants chr:pos:ref:alt
+        )
         self.bim = bim  # variant on rows
-        self.pheno = count  # nxG
+        self.pheno = pheno  # nxG
         self.covar = covar  # nxcovar
 
     def create_ReadyData(self) -> ReadyDataState:

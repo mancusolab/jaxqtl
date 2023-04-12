@@ -1,10 +1,14 @@
+# import numpy.testing as nptest
+#
 # import numpy as np
 # from statsmodels.discrete.discrete_model import (  # , NegativeBinomial as smNB
 #     Poisson as smPoisson,
 # )
 #
 # import jax.numpy as jnp
-# from jax import lax, random as rdm
+# from jax import random as rdm
+import pandas as pd
+
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
@@ -14,9 +18,13 @@ from jaxqtl.infer.permutation import BetaPerm  # , DirectPerm,
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
-from jaxqtl.map import map_cis, map_cis_nominal  # , MapCis_OutState
+from jaxqtl.map import map_cis, prepare_cis_output  # , map_cis_nominal, MapCis_OutState
+
+# from utils import assert_beta_array_eq
 
 config.update("jax_enable_x64", True)
+
+pd.set_option("display.max_columns", 500)
 
 geno_path = "./example/data/chr22.bed"
 # raw_count_path = "./example/data/Countdata_n100.h5ad"
@@ -50,11 +58,12 @@ dat_CD14 = dat.create_ReadyData()
 
 # TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat_CD14, family=Poisson(), perm=BetaPerm())
-print(mapcis_out.effect_beta)
+print(mapcis_out.slope)
 
-
-mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
-print(mapcis_out.effect_beta)
+outdf = prepare_cis_output(dat_CD14, mapcis_out)
+print(outdf)
+# mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
+# print(mapcis_out.effect_beta)
 
 
 # def cis_scan_sm(X, G, y):
@@ -74,11 +83,11 @@ print(mapcis_out.effect_beta)
 #         p.append(glmstate.pvalues[-1])
 #
 #     return CisGLMState(
-#         beta=np.asarray(beta),
-#         se=np.asarray(se),
-#         p=np.asarray(p),
-#         num_iters=np.array([-9]),
-#         converged=np.array([-9]),
+#         beta=jnp.asarray(beta),
+#         se=jnp.asarray(se),
+#         p=jnp.asarray(p),
+#         num_iters=jnp.array([-9]),
+#         converged=jnp.array([-9]),
 #     )
 #
 #
@@ -137,7 +146,7 @@ print(mapcis_out.effect_beta)
 # %timeit -n1 -r1 mapcis_out_sm = map_cis_nominal_sm(dat_CD14)
 
 
-def test_run_cis_GLM():
-    # mapcis_out_jaxqtl = map_cis_nominal(dat_CD14, family=Poisson())
-    # mapcis_out_sm = map_cis_nominal_sm(dat_CD14)
-    pass
+# def test_run_cis_GLM():
+#     mapcis_out_jaxqtl = map_cis_nominal(dat_CD14, family=Poisson())
+#     mapcis_out_sm = map_cis_nominal_sm(dat_CD14)
+#     nptest.assert_allclose(mapcis_out_jaxqtl.effect_beta, mapcis_out_sm.effect_beta, rtol=1e-5)

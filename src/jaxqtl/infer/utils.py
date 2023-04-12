@@ -1,5 +1,7 @@
 from typing import NamedTuple, Tuple
 
+import pandas as pd
+
 import jax.lax as lax
 from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
@@ -17,7 +19,9 @@ class CisGLMState(NamedTuple):
     converged: jnp.ndarray
 
 
-def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) -> Array:
+def _cis_window_cutter(
+    dat: ReadyDataState, chrom: str, start: int, end: int
+) -> Tuple[Array, pd.DataFrame]:
     """
     return variant list in cis for given gene
     Map is a pandas data frame
@@ -27,7 +31,7 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
     emsemble use 1-based
     vcf file is one-based
 
-    gene_name = 'ENSG00000250479'
+    gene_name = 'ENSG00000250479', start: 24110630
     GenomicRanges example: https://biocpy.github.io/GenomicRanges/
 
     Returns:
@@ -42,18 +46,26 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
     ]
 
     # Unit test: only test for first 10 cis variants
-    G = jnp.take(dat.geno, jnp.array(cis_var_info.i[0:10]), axis=1)
+    # G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i[0:100]), axis=1)
+    G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i), axis=1)
 
-    return G
+    # check monomorphic: G.T[:, [0]] find first occurrence on all genotype, var x 1
+    mono_var = (G_tocheck.T == G_tocheck.T[:, [0]]).all(
+        1
+    )  # bool (var, ), show whether given variant is monomorphic
+    not_mono_var = jnp.invert(mono_var)
+    G = G_tocheck.T[not_mono_var].T  # take genotype that are NOT monomorphic
+    cis_var_info = cis_var_info.loc[not_mono_var.tolist()]
+    return G, cis_var_info
 
 
 def _setup_G_y(
     dat: ReadyDataState, gene_name: str, chrom: str, start: int, end: int
-) -> Tuple[Array, Array]:
-    G = _cis_window_cutter(dat, chrom, start, end)
+) -> Tuple[Array, Array, pd.DataFrame]:
+    G, var_df = _cis_window_cutter(dat, chrom, start, end)
     y = dat.pheno[gene_name]  # __getitem__
 
-    return G, jnp.array(y)
+    return G, jnp.array(y), var_df
 
 
 def cis_scan(
