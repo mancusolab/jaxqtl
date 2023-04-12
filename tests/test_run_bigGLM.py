@@ -63,8 +63,8 @@ print(mapcis_out.slope)
 mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
 print(mapcis_out.slope)
 
-outdf = prepare_cis_output(dat_CD14, mapcis_out)
-print(outdf)
+mapcis_df = prepare_cis_output(dat_CD14, mapcis_out)
+print(mapcis_df)
 
 
 # def cis_scan_sm(X, G, y):

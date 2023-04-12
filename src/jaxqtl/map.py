@@ -1,3 +1,4 @@
+import os
 from typing import List, NamedTuple
 
 import numpy as np
@@ -105,7 +106,7 @@ def map_cis(
         converged.append(result.cisglm.converged[leading_var_idx])
         num_var_cis.append(var_df.shape[0])
 
-        # unit test for 3 genes
+        # unit test for 2 genes
         if len(pval_beta) > 1:
             break
 
@@ -174,67 +175,9 @@ def map_cis_single(
     )
 
 
-# def map_cis_nominal(
-#     dat: ReadyDataState,
-#     family: ExponentialFamily,
-#     seed: int = 123,
-#     window: int = 500000,
-# ) -> MapCis_OutState:
-#     n, k = dat.covar.shape
-#     gene_info = dat.pheno_meta
-#
-#     # append genotype as the last column
-#     X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
-#     key = rdm.PRNGKey(seed)
-#
-#     effect_beta = []
-#     beta_se = []
-#     nominal_p = []
-#     var_df_all = pd.DataFrame
-#
-#     for gene in gene_info:
-#         gene_name, chrom, start_min, end_max = gene
-#         lstart = min(0, start_min - window)
-#         rend = end_max + window
-#
-#         # pull cis G and y for this gene
-#         G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
-#
-#         # skip if no cis SNPs found
-#         if G.shape[1] == 0:
-#             continue
-#
-#         key, g_key = rdm.split(key)
-#
-#         result = cis_scan(X, G, y, family)
-#
-#         # combine results
-#         effect_beta.append(result.beta)
-#         beta_se.append(result.se)
-#         nominal_p.append(result.p)
-#         var_df_all.append(var_df, ignore_index=True)
-#
-#         # unit test for 4 genes
-#         if len(nominal_p) > 3:
-#             break
-#
-#     # filter results based on user speicification (e.g., report all, report top, etc)
-#
-#     return MapCis_OutState(
-#         effect_beta=effect_beta,
-#         beta_se=beta_se,
-#         nominal_p=nominal_p,
-#         adj_p=[],
-#         beta_param=[],
-#         converged=[],
-#         var_df=var_df_all
-#     )
-
-
 def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    seed: int = 123,
     window: int = 500000,
 ) -> MapCis_OutState:
     n, k = dat.covar.shape
@@ -242,20 +185,23 @@ def map_cis_nominal(
 
     # append genotype as the last column
     X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
-    key = rdm.PRNGKey(seed)
 
     slope = []
     slope_se = []
     nominal_p = []
     converged = []
     num_var_cis = []
+    gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
     )
 
+    # TODO: fix for efficiency, filter by chromosome that exists in bim file
+    gene_info.gene_map = gene_info.gene_map.loc[gene_info.gene_map.chr == "22"]
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
-        lstart = min(0, start_min - window)
+        lstart = max(0, start_min - window)
         rend = end_max + window
 
         # pull cis G and y for this gene
@@ -265,13 +211,12 @@ def map_cis_nominal(
         if G.shape[1] == 0:
             continue
 
-        key, g_key = rdm.split(key)
-
         result = cis_scan(X, G, y, family)
 
         var_df["phenotype_id"] = gene_name
         var_df["tss"] = start_min
         var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
+        gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
 
         # combine results
         slope.append(result.beta)
@@ -285,8 +230,6 @@ def map_cis_nominal(
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
-
-    # chr_res_df.to_parquet(os.path.join(output_dir, f'{prefix}.cis_qtl_pairs.{chrom}.parquet'))
     return MapCis_OutState(
         slope=slope,
         slope_se=slope_se,
@@ -296,9 +239,41 @@ def map_cis_nominal(
         pval_perm=[],
         converged=converged,
         var_leading_df=var_df_all,
-        gene_mapped_list=pd.DataFrame(),
+        gene_mapped_list=gene_mapped_list,
         num_var_cis=num_var_cis,
     )
+
+
+def write_nominal(res: MapCis_OutState, out_dir: str, prefix):
+    """write to parquet file by chrom for efficient data storage and retrieval"""
+
+    start_row = 0
+    end_row = 0
+    outdf = res.var_leading_df
+    outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
+    outdf = outdf.drop(["cm", "i", "a0", "a1", "tss"], axis=1)
+
+    outdf["af"] = np.NaN
+    outdf["ma_samples"] = np.NaN
+    outdf["ma_count"] = np.NaN
+    outdf["pval_nominal"] = np.NaN
+    outdf["slope"] = np.NaN
+    outdf["slope_se"] = np.NaN
+
+    # TODO: add genotype info including af, ma_samples, ma_count
+    for idx, _ in res.gene_mapped_list.iterrows():
+        end_row += res.num_var_cis[idx]
+        outdf["pval_nominal"][start_row:end_row] = res.nominal_p[idx]
+        outdf["slope"][start_row:end_row] = res.slope[idx]
+        outdf["slope_se"][start_row:end_row] = res.slope_se[idx]
+        start_row = end_row
+
+    # split by chrom
+    for chrom in outdf["chrom"].unique().tolist():
+        one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
+        one_chrom_df.to_parquet(
+            os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.{chrom}.parquet")
+        )
 
 
 def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
@@ -327,11 +302,13 @@ def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
     n2 = 2 * dat.geno.shape[0]  # 2 * n_sample
 
     for idx, _ in res.gene_mapped_list.iterrows():
-        g = np.array(dat.geno[:, idx])
+        g = np.array(dat.geno[:, res.var_leading_df.i[idx]])
         af = np.sum(g) / n2
         if af <= 0.5:
-            ma_samples = np.sum(g > 0.5)  # major allele samples?
-            ma_count = np.sum(g[g > 0.5])  # major allele count?
+            ma_samples = np.sum(
+                g > 0.5
+            )  # Number of samples carrying at least on minor allele
+            ma_count = np.sum(g[g > 0.5])  # Number of minor alleles
         else:
             ma_samples = np.sum(g < 1.5)
             ma_count = n2 - np.sum(g[g > 0.5])
