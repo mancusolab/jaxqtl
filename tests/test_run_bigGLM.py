@@ -18,7 +18,7 @@ from jaxqtl.infer.permutation import BetaPerm  # , DirectPerm,
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
-from jaxqtl.map import map_cis, prepare_cis_output  # , map_cis_nominal, MapCis_OutState
+from jaxqtl.map import map_cis, map_cis_nominal, prepare_cis_output
 
 # from utils import assert_beta_array_eq
 
@@ -26,10 +26,10 @@ config.update("jax_enable_x64", True)
 
 pd.set_option("display.max_columns", 500)
 
-geno_path = "./example/data/chr22.bed"
+geno_path = "../example/data/chr22.bed"
 # raw_count_path = "./example/data/Countdata_n100.h5ad"
-covar_path = "./example/data/donor_features.tsv"
-pheno_path = "./example/data/CD14_positive_monocyte.bed.gz"
+covar_path = "../example/data/donor_features.tsv"
+pheno_path = "../example/data/CD14_positive_monocyte.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 
@@ -60,10 +60,11 @@ dat_CD14 = dat.create_ReadyData()
 mapcis_out = map_cis(dat_CD14, family=Poisson(), perm=BetaPerm())
 print(mapcis_out.slope)
 
+mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
+print(mapcis_out.slope)
+
 outdf = prepare_cis_output(dat_CD14, mapcis_out)
 print(outdf)
-# mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
-# print(mapcis_out.effect_beta)
 
 
 # def cis_scan_sm(X, G, y):

@@ -29,7 +29,6 @@ class MapCis_OutState(NamedTuple):
     pval_perm: List
     converged: List
     num_var_cis: List
-    leading_var_list: List
     var_leading_df: pd.DataFrame
     gene_mapped_list: pd.DataFrame
 
@@ -58,7 +57,6 @@ def map_cis(
     beta_param = []
     converged = []
     num_var_cis = []
-    leading_var_list = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_leading_df = pd.DataFrame(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i"]
@@ -98,18 +96,17 @@ def map_cis(
         gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
 
         # combine results
-        slope.append(result.cisglm.beta.tolist())
-        slope_se.append(result.cisglm.se.tolist())
-        nominal_p.append(result.cisglm.p.tolist())
+        slope.append(result.cisglm.beta[leading_var_idx])
+        slope_se.append(result.cisglm.se[leading_var_idx])
+        nominal_p.append(result.cisglm.p[leading_var_idx])
         pval_beta.append(result.pval_beta)
         pval_perm.append(result.pval_perm)
         beta_param.append(result.beta_param)
-        converged.append(result.cisglm.converged)
+        converged.append(result.cisglm.converged[leading_var_idx])
         num_var_cis.append(var_df.shape[0])
-        leading_var_list.append(leading_var_idx)
 
         # unit test for 3 genes
-        if len(pval_beta) > 2:
+        if len(pval_beta) > 1:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
@@ -125,7 +122,6 @@ def map_cis(
         var_leading_df=var_leading_df,
         gene_mapped_list=gene_mapped_list,
         num_var_cis=num_var_cis,
-        leading_var_list=leading_var_list,
     )
 
 
@@ -235,6 +231,76 @@ def map_cis_single(
 #     )
 
 
+def map_cis_nominal(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    seed: int = 123,
+    window: int = 500000,
+) -> MapCis_OutState:
+    n, k = dat.covar.shape
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
+    key = rdm.PRNGKey(seed)
+
+    slope = []
+    slope_se = []
+    nominal_p = []
+    converged = []
+    num_var_cis = []
+    var_df_all = pd.DataFrame(
+        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
+    )
+
+    for gene in gene_info:
+        gene_name, chrom, start_min, end_max = gene
+        lstart = min(0, start_min - window)
+        rend = end_max + window
+
+        # pull cis G and y for this gene
+        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+
+        # skip if no cis SNPs found
+        if G.shape[1] == 0:
+            continue
+
+        key, g_key = rdm.split(key)
+
+        result = cis_scan(X, G, y, family)
+
+        var_df["phenotype_id"] = gene_name
+        var_df["tss"] = start_min
+        var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
+
+        # combine results
+        slope.append(result.beta)
+        slope_se.append(result.se)
+        nominal_p.append(result.p)
+        converged.append(result.converged)
+        num_var_cis.append(var_df.shape[0])
+
+        # unit test for 3 genes
+        if len(slope) > 1:
+            break
+
+    # filter results based on user speicification (e.g., report all, report top, etc)
+
+    # chr_res_df.to_parquet(os.path.join(output_dir, f'{prefix}.cis_qtl_pairs.{chrom}.parquet'))
+    return MapCis_OutState(
+        slope=slope,
+        slope_se=slope_se,
+        nominal_p=nominal_p,
+        pval_beta=[],
+        beta_param=[],
+        pval_perm=[],
+        converged=converged,
+        var_leading_df=var_df_all,
+        gene_mapped_list=pd.DataFrame(),
+        num_var_cis=num_var_cis,
+    )
+
+
 def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
     """Return nominal p-value, allele frequencies, etc. as pd.Series"""
     outdf = pd.DataFrame(
@@ -259,14 +325,13 @@ def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
     )
 
     n2 = 2 * dat.geno.shape[0]  # 2 * n_sample
-    leading_idx = res.leading_var_list
 
     for idx, _ in res.gene_mapped_list.iterrows():
         g = np.array(dat.geno[:, idx])
         af = np.sum(g) / n2
         if af <= 0.5:
-            ma_samples = np.sum(g > 0.5)
-            ma_count = np.sum(g[g > 0.5])
+            ma_samples = np.sum(g > 0.5)  # major allele samples?
+            ma_count = np.sum(g[g > 0.5])  # major allele count?
         else:
             ma_samples = np.sum(g < 1.5)
             ma_count = n2 - np.sum(g[g > 0.5])
@@ -283,9 +348,9 @@ def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
             ma_samples,
             ma_count,
             af,
-            res.nominal_p[idx][leading_idx[idx]],
-            res.slope[idx][leading_idx[idx]],
-            res.slope_se[idx][leading_idx[idx]],
+            res.nominal_p[idx],
+            res.slope[idx],
+            res.slope_se[idx],
             res.pval_perm[idx],
             res.pval_beta[idx],
         ]
