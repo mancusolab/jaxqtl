@@ -1,16 +1,9 @@
-# TODO: add permutation
-# 1) Direct permutation
-# 2) beta distribution
-
 from abc import ABCMeta, abstractmethod
-from typing import Tuple  # , NamedTuple
+from typing import Tuple
 
 import equinox as eqx
 
-# import jax.debug
 import jax.numpy as jnp
-
-# import jax.scipy.optimize as jso
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
@@ -135,18 +128,6 @@ def infer_beta(
     )
     # jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
     return jnp.array([params[0], params[1], converged])
-
-    # def negloglik(p: ArrayLike, k: float, n: float) -> jnp.ndarray:
-    #     return -(
-    #         (k - 1) * jnp.sum(jnp.log(p))
-    #         + (n - 1) * jnp.sum(jnp.log1p(-p))
-    #         - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
-    #     )
-    #
-    # R = max_iter
-    #
-    # res = jso.minimize(lambda s: negloglik(p_perm, s[0], s[1]), init, method='BFGS', tol=tol)
-    # return jnp.array([res.x[0], res.x[1], res.success])
 
 
 @jit

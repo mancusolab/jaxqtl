@@ -12,11 +12,14 @@ from jaxqtl.io.readfile import ReadyDataState
 
 
 class CisGLMState(NamedTuple):
-    beta: jnp.ndarray
-    se: jnp.ndarray
-    p: jnp.ndarray
-    num_iters: jnp.ndarray
-    converged: jnp.ndarray
+    af: Array
+    ma_samples: Array
+    ma_count: Array
+    beta: Array
+    se: Array
+    p: Array
+    num_iters: Array
+    converged: Array
 
 
 def _cis_window_cutter(
@@ -88,7 +91,18 @@ def cis_scan(
             append=False,
             maxiter=100,
         ).fit()
+        af = jnp.mean(snp) / 2.0
+        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
+
+        ma_samples = jnp.sum(
+            snp > 0
+        )  # Number of samples carrying at least one minor allele
+        ma_count = jnp.sum(snp)  # Number of minor alleles
+
         return carry, CisGLMState(
+            af=af,
+            ma_samples=ma_samples,
+            ma_count=ma_count,
             beta=glmstate.beta[-1],
             se=glmstate.se[-1],
             p=glmstate.p[-1],
@@ -97,4 +111,5 @@ def cis_scan(
         )
 
     _, state = lax.scan(_func, 0.0, G.T)
+
     return state

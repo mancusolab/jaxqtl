@@ -1,5 +1,6 @@
 import os
-from typing import List, NamedTuple
+from dataclasses import dataclass
+from typing import List, NamedTuple, Tuple
 
 import numpy as np
 import pandas as pd
@@ -12,16 +13,42 @@ from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState
+from jaxqtl.log import get_log
 
 
-class MapCis_SingleState(NamedTuple):
+@dataclass
+class MapCisSingleState:
     cisglm: CisGLMState
     pval_perm: Array
     pval_beta: Array
     beta_param: Array
 
+    def get_lead(self) -> Tuple[List, int]:
 
-class MapCis_OutState(NamedTuple):
+        # need to break tie
+        # for now return first occurence
+
+        vdx = int(jnp.argmin(self.cisglm.p))
+
+        beta_1, beta_2, beta_converged = self.beta_param
+        result = [
+            beta_1,
+            beta_2,
+            beta_converged,
+            self.cisglm.ma_samples[vdx],
+            self.cisglm.ma_count[vdx],
+            self.cisglm.af[vdx],
+            self.cisglm.p[vdx],
+            self.cisglm.beta[vdx],
+            self.cisglm.se[vdx],
+            self.pval_perm,
+            self.pval_beta,
+        ]
+
+        return result, vdx
+
+
+class MapCisOutState(NamedTuple):
     slope: List
     slope_se: List
     nominal_p: List
@@ -38,34 +65,53 @@ class MapCis_OutState(NamedTuple):
 def map_cis(
     dat: ReadyDataState,
     family: ExponentialFamily,
+    append_intercept: bool = True,
+    standardize: bool = True,
     seed: int = 123,
     window: int = 500000,
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
-) -> MapCis_OutState:
-    n, k = dat.covar.shape
+    verbose: bool = True,
+) -> pd.DataFrame:
+
+    log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar
+    n, k = X.shape
+
     gene_info = dat.pheno_meta
 
     # append genotype as the last column
-    X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
+    if standardize:
+        X = X / jnp.std(X, axis=0)
+
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
     key = rdm.PRNGKey(seed)
 
-    slope = []
-    slope_se = []
-    nominal_p = []
-    pval_beta = []
-    pval_perm = []
-    beta_param = []
-    converged = []
-    num_var_cis = []
-    gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
-    var_leading_df = pd.DataFrame(
-        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i"]
-    )
+    out_columns = [
+        "phenotype_id",
+        "chrom",
+        "num_var",
+        "variant_id",
+        "beta_shape1",
+        "beta_shape2",
+        "beta_converged",
+        "tss_distance",
+        "ma_samples",
+        "ma_count",
+        "af",
+        "pval_nominal",
+        "slope",
+        "slope_se",
+        "pval_perm",
+        "pval_beta",
+    ]
 
-    # TODO: fix for efficiency, filter by chromosome that exists in bim file
+    results = []
     gene_info.gene_map = gene_info.gene_map.loc[gene_info.gene_map.chr == "22"]
-
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -79,7 +125,14 @@ def map_cis(
             continue
 
         key, g_key = rdm.split(key)
-
+        if verbose:
+            log.info(
+                "Performing cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
         result = map_cis_single(
             X,
             G,
@@ -89,44 +142,35 @@ def map_cis(
             sig_level,
             perm,
         )
+        if verbose:
+            log.info(
+                "Finished cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+        # get info at lead hit, and lead hit index
+        row, vdx = result.get_lead()
 
-        # need to break tie
-        # for now return first occurence
-        nominal_p_onegene = result.cisglm.p
-        leading_var_idx = nominal_p_onegene.tolist().index(jnp.min(nominal_p_onegene))
+        # pull SNP info at lead hit index
+        snp_id = var_df.iloc[vdx].snp
+        snp_pos = var_df.iloc[vdx].pos
+        tss_distance = snp_pos - start_min
 
-        var_leading_df.loc[len(var_leading_df)] = var_df.iloc[leading_var_idx]
-
-        gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
-
-        # combine results
-        slope.append(result.cisglm.beta[leading_var_idx])
-        slope_se.append(result.cisglm.se[leading_var_idx])
-        nominal_p.append(result.cisglm.p[leading_var_idx])
-        pval_beta.append(result.pval_beta)
-        pval_perm.append(result.pval_perm)
-        beta_param.append(result.beta_param)
-        converged.append(result.cisglm.converged[leading_var_idx])
-        num_var_cis.append(var_df.shape[0])
+        # combine lead hit info and gene meta data
+        num_var_cis = G.shape[1]
+        result = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
+        results.append(result)
 
         # unit test for 2 genes
-        if len(pval_beta) > 1:
+        if len(results) > 1:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
+    result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
-    return MapCis_OutState(
-        slope=slope,
-        slope_se=slope_se,
-        nominal_p=nominal_p,
-        pval_beta=pval_beta,
-        beta_param=beta_param,
-        pval_perm=pval_perm,
-        converged=converged,
-        var_leading_df=var_leading_df,
-        gene_mapped_list=gene_mapped_list,
-        num_var_cis=num_var_cis,
-    )
+    return result_df
 
 
 def map_cis_single(
@@ -134,10 +178,10 @@ def map_cis_single(
     G: ArrayLike,
     y: ArrayLike,
     family: ExponentialFamily,
-    key_init,
-    sig_level=0.05,
+    key_init: rdm.PRNGKey,
+    sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
-) -> MapCis_SingleState:
+) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
 
@@ -147,6 +191,7 @@ def map_cis_single(
     """
 
     cisglmstate = cis_scan(X, G, y, family)
+    beta_key, direct_key = rdm.split(key_init)
 
     pval_beta, beta_param = perm(
         X,
@@ -154,7 +199,7 @@ def map_cis_single(
         G,
         jnp.min(cisglmstate.p),
         family,
-        key_init,
+        beta_key,
         sig_level,
     )
 
@@ -166,11 +211,11 @@ def map_cis_single(
         G,
         jnp.min(cisglmstate.p),
         family,
-        key_init,
+        direct_key,
         sig_level,
     )
 
-    return MapCis_SingleState(
+    return MapCisSingleState(
         cisglm=cisglmstate,
         pval_perm=pval_perm,
         pval_beta=pval_beta,
@@ -182,7 +227,7 @@ def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
     window: int = 500000,
-) -> MapCis_OutState:
+) -> MapCisOutState:
     n, k = dat.covar.shape
     gene_info = dat.pheno_meta
 
@@ -233,7 +278,7 @@ def map_cis_nominal(
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
-    return MapCis_OutState(
+    return MapCisOutState(
         slope=slope,
         slope_se=slope_se,
         nominal_p=nominal_p,
@@ -247,7 +292,7 @@ def map_cis_nominal(
     )
 
 
-def write_nominal(res: MapCis_OutState, dat: ReadyDataState, out_dir: str, prefix):
+def write_nominal(res: MapCisOutState, dat: ReadyDataState, out_dir: str, prefix):
     """write to parquet file by chrom for efficient data storage and retrieval"""
 
     start_row = 0
@@ -300,7 +345,7 @@ def write_nominal(res: MapCis_OutState, dat: ReadyDataState, out_dir: str, prefi
         )
 
 
-def prepare_cis_output(dat: ReadyDataState, res: MapCis_OutState):
+def prepare_cis_output(dat: ReadyDataState, res: MapCisOutState):
     """Return nominal p-value, allele frequencies, etc. as pd.Series"""
     outdf = pd.DataFrame(
         columns=[

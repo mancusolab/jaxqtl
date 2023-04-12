@@ -15,4 +15,4 @@ except PackageNotFoundError:  # pragma: no cover
 finally:
     del version, PackageNotFoundError
 
-from . import families, infer, io, sim  # noqa 401
+from . import families, infer, io, log, map, sim  # noqa 401
