@@ -12,18 +12,13 @@ import pandas as pd
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.permutation import BetaPerm  # , DirectPerm,
-
-# from jaxqtl.infer.utils import CisGLMState, _setup_G_y
-from jaxqtl.io.geno import PlinkReader  # , VCFReader
-from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
+from jaxqtl.infer.permutation import BetaPerm
+from jaxqtl.io.geno import PlinkReader
+from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import read_data
 from jaxqtl.map import map_cis
 
-# from utils import assert_beta_array_eq
-
 config.update("jax_enable_x64", True)
-
 pd.set_option("display.max_columns", 500)
 
 geno_path = "../example/data/chr22.bed"
