@@ -163,15 +163,6 @@ def map_cis(
         result = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
         results.append(result)
 
-        "phenotype_id",
-        "chrom",
-        "num_var",
-        "variant_id",
-        "tss_distance",
-        "beta_shape1",
-        "beta_shape2",
-        "beta_converged",
-
         # unit test for 2 genes
         if len(results) > 1:
             break
