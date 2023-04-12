@@ -63,9 +63,12 @@ def map_cis(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i"]
     )
 
+    # TODO: fix for efficiency, filter by chromosome that exists in bim file
+    gene_info.gene_map = gene_info.gene_map.loc[gene_info.gene_map.chr == "22"]
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
-        lstart = min(0, start_min - window)
+        lstart = max(0, start_min - window)
         rend = end_max + window
 
         # pull cis G and y for this gene
