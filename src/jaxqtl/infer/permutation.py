@@ -3,12 +3,13 @@ from typing import Tuple
 
 import equinox as eqx
 
+import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, hessian, jit, lax
-from jax.scipy.special import gammaln
+from jax.scipy.special import gammaln, polygamma
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -89,29 +90,65 @@ def infer_beta(
     p ~ Beta(k, n)
     """
 
-    # this -might- be sensitive to step size; if we get bad estimates due to step size
-    # we can adjust using results from https://arxiv.org/abs/2002.10060
-    def loglik(params: ArrayLike, p: ArrayLike, R: int) -> jnp.ndarray:
+    def loglik(params: ArrayLike, p: ArrayLike) -> Array:
         k, n = params
+        # cannot use jaxstats.beta.logpdf due to bug when deriv at 1, 1
         return (
             (k - 1) * jnp.sum(jnp.log(p))
             + (n - 1) * jnp.sum(jnp.log1p(-p))
-            - R * (gammaln(k) + gammaln(n) - gammaln(k + n))
+            - len(p) * (gammaln(k) + gammaln(n) - gammaln(k + n))
         )
 
-    score_fn = grad(loglik)
-    hess_fn = hessian(loglik)
+    def info(params: ArrayLike, p: ArrayLike) -> Array:
+        k, n = params
+        i_kn = -polygamma(1, k + n)
+        i_k = polygamma(1, k) + i_kn
+        i_n = polygamma(1, n) + i_kn
 
-    r = len(p_perm)
+        info_mat = jnp.array([
+           [i_k, i_kn],
+           [i_kn, i_n]])
+
+        return -len(p) * info_mat
+
+    def christoffel(param: ArrayLike, p: ArrayLike) -> Array:
+        k, n = param
+
+        i_kkn = polygamma(1, n) * polygamma(2, k + n)
+        i_k = -polygamma(1, n) * polygamma(2, k) + i_kkn + polygamma(1, k + n) * polygamma(2, k)
+        i_knn = i_kkn - polygamma(1, k + n) * polygamma(2, n)
+
+
+        i_nnk = polygamma(1, k) * polygamma(2, k + n)
+        i_nkk = i_nnk - polygamma(1, k + n) * polygamma(2, k)
+        i_n = -polygamma(1, k) * polygamma(2, n) + i_nnk + polygamma(1, k + n) * polygamma(2, n)
+
+        scale = -polygamma(1, k) * polygamma(1, n) + polygamma(1, k) * polygamma(1, k + n) + polygamma(1, n) * polygamma(1, k + n)
+        sec_gamma = 0.5 * jnp.array([
+            [[i_k, i_kkn],
+             [i_kkn, i_knn]],
+            [[i_nkk, i_nnk],
+             [i_nnk, i_n]]
+        ]) / scale
+
+        return sec_gamma
+
+    score_fn = grad(loglik)
 
     def body_fun(val: Tuple):
         old_lik, diff, num_iter, old_param = val
+        # first order approx to RGD => NGD
+        # direction = NatGrad
         direction = jnla.solve(
-            hess_fn(old_param, p_perm, r), score_fn(old_param, p_perm, r)
+            info(old_param, p_perm), score_fn(old_param, p_perm)
         )
-        new_param = old_param - stepsize * direction
 
-        new_lik = loglik(new_param, p_perm, r)
+        # take second order approx to RGD
+        gamma = christoffel(old_param, p_perm)
+        adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
+        new_param = old_param - stepsize * direction - 0.5 * stepsize ** 2 * adjustment
+
+        new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
 
         return new_lik, diff, num_iter + 1, new_param
