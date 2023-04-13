@@ -43,6 +43,9 @@ class GeneMetaData:
 
         self.gene_map = pos_df
 
+    def filter_chr(self, chrom: str):
+        self.gene_map = self.gene_map.loc[self.gene_map.chr == chrom]
+
     def __iter__(self):
         for _, gene in self.gene_map.iterrows():
             gene_name = gene.phenotype_id  # gene.ensemble_id

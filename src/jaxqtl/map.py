@@ -26,7 +26,7 @@ class MapCisSingleState:
     def get_lead(self) -> Tuple[List, int]:
 
         # need to break tie
-        # for now return first occurence
+        # for now return first occurrence
 
         vdx = int(jnp.argmin(self.cisglm.p))
 
@@ -226,14 +226,40 @@ def map_cis_single(
 def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
+    out_dir: str,
+    prefix: str,
+    append_intercept: bool = True,
+    standardize: bool = True,
     window: int = 500000,
-) -> MapCisOutState:
-    n, k = dat.covar.shape
+    verbose: bool = True,
+):
+    """eQTL Mapping for all cis-SNP gene pairs
+
+    append_intercept: add a column of ones in front for intercepts in design matrix
+    standardize: on covariates
+
+    Returns:
+        write out parquet file by chrom for efficient data storage and retrieval
+    """
+
+    log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar
+    n, k = X.shape
+
     gene_info = dat.pheno_meta
 
     # append genotype as the last column
-    X = jnp.hstack((jnp.ones((n, 1)), dat.covar))
+    if standardize:
+        X = X / jnp.std(X, axis=0)
 
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    af = []
+    ma_samples = []
+    ma_count = []
     slope = []
     slope_se = []
     nominal_p = []
@@ -243,9 +269,6 @@ def map_cis_nominal(
     var_df_all = pd.DataFrame(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
     )
-
-    # TODO: fix for efficiency, filter by chromosome that exists in bim file
-    gene_info.gene_map = gene_info.gene_map.loc[gene_info.gene_map.chr == "22"]
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
@@ -259,7 +282,25 @@ def map_cis_nominal(
         if G.shape[1] == 0:
             continue
 
+        if verbose:
+            log.info(
+                "Performing cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+
         result = cis_scan(X, G, y, family)
+
+        if verbose:
+            log.info(
+                "Finished cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
 
         var_df["phenotype_id"] = gene_name
         var_df["tss"] = start_min
@@ -267,6 +308,10 @@ def map_cis_nominal(
         gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
 
         # combine results
+        af.append(result.af)
+        ma_samples.append(result.ma_samples)
+        ma_count.append(result.ma_count)
+
         slope.append(result.beta)
         slope_se.append(result.se)
         nominal_p.append(result.p)
@@ -277,64 +322,31 @@ def map_cis_nominal(
         if len(slope) > 1:
             break
 
-    # filter results based on user speicification (e.g., report all, report top, etc)
-    return MapCisOutState(
-        slope=slope,
-        slope_se=slope_se,
-        nominal_p=nominal_p,
-        pval_beta=[],
-        beta_param=[],
-        pval_perm=[],
-        converged=converged,
-        var_leading_df=var_df_all,
-        gene_mapped_list=gene_mapped_list,
-        num_var_cis=num_var_cis,
-    )
-
-
-def write_nominal(res: MapCisOutState, dat: ReadyDataState, out_dir: str, prefix):
-    """write to parquet file by chrom for efficient data storage and retrieval"""
-
+    # write result
     start_row = 0
     end_row = 0
-    outdf = res.var_leading_df
+    outdf = var_df_all
     outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
     outdf = outdf.drop(["cm", "a0", "a1", "tss"], axis=1)
 
+    # add additional columns
     outdf["af"] = np.NaN
     outdf["ma_samples"] = np.NaN
     outdf["ma_count"] = np.NaN
     outdf["pval_nominal"] = np.NaN
     outdf["slope"] = np.NaN
     outdf["slope_se"] = np.NaN
+    outdf["converged"] = np.NaN
 
-    # calculate genotype info
-    G = dat.geno
-    G = G[:, outdf.i.tolist()]
-
-    n2 = 2 * G.shape[0]
-
-    for idx in range(len(G.T)):
-        g = G.T[idx]
-        af = np.sum(g) / n2
-        outdf["af"][idx] = af
-        if af <= 0.5:
-            outdf["ma_samples"][idx] = np.sum(
-                g > 0.5
-            )  # Number of samples carrying at least on minor allele
-            outdf["ma_count"][idx] = np.sum(g[g > 0.5])  # Number of minor alleles
-        else:
-            outdf["ma_samples"][idx] = np.sum(g < 1.5)
-            outdf["ma_count"][idx] = n2 - np.sum(g[g > 0.5])
-
-    outdf = outdf.drop(["i"], axis=1)
-
-    # TODO: add genotype info including af, ma_samples, ma_count
-    for idx, _ in res.gene_mapped_list.iterrows():
-        end_row += res.num_var_cis[idx]
-        outdf["pval_nominal"][start_row:end_row] = res.nominal_p[idx]
-        outdf["slope"][start_row:end_row] = res.slope[idx]
-        outdf["slope_se"][start_row:end_row] = res.slope_se[idx]
+    for idx, _ in gene_mapped_list.iterrows():
+        end_row += num_var_cis[idx]
+        outdf["af"][start_row:end_row] = af[idx]
+        outdf["ma_samples"][start_row:end_row] = ma_samples[idx]
+        outdf["ma_count"][start_row:end_row] = ma_count[idx]
+        outdf["pval_nominal"][start_row:end_row] = nominal_p[idx]
+        outdf["slope"][start_row:end_row] = slope[idx]
+        outdf["slope_se"][start_row:end_row] = slope_se[idx]
+        outdf["converged"][start_row:end_row] = converged[idx]
         start_row = end_row
 
     # split by chrom
@@ -343,62 +355,3 @@ def write_nominal(res: MapCisOutState, dat: ReadyDataState, out_dir: str, prefix
         one_chrom_df.to_parquet(
             os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.{chrom}.parquet")
         )
-
-
-def prepare_cis_output(dat: ReadyDataState, res: MapCisOutState):
-    """Return nominal p-value, allele frequencies, etc. as pd.Series"""
-    outdf = pd.DataFrame(
-        columns=[
-            "phenotype_id",
-            "num_var",
-            "beta_shape1",
-            "beta_shape2",
-            "true_df",
-            "pval_true_df",
-            "variant_id",
-            "tss_distance",
-            "ma_samples",
-            "ma_count",
-            "af",
-            "pval_nominal",
-            "slope",
-            "slope_se",
-            "pval_perm",
-            "pval_beta",
-        ]
-    )
-
-    n2 = 2 * dat.geno.shape[0]  # 2 * n_sample
-
-    for idx, _ in res.gene_mapped_list.iterrows():
-        g = np.array(dat.geno[:, res.var_leading_df.i[idx]])
-        af = np.sum(g) / n2
-        if af <= 0.5:
-            ma_samples = np.sum(
-                g > 0.5
-            )  # Number of samples carrying at least on minor allele
-            ma_count = np.sum(g[g > 0.5])  # Number of minor alleles
-        else:
-            ma_samples = np.sum(g < 1.5)
-            ma_count = n2 - np.sum(g[g > 0.5])
-
-        outdf.loc[idx] = [
-            res.gene_mapped_list.gene_name[idx],
-            res.num_var_cis[idx],
-            res.beta_param[idx][0],
-            res.beta_param[idx][1],
-            np.NaN,
-            np.NaN,
-            res.var_leading_df.snp[idx],
-            res.var_leading_df.pos[idx] - res.gene_mapped_list.tss[idx],
-            ma_samples,
-            ma_count,
-            af,
-            res.nominal_p[idx],
-            res.slope[idx],
-            res.slope_se[idx],
-            res.pval_perm[idx],
-            res.pval_beta[idx],
-        ]
-
-    return outdf

@@ -1,4 +1,5 @@
-from typing import NamedTuple
+from dataclasses import dataclass
+from typing import List
 
 import pandas as pd
 
@@ -9,66 +10,27 @@ from jaxqtl.io.expr import ExpressionData, GeneMetaData
 from jaxqtl.io.geno import GenoIO, PlinkReader
 from jaxqtl.io.pheno import PheBedReader, PhenoIO, SingleCellFilter  # , H5AD
 
-pd.set_option("display.max_rows", 100000)
+# pd.set_option("display.max_rows", 100000)
 
 
-class ReadyDataState(NamedTuple):
+@dataclass
+class ReadyDataState:
     geno: Array  # sample x genes
     bim: pd.DataFrame
     pheno: ExpressionData
     pheno_meta: GeneMetaData
     covar: Array  # sample x covariate
 
+    def filter_geno(self, chrom: str):
+        self.pheno_meta.filter_chr(chrom)
+        self.bim = self.bim.loc[self.bim.chrom == chrom]
 
-class AllDataState:
-    """Raw data state in data frame"""
+        # pull genotype for this chrom only and reset "i"
+        self.geno = jnp.take(self.geno, jnp.array(self.bim.i), axis=1)
+        self.bim.i = self.bim.index
 
-    def __init__(
-        self,
-        geno: pd.DataFrame,
-        bim: pd.DataFrame,
-        pheno: pd.DataFrame,
-        covar: pd.DataFrame,
-    ):
-        self.geno = (
-            geno  # nxp, index by sample iid, column names are variants chr:pos:ref:alt
-        )
-        self.bim = bim  # variant on rows
-        self.pheno = pheno  # nxG
-        self.covar = covar  # nxcovar
-
-    def create_ReadyData(self) -> ReadyDataState:
-        pos_df = self.pheno[["chr", "start", "end"]].reset_index()
-        self.pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
-
-        # transpose to sample x genes
-        count = self.pheno.T
-        sample_id = count.index.to_list()
-
-        # filter genotype and covariates
-        genotype = self.geno.loc[self.geno.index.isin(sample_id)].sort_index(
-            level=sample_id
-        )
-        covar = self.covar.loc[self.covar.index.isin(sample_id)].sort_index(
-            level=sample_id
-        )
-
-        # ensure sample order in genotype and covar are same as count
-        assert (
-            genotype.index == count.index
-        ).all(), "samples are not sorted in genotype and count matrix"
-
-        assert (
-            covar.index == count.index
-        ).all(), "samples are not sorted in covariate and count matrix"
-
-        return ReadyDataState(
-            geno=jnp.float64(genotype),
-            bim=self.bim,
-            pheno=ExpressionData(count),
-            pheno_meta=GeneMetaData(pos_df),
-            covar=jnp.float64(covar),
-        )
+    def filter_pheno(self, pheno_list: List):
+        pass
 
 
 def read_data(
@@ -78,7 +40,7 @@ def read_data(
     filter_opt=SingleCellFilter,
     geno_reader: GenoIO = PlinkReader(),
     pheno_reader: PhenoIO = PheBedReader(),
-) -> AllDataState:
+) -> ReadyDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
     pheno_path: bed file
@@ -92,7 +54,7 @@ def read_data(
     recode sex as: female = 1, male = 0
     """
     # raw genotype data
-    genotype, var_info, sample_info = geno_reader(geno_path)
+    geno, bim, sample_info = geno_reader(geno_path)
 
     covar = pd.read_csv(covar_path, delimiter="\t")
     covar = covar.set_index("iid")
@@ -100,6 +62,32 @@ def read_data(
     rawdat = pheno_reader(pheno_path)
 
     # TODO: use this for filtering
-    count = pheno_reader.process(rawdat, filter_opt)
+    pheno = pheno_reader.process(rawdat, filter_opt)
 
-    return AllDataState(genotype, var_info, count, covar)
+    pos_df = pheno[["chr", "start", "end"]].reset_index()
+    pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
+
+    # transpose to sample x genes
+    pheno = pheno.T
+    sample_id = pheno.index.to_list()
+
+    # filter genotype and covariates
+    geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
+    covar = covar.loc[covar.index.isin(sample_id)].sort_index(level=sample_id)
+
+    # ensure sample order in genotype and covar are same as count
+    assert (
+        geno.index == pheno.index
+    ).all(), "samples are not sorted in genotype and count matrix"
+
+    assert (
+        covar.index == pheno.index
+    ).all(), "samples are not sorted in covariate and count matrix"
+
+    return ReadyDataState(
+        geno=jnp.float64(geno),
+        bim=bim,
+        pheno=ExpressionData(pheno),
+        pheno_meta=GeneMetaData(pos_df),
+        covar=jnp.float64(covar),
+    )

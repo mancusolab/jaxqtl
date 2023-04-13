@@ -48,8 +48,6 @@ def _cis_window_cutter(
         & (var_info["pos"] <= end)
     ]
 
-    # Unit test: only test for first 10 cis variants
-    # G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i[0:100]), axis=1)
     G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i), axis=1)
 
     # check monomorphic: G.T[:, [0]] find first occurrence on all genotype, var x 1
