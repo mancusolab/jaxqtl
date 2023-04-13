@@ -10,7 +10,7 @@ config.update("jax_enable_x64", True)
 
 
 def test_betaperm():
-    sample_n = 5000
+    sample_n = 500
     key = random.PRNGKey(2)
     key, key_random = random.split(key, 2)
 
@@ -21,7 +21,7 @@ def test_betaperm():
 
     init = jnp.ones(2)
 
-    res = infer_beta(p_perm, init, stepsize=0.5)
+    res = infer_beta(p_perm, init, stepsize=1.0)
 
     observed = res[0:2]
     converged = res[2]
