@@ -3,12 +3,11 @@ from typing import Tuple
 
 import equinox as eqx
 
-import jax
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
-from jax import Array, grad, hessian, jit, lax
+from jax import Array, grad, jit, lax
 from jax.scipy.special import gammaln, polygamma
 from jax.typing import ArrayLike
 
@@ -105,9 +104,7 @@ def infer_beta(
         i_k = polygamma(1, k) + i_kn
         i_n = polygamma(1, n) + i_kn
 
-        info_mat = jnp.array([
-           [i_k, i_kn],
-           [i_kn, i_n]])
+        info_mat = jnp.array([[i_k, i_kn], [i_kn, i_n]])
 
         return -len(p) * info_mat
 
@@ -115,21 +112,33 @@ def infer_beta(
         k, n = param
 
         i_kkn = polygamma(1, n) * polygamma(2, k + n)
-        i_k = -polygamma(1, n) * polygamma(2, k) + i_kkn + polygamma(1, k + n) * polygamma(2, k)
+        i_k = (
+            -polygamma(1, n) * polygamma(2, k)
+            + i_kkn
+            + polygamma(1, k + n) * polygamma(2, k)
+        )
         i_knn = i_kkn - polygamma(1, k + n) * polygamma(2, n)
-
 
         i_nnk = polygamma(1, k) * polygamma(2, k + n)
         i_nkk = i_nnk - polygamma(1, k + n) * polygamma(2, k)
-        i_n = -polygamma(1, k) * polygamma(2, n) + i_nnk + polygamma(1, k + n) * polygamma(2, n)
+        i_n = (
+            -polygamma(1, k) * polygamma(2, n)
+            + i_nnk
+            + polygamma(1, k + n) * polygamma(2, n)
+        )
 
-        scale = -polygamma(1, k) * polygamma(1, n) + polygamma(1, k) * polygamma(1, k + n) + polygamma(1, n) * polygamma(1, k + n)
-        sec_gamma = 0.5 * jnp.array([
-            [[i_k, i_kkn],
-             [i_kkn, i_knn]],
-            [[i_nkk, i_nnk],
-             [i_nnk, i_n]]
-        ]) / scale
+        scale = (
+            -polygamma(1, k) * polygamma(1, n)
+            + polygamma(1, k) * polygamma(1, k + n)
+            + polygamma(1, n) * polygamma(1, k + n)
+        )
+        sec_gamma = (
+            0.5
+            * jnp.array(
+                [[[i_k, i_kkn], [i_kkn, i_knn]], [[i_nkk, i_nnk], [i_nnk, i_n]]]
+            )
+            / scale
+        )
 
         return sec_gamma
 
@@ -139,9 +148,7 @@ def infer_beta(
         old_lik, diff, num_iter, old_param = val
         # first order approx to RGD => NGD
         # direction = NatGrad
-        direction = jnla.solve(
-            info(old_param, p_perm), score_fn(old_param, p_perm)
-        )
+        direction = jnla.solve(info(old_param, p_perm), score_fn(old_param, p_perm))
 
         # take second order approx to RGD
         gamma = christoffel(old_param, p_perm)

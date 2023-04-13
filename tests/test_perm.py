@@ -21,7 +21,7 @@ def test_betaperm():
 
     init = jnp.ones(2)
 
-    res = infer_beta(p_perm, init, stepsize=1.)
+    res = infer_beta(p_perm, init, stepsize=1.0)
 
     observed = res[0:2]
     converged = res[2]
