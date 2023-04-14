@@ -81,9 +81,9 @@ def _main(args):
     )
     parser.add_argument(
         "--window",
-        default=1000000,
+        default=500000,
         type=np.int32,
-        help="Cis-window size, in bases. Default: 1000000.",
+        help="Cis-window size (one side), in bases. Default: 500000.",
     )
     parser.add_argument(
         "--pval_threshold",

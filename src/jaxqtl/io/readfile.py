@@ -1,14 +1,15 @@
 from dataclasses import dataclass
-from typing import List
 
+import numpy as np
 import pandas as pd
 
 import jax.numpy as jnp
 from jax import Array
 
+from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
 from jaxqtl.io.geno import GenoIO, PlinkReader
-from jaxqtl.io.pheno import PheBedReader, PhenoIO, SingleCellFilter  # , H5AD
+from jaxqtl.io.pheno import PheBedReader, PhenoIO  # , H5AD, SingleCellFilter
 
 # pd.set_option("display.max_rows", 100000)
 
@@ -25,19 +26,16 @@ class ReadyDataState:
         self.pheno_meta.filter_chr(chrom)
         self.bim = self.bim.loc[self.bim.chrom == chrom]
 
-        # pull genotype for this chrom only and reset "i"
+        # pull genotype for this chrom only and reset "i" for pulling genotype by position
         self.geno = jnp.take(self.geno, jnp.array(self.bim.i), axis=1)
-        self.bim.i = self.bim.index
-
-    def filter_pheno(self, pheno_list: List):
-        pass
+        self.bim.i = np.arange(0, self.geno.shape[1])
 
 
 def read_data(
     geno_path: str,
     pheno_path: str,
     covar_path: str,
-    filter_opt=SingleCellFilter,
+    maf_threshold: float = 0.0,
     geno_reader: GenoIO = PlinkReader(),
     pheno_reader: PhenoIO = PheBedReader(),
 ) -> ReadyDataState:
@@ -52,17 +50,17 @@ def read_data(
     - dat.var: gene x gene summary stats
 
     recode sex as: female = 1, male = 0
+
+    All these files must contain the same set of individuals (better ordered, but not required)
+    Internally we check ordering and guarantee they are in the same order as phenotype data
     """
     # raw genotype data
     geno, bim, sample_info = geno_reader(geno_path)
+    geno, bim = geno_reader.filter_geno(geno, bim, maf_threshold)
 
-    covar = pd.read_csv(covar_path, delimiter="\t")
-    covar = covar.set_index("iid")
+    covar = covar_reader(covar_path)
 
-    rawdat = pheno_reader(pheno_path)
-
-    # TODO: use this for filtering
-    pheno = pheno_reader.process(rawdat, filter_opt)
+    pheno = pheno_reader(pheno_path)
 
     pos_df = pheno[["chr", "start", "end"]].reset_index()
     pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
@@ -71,7 +69,7 @@ def read_data(
     pheno = pheno.T
     sample_id = pheno.index.to_list()
 
-    # filter genotype and covariates
+    # filter genotype and covariates by sample id
     geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
     covar = covar.loc[covar.index.isin(sample_id)].sort_index(level=sample_id)
 
