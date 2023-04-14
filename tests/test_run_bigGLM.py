@@ -7,6 +7,8 @@
 #
 # import jax.numpy as jnp
 # from jax import random as rdm
+import os
+
 import pandas as pd
 
 from jax.config import config
@@ -16,7 +18,7 @@ from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import read_data
-from jaxqtl.map import map_cis
+from jaxqtl.map import map_cis, map_cis_nominal
 
 config.update("jax_enable_x64", True)
 pd.set_option("display.max_columns", 500)
@@ -49,16 +51,18 @@ dat = read_data(
     geno_reader=PlinkReader(),
     pheno_reader=PheBedReader(),
 )
-dat_CD14 = dat.create_ReadyData()
 
-# TODO: need error handle singlular value (won't stop for now, but Inf estimate in SE)
-mapcis_out = map_cis(dat_CD14, family=Poisson(), perm=BetaPerm())
+# TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
+mapcis_out = map_cis(dat, family=Poisson(), perm=BetaPerm())
 print(mapcis_out.slope)
 
-# mapcis_out = map_cis_nominal(dat_CD14, family=Poisson())
-# write_nominal(mapcis_out, dat_CD14, "../example/result", "datCD14_n94")
-#
-# mapcis_df = prepare_cis_output(dat_CD14, mapcis_out)
+map_cis_nominal(dat, family=Poisson(), out_dir="./example/result", prefix="dat_n94")
+
+prefix = "dat_n94"
+out_dir = "./example/result"
+pairs_df = pd.read_parquet(os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.parquet"))
+
+# mapcis_df = prepare_cis_output(dat, mapcis_out)
 # print(mapcis_df)
 
 

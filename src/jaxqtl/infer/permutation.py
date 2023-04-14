@@ -19,7 +19,6 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
     """
     For a given cis-window around a gene (L variants), perform permutation test to
     identify (one candidate) eQTL for this gene.
-
     direct_perm performs native permutation with max_iters,
     i.e. for each permutated data, do cis-window scan
     """
@@ -205,7 +204,6 @@ class BetaPerm(DirectPerm):
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
         Estimate Beta(k,n) using Newton's gradient descent, step size = 1
-
         Returns:
             k, n estimates
             adjusted p value for lead SNP
