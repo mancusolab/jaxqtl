@@ -1,8 +1,10 @@
 from typing import NamedTuple, Optional, Tuple
 
+from scipy.stats import t
+
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
-from jax.scipy.stats import norm, t  # , chi2
+from jax.scipy.stats import norm  # , t (not supported rn), chi2
 from jax.tree_util import register_pytree_node_class
 from jax.typing import ArrayLike
 

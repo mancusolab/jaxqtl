@@ -1,7 +1,7 @@
 import gzip
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 
 import equinox as eqx
 import numpy as np
@@ -26,9 +26,24 @@ class GenoIO(eqx.Module, metaclass=ABCMeta):
         """
         pass
 
+    @staticmethod
+    def filter_geno(
+        geno: pd.DataFrame, bim: pd.DataFrame, maf_threshold: float
+    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
+
+        af = np.array(geno.mean(axis=0) / 2)
+        maf = np.where(af > 0.5, 1 - af, af)  # convert to maf
+        geno = geno.loc[:, maf > maf_threshold]
+        bim = bim.loc[maf > maf_threshold]
+        bim.i = np.arange(0, len(bim))  # reset index i after variant filtering
+
+        assert geno.shape[1] == len(bim), "genotype and bim file do not have same shape"
+
+        return geno, bim
+
 
 class PlinkReader(GenoIO):
-    """Read genotype data from plink triplets
+    """Read raw genotype data from plink triplets
     prefix: chr22.bed, also accept chr*.bed (read everything)
 
     Note: read bed file is much faster than VCF file (parser)
@@ -80,9 +95,6 @@ class VCFReader(GenoIO):
         # G = G.fillna(G.mean())  # really slow
 
         G = G.set_index(fam.iid)
-
-        # convert to REF dose
-        # genotype = 2 - genotype
 
         return PlinkState(G, bim, fam)
 

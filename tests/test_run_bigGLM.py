@@ -16,25 +16,24 @@ from jax.config import config
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import PheBedReader
+from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
 from jaxqtl.map import map_cis, map_cis_nominal
 
 config.update("jax_enable_x64", True)
-pd.set_option("display.max_columns", 500)
+# pd.set_option("display.max_columns", 500)
 
-geno_path = "../example/data/chr22.bed"
-# raw_count_path = "./example/data/Countdata_n100.h5ad"
-covar_path = "../example/data/donor_features.tsv"
+geno_path = "../example/data/chr22.n94.bed"
+# raw_count_path = "./example/local/Countdata_n100.h5ad"
+covar_path = "../example/data/donor_features.n94.tsv"
 pheno_path = "../example/data/CD14_positive_monocyte.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 
 # For given cell type, create bed files from h5ad file
 # pheno_reader = H5AD()
-# rawcount = pheno_reader(raw_count_path)
-# count_df = pheno_reader.process(rawcount, SingleCellFilter)
-
+# count_df = pheno_reader(raw_count_path)
+#
 # cell_type = "CD14-positive monocyte"
 # pheno_reader.write_bed(
 #     count_df,
@@ -51,6 +50,8 @@ dat = read_data(
     geno_reader=PlinkReader(),
     pheno_reader=PheBedReader(),
 )
+
+dat.filter_geno("22")
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat, family=Poisson(), perm=BetaPerm())

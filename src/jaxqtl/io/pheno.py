@@ -94,9 +94,8 @@ class H5AD(PhenoIO):
         out_dir: str = "./example/data",
         cell_type: str = "CD14-positive monocyte",
     ):
-        """
-        After creating pseudo-bulk using process(), create bed file for each cell type
-        """
+        """After creating pseudo-bulk using process(), create bed file for each cell type"""
+
         pheno_onetype = pheno[pheno.index.get_level_values("cell_type") == cell_type]
 
         # drop genes with all zero expressions
@@ -114,7 +113,7 @@ class H5AD(PhenoIO):
 
         out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on="ensembl_id")
         out = out.drop("ensemble_id", axis=1)
-        out = out.rename(columns={"ensembl_id": "phenotype_id"})
+        out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
 
         cell_type_outname = re.sub("[^0-9a-zA-Z]+", "_", cell_type)
         out.to_csv(out_dir + "/" + cell_type_outname + ".bed.gz", index=False, sep="\t")
@@ -122,8 +121,10 @@ class H5AD(PhenoIO):
 
 class PheBedReader(PhenoIO):
     """Read phenotype from bed format
-    must in this following format (same as tensorqtl / fastqtl):
-    chr, start, end, phenotype_id, sample_id_1, sample_id_2, ...
+    filename: *.bed, *.bed.gz
+
+    must have following headers (same as tensorqtl / fastqtl):
+    #Chr, start, end, phenotype_id, sample_id_1, sample_id_2, ...
 
     tss_start = tss - 1 (0-base format)
     tss_end = tss (1-base)
@@ -139,6 +140,8 @@ class PheBedReader(PhenoIO):
             phenotype_df.set_index(phenotype_df.columns[3], inplace=True)
         else:
             raise ValueError("Unsupported file type.")
+
+        # convert all columns to lower case and rename #Chr to chr
         phenotype_df.rename(
             columns={
                 i: i.lower().replace("#chr", "chr") for i in phenotype_df.columns[:3]
@@ -146,19 +149,16 @@ class PheBedReader(PhenoIO):
             inplace=True,
         )
 
-        return phenotype_df
-
-    def process(
-        self,
-        phenotype_df: pd.DataFrame,
-        filter_opt=SingleCellFilter,
-    ) -> pd.DataFrame:
         phenotype_df["start"] += 1  # change to 1-based
 
         return phenotype_df
 
+    def process(self, dat: Any, filter_opt=SingleCellFilter) -> pd.DataFrame:
+        pass
+
 
 def load_gene_gft_bed(gtf_bed_path: str) -> pd.DataFrame:
+    """Read gft bed file"""
     gene_map = pd.read_csv(gtf_bed_path, delimiter="\t")
     gene_map.columns = [
         "chr",
