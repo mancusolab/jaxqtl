@@ -98,40 +98,39 @@ def infer_beta(
             - len(p) * (gammaln(k) + gammaln(n) - gammaln(k + n))
         )
 
-    def info(params: ArrayLike, p: ArrayLike) -> Array:
+    def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> Tuple[Array, Array]:
         k, n = params
-        i_kn = -polygamma(1, k + n)
-        i_k = polygamma(1, k) + i_kn
-        i_n = polygamma(1, n) + i_kn
 
-        info_mat = jnp.array([[i_k, i_kn], [i_kn, i_n]])
+        # reuse terms
+        pg_1k = polygamma(1, k)
+        pg_1n = polygamma(1, n)
+        pg_1kn = polygamma(1, k + n)
 
-        return -len(p) * info_mat
+        pg_2k = polygamma(2, k)
+        pg_2n = polygamma(2, n)
+        pg_2kn = polygamma(2, k + n)
 
-    def christoffel(param: ArrayLike, p: ArrayLike) -> Array:
-        k, n = param
+        # fisher information matrix
+        i_kn = -pg_1kn
+        i_k = pg_1k + i_kn
+        i_n = pg_1n + i_kn
 
-        i_kkn = polygamma(1, n) * polygamma(2, k + n)
-        i_k = (
-            -polygamma(1, n) * polygamma(2, k)
-            + i_kkn
-            + polygamma(1, k + n) * polygamma(2, k)
-        )
-        i_knn = i_kkn - polygamma(1, k + n) * polygamma(2, n)
+        info_mat = -len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
 
-        i_nnk = polygamma(1, k) * polygamma(2, k + n)
-        i_nkk = i_nnk - polygamma(1, k + n) * polygamma(2, k)
-        i_n = (
-            -polygamma(1, k) * polygamma(2, n)
-            + i_nnk
-            + polygamma(1, k + n) * polygamma(2, n)
-        )
+        # first sub-matrix of the unscaled 2nd-order Christoffell symbol
+        i_kkn = pg_1n * pg_2kn
+        i_k = -pg_1n * pg_2k + i_kkn + pg_1kn * pg_2k
+        i_knn = i_kkn - pg_1kn * pg_2n
 
-        scale = (
-            -polygamma(1, k) * polygamma(1, n)
-            + polygamma(1, k) * polygamma(1, k + n)
-            + polygamma(1, n) * polygamma(1, k + n)
-        )
+        # second sub-matrix of the unscaled 2nd-order Christoffell symbol
+        i_nnk = pg_1k * pg_2kn
+        i_nkk = i_nnk - pg_1kn * pg_2k
+        i_n = -pg_1k * pg_2n + i_nnk + pg_1kn * pg_2n
+
+        # scale for the 2nd-order Christoffel symbol
+        scale = -pg_1k * pg_1n + (pg_1k + pg_1n) * pg_1kn
+
+        # combine into single tensor
         sec_gamma = (
             0.5
             * jnp.array(
@@ -140,7 +139,7 @@ def infer_beta(
             / scale
         )
 
-        return sec_gamma
+        return info_mat, sec_gamma
 
     score_fn = grad(loglik)
 
@@ -148,10 +147,10 @@ def infer_beta(
         old_lik, diff, num_iter, old_param = val
         # first order approx to RGD => NGD
         # direction = NatGrad
-        direction = jnla.solve(info(old_param, p_perm), score_fn(old_param, p_perm))
+        info_mat, gamma = info_and_christoffel(old_param, p_perm)
+        direction = jnla.solve(info_mat, score_fn(old_param, p_perm))
 
         # take second order approx to RGD
-        gamma = christoffel(old_param, p_perm)
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
         new_param = old_param - stepsize * direction - 0.5 * stepsize ** 2 * adjustment
 
