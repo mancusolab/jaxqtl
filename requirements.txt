@@ -2,11 +2,13 @@ cyvcf2
 decoupler
 equinox
 fastparquet
+ipython
 jax
 jaxlib
 jaxopt
 numpy
 pandas_plink
 pyarrow
+rpy2
 scanpy
 typing_extensions
