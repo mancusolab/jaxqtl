@@ -23,10 +23,10 @@ from jaxqtl.map import map_cis, map_cis_nominal
 config.update("jax_enable_x64", True)
 # pd.set_option("display.max_columns", 500)
 
-geno_path = "../example/data/chr22.n94.bed"
+geno_path = "./example/data/chr22.n94.bed"
 # raw_count_path = "./example/local/Countdata_n100.h5ad"
-covar_path = "../example/data/donor_features.n94.tsv"
-pheno_path = "../example/data/CD14_positive_monocyte.bed.gz"
+covar_path = "./example/data/donor_features.n94.tsv"
+pheno_path = "./example/data/CD14_positive_monocyte.n94.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 

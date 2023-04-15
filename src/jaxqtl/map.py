@@ -45,6 +45,8 @@ class MapCisSingleState:
             self.pval_beta,
         ]
 
+        result = [element.tolist() for element in result]
+
         return result, vdx
 
 
@@ -164,7 +166,7 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if len(results) > 1:
+        if len(results) > 9:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
