@@ -1,3 +1,4 @@
+import os
 import re
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
@@ -19,7 +20,6 @@ class SingleCellFilter:
     n_genes: int = 2500
     percent_mt: int = 5  # 5 means 5%
     norm_target_sum: float = 1e6
-    cell_type: str = "CD14-positive monocyte"
     bulk_method: str = "mean"
     bulk_min_prop: float = 0.2
     bulk_min_smpls: int = 2
@@ -91,32 +91,42 @@ class H5AD(PhenoIO):
     def write_bed(
         pheno: pd.DataFrame,
         gtf_bed_path: str = "./example/data/Homo_sapiens.GRCh37.87.bed.gz",
-        out_dir: str = "./example/data",
-        cell_type: str = "CD14-positive monocyte",
+        out_dir: str = "./example/local/phe_bed",
+        celltype_path: str = "./example/data/celltype.tsv",
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
-        pheno_onetype = pheno[pheno.index.get_level_values("cell_type") == cell_type]
+        cell_type_list = pd.read_csv(celltype_path, sep="\t").iloc[:, 0].to_list()
 
-        # drop genes with all zero expressions
-        pheno_onetype = pheno_onetype.loc[:, (pheno_onetype != 0).any(axis=0)]
+        for cell_type in cell_type_list:
 
-        # remove cell type index
-        pheno_onetype = pheno_onetype.reset_index(level="cell_type", drop=True)
+            pheno_onetype = pheno[
+                pheno.index.get_level_values("cell_type") == cell_type
+            ]
 
-        # transpose s.t samples on columns, put ensembl_id back to column
-        bed = pheno_onetype.T
-        bed = bed.reset_index()
+            # drop genes with all zero expressions
+            pheno_onetype = pheno_onetype.loc[:, (pheno_onetype != 0).any(axis=0)]
 
-        # load gtf file for locating tss
-        gene_map = load_gene_gft_bed(gtf_bed_path)
+            # remove cell type index
+            pheno_onetype = pheno_onetype.reset_index(level="cell_type", drop=True)
 
-        out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on="ensembl_id")
-        out = out.drop("ensemble_id", axis=1)
-        out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
+            # transpose s.t samples on columns, put ensembl_id back to column
+            bed = pheno_onetype.T
+            bed = bed.reset_index()
 
-        cell_type_outname = re.sub("[^0-9a-zA-Z]+", "_", cell_type)
-        out.to_csv(out_dir + "/" + cell_type_outname + ".bed.gz", index=False, sep="\t")
+            # load gtf file for locating tss
+            gene_map = load_gene_gft_bed(gtf_bed_path)
+
+            out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on="ensembl_id")
+            out = out.drop("ensemble_id", axis=1)
+            out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
+
+            cell_type_outname = re.sub("[^0-9a-zA-Z]+", "_", cell_type)
+            out.to_csv(
+                os.path.join(out_dir, f"{cell_type_outname}.bed.gz"),
+                index=False,
+                sep="\t",
+            )
 
 
 class PheBedReader(PhenoIO):
