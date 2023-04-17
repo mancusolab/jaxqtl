@@ -1,4 +1,3 @@
-import os
 from dataclasses import dataclass
 from typing import List, NamedTuple, Tuple
 
@@ -113,7 +112,7 @@ def map_cis(
     ]
 
     results = []
-    gene_info.gene_map = gene_info.gene_map.loc[gene_info.gene_map.chr == "22"]
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -228,8 +227,7 @@ def map_cis_single(
 def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    out_dir: str,
-    prefix: str,
+    out_path: str,
     append_intercept: bool = True,
     standardize: bool = True,
     window: int = 500000,
@@ -354,6 +352,4 @@ def map_cis_nominal(
     # split by chrom
     for chrom in outdf["chrom"].unique().tolist():
         one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
-        one_chrom_df.to_parquet(
-            os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.{chrom}.parquet")
-        )
+        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.parquet")

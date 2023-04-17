@@ -60,7 +60,7 @@ dat.filter_geno("22")
 mapcis_out = map_cis(dat, family=Poisson(), perm=BetaPerm())
 print(mapcis_out.slope)
 
-map_cis_nominal(dat, family=Poisson(), out_dir="./example/result", prefix="dat_n94")
+map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94")
 
 prefix = "dat_n94"
 out_dir = "./example/result"
