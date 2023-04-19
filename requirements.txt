@@ -9,7 +9,6 @@ numpy
 pandas_plink
 pyarrow
 python < 3.11
-rpy2
-rpy2
 scanpy
+scipy
 typing_extensions

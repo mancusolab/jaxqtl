@@ -44,6 +44,7 @@ class MapCisSingleState:
             self.pval_beta,
         ]
 
+        # TODO: replace this with jnp.ravel()
         result = [element.tolist() for element in result]
 
         return result, vdx
