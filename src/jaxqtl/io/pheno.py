@@ -15,6 +15,9 @@ from anndata import AnnData
 class SingleCellFilter:
     """Filtering metric for single cell data"""
 
+    id_col: str = "donor_id"
+    celltype_col: str = "cell_type"
+    mt_col: str = "percent.mt"
     min_cells: int = 3
     min_genes: int = 200
     n_genes: int = 2500
@@ -44,7 +47,13 @@ class H5AD(PhenoIO):
         """Read raw count file in H5AD format"""
         return sc.read_h5ad(pheno_path)
 
-    def process(self, dat: AnnData, filter_opt=SingleCellFilter) -> pd.DataFrame:
+    def process(
+        self,
+        dat: AnnData,
+        filter_opt=SingleCellFilter,
+        id_col: str = "donor_id",
+        celltype_col: str = "cell_type",
+    ) -> pd.DataFrame:
         """Filter single cell data and create pseudo-bulk
         dat.X: n_obs (cell) x n_vars (genes)
         dat.var_name = 'ensembl_id'
@@ -67,6 +76,7 @@ class H5AD(PhenoIO):
 
         # normalize by total UMI count: scale factor (in-place change), CPM if target=1e6
         # every cell has the same total count
+        # TODO: estimate size factor and normalize using AE&Huber suggested method
         sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)
 
         # mean count for given cell type within individual and create a view

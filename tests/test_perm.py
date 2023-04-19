@@ -25,6 +25,7 @@ def test_betaperm():
 
     observed = res[0:2]
     converged = res[2]
+    print(observed)
     assert_array_eq(converged, jnp.asarray(1.0))
     assert_array_eq(
         observed, expected, rtol=5.2e-2

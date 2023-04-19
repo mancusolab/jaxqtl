@@ -16,7 +16,7 @@ sys.path.insert(1, os.path.dirname(__file__))  # ?
 # port https://github.com/nfusi/qvalue/blob/master/qvalue/qvalue.py to use jax
 
 
-def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> float:
+def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.ndarray:
     """Estimate pi0 for qvalue calculation"""
     p = p[~np.isnan(p)]  # remove NA values
     m = len(p)
@@ -56,6 +56,11 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> float:
         pi0Smooth = interpolate.splev(lam[-1], tck)
         pi0 = np.append(pi0Smooth, 1).min()
 
+        # Or try CubicSpline
+        # tck2 = interpolate.CubicSpline(lam, pi0)
+        # pi0Smooth = tck2(lam[-1])
+        # pi0 = np.append(pi0Smooth, 1).min()
+
         if verbose:
             log.info("qvalues pi0=%.3f, estimated proportion of null features " % pi0)
 
@@ -78,7 +83,7 @@ def calculate_qval(
     lam: np.ndarray = None,
     fdr_level: float = 0.05,
     lowmem=False,
-) -> Tuple[np.ndarray, float]:
+) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate q value"""
 
     p = p[~np.isnan(p)]  # remove NA values

@@ -8,7 +8,7 @@ import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
-from jax.scipy.special import gammaln, polygamma
+from jax.scipy.special import polygamma
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -88,14 +88,8 @@ def infer_beta(
     p ~ Beta(k, n)
     """
 
-    def loglik(params: ArrayLike, p: ArrayLike) -> Array:
-        k, n = params
-        # cannot use jaxstats.beta.logpdf due to bug when deriv at 1, 1
-        return (
-            (k - 1) * jnp.sum(jnp.log(p))
-            + (n - 1) * jnp.sum(jnp.log1p(-p))
-            - len(p) * (gammaln(k) + gammaln(n) - gammaln(k + n))
-        )
+    def loglik(params, p: ArrayLike) -> Array:
+        return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
 
     def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> Tuple[Array, Array]:
         k, n = params

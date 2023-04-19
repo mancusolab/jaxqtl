@@ -43,8 +43,17 @@ class GeneMetaData:
 
         self.gene_map = pos_df
 
-    def filter_chr(self, chrom: str):
-        self.gene_map = self.gene_map.loc[self.gene_map.chr == chrom]
+    def filter_chr(self, *chrom: str):
+        """filter gene meta data by chromosome for faster loop over genes
+
+        *chrome should be specified as: filter_chr("22", "21")
+        the args chrom will be turned into Tuple
+        """
+        # TODO: check with Nick
+        assert all(
+            isinstance(item, str) for item in chrom
+        ), "Chromosomes must be specified in strings, eg. "
+        self.gene_map = self.gene_map.loc[self.gene_map.chr.isin(chrom)]
 
     def __iter__(self):
         for _, gene in self.gene_map.iterrows():

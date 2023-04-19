@@ -16,33 +16,33 @@ from jax.config import config
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
+from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
 from jaxqtl.map import map_cis, map_cis_nominal
 
 config.update("jax_enable_x64", True)
 # pd.set_option("display.max_columns", 500)
 
-geno_path = "./example/data/chr22.n94.bed"
-raw_count_path = "./example/local/Countdata_n100.h5ad"
-covar_path = "./example/data/donor_features.n94.tsv"
-pheno_path = "./example/data/CD14_positive_monocyte.n94.bed.gz"
+geno_path = "../example/data/chr22.n94.bed"
+raw_count_path = "../example/local/Countdata_n100.h5ad"
+covar_path = "../example/data/donor_features.n94.tsv"
+pheno_path = "../example/data/CD14_positive_monocyte.n94.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 
-# Prepare input #
-# For given cell type, create bed files from h5ad file
-pheno_reader = H5AD()
-count_mat = pheno_reader(raw_count_path)
-count_df = pheno_reader.process(count_mat, SingleCellFilter)
-
-# cell_type = "CD14-positive monocyte"
-pheno_reader.write_bed(
-    count_df,
-    gtf_bed_path="./example/data/Homo_sapiens.GRCh37.87.bed.gz",
-    out_dir="./example/local/phe_bed",
-    celltype_path="./example/data/celltype.tsv",
-)
+# # Prepare input #
+# # For given cell type, create bed files from h5ad file
+# pheno_reader = H5AD()
+# count_mat = pheno_reader(raw_count_path)
+# count_df = pheno_reader.process(count_mat, SingleCellFilter)
+#
+# # cell_type = "CD14-positive monocyte"
+# pheno_reader.write_bed(
+#     count_df,
+#     gtf_bed_path="./example/data/Homo_sapiens.GRCh37.87.bed.gz",
+#     out_dir="./example/local/phe_bed",
+#     celltype_path="./example/data/celltype.tsv",
+# )
 
 
 # run Mapping #
@@ -54,7 +54,8 @@ dat = read_data(
     pheno_reader=PheBedReader(),
 )
 
-dat.filter_geno("22")
+maf_threshold = 0.01
+dat.filter_geno(maf_threshold, "22", "21")
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat, family=Poisson(), perm=BetaPerm())

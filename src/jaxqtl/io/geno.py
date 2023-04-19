@@ -1,7 +1,7 @@
 import gzip
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import equinox as eqx
 import numpy as np
@@ -21,25 +21,7 @@ class GenoIO(eqx.Module, metaclass=ABCMeta):
 
     @abstractmethod
     def __call__(self, path: str) -> PlinkState:
-        """
-        Read files
-        """
         pass
-
-    @staticmethod
-    def filter_geno(
-        geno: pd.DataFrame, bim: pd.DataFrame, maf_threshold: float
-    ) -> Tuple[pd.DataFrame, pd.DataFrame]:
-
-        af = np.array(geno.mean(axis=0) / 2)
-        maf = np.where(af > 0.5, 1 - af, af)  # convert to maf
-        geno = geno.loc[:, maf > maf_threshold]
-        bim = bim.loc[maf > maf_threshold]
-        bim.i = np.arange(0, len(bim))  # reset index i after variant filtering
-
-        assert geno.shape[1] == len(bim), "genotype and bim file do not have same shape"
-
-        return geno, bim
 
 
 class PlinkReader(GenoIO):
@@ -69,7 +51,9 @@ class VCFReader(GenoIO):
     def __call__(self, vcf_path: str) -> PlinkState:
         """read genotype from VCF file
         Note: slower than PlinkReader()
-        Recommend converting VCF file to bed file first
+        Recommend converting VCF file to bed file first using command:
+        `plink2 --vcf example.vcf.gz --make-bed --out ex`
+
         """
 
         # read VCF files

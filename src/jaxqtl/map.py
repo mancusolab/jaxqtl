@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -13,6 +13,7 @@ from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
+from jaxqtl.post.qvalue import add_qvalues
 
 
 @dataclass
@@ -74,9 +75,15 @@ def map_cis(
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
     verbose: bool = True,
+    qvalue_lambda: Optional[np.ndarray] = None,
+    fdr_level: float = 0.05,
+    log=None,
 ) -> pd.DataFrame:
-
-    log = get_log()
+    """Cis mapping for each gene, report lead variant
+    use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
+    """
+    if log is None:
+        log = get_log()
 
     # TODO: we need to do some validation here...
     X = dat.covar
@@ -171,6 +178,9 @@ def map_cis(
 
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
+
+    # add qvalue
+    result_df = add_qvalues(result_df, log, fdr_level, qvalue_lambda)
 
     return result_df
 

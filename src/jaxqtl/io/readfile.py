@@ -10,6 +10,7 @@ from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
 from jaxqtl.io.geno import GenoIO, PlinkReader
 from jaxqtl.io.pheno import PheBedReader, PhenoIO  # , H5AD, SingleCellFilter
+from jaxqtl.log import get_log
 
 # pd.set_option("display.max_rows", 100000)
 
@@ -22,12 +23,24 @@ class ReadyDataState:
     pheno_meta: GeneMetaData
     covar: Array  # sample x covariate
 
-    def filter_geno(self, chrom: str):
-        self.pheno_meta.filter_chr(chrom)
-        self.bim = self.bim.loc[self.bim.chrom == chrom]
+    def filter_geno(self, maf_threshold: float = 0.0, *chrom):
+        self.pheno_meta.filter_chr(*chrom)
+        self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
 
-        # pull genotype for this chrom only and reset "i" for pulling genotype by position
+        # filter bim by maf
+        assert 0 <= maf_threshold <= 1, "maf threshold must be in range [0, 1]"
+        if maf_threshold > 0.0:
+            af = np.array(self.geno.mean(axis=0) / 2)
+            maf = np.where(af > 0.5, 1 - af, af)  # convert to maf
+            self.bim = self.bim.loc[maf > maf_threshold]
+
+        # pull filtered geno by bim file
         self.geno = jnp.take(self.geno, jnp.array(self.bim.i), axis=1)
+        assert self.geno.shape[1] == len(
+            self.bim
+        ), "genotype and bim file do not have same shape"
+
+        # reset "i" for pulling genotype by position
         self.bim.i = np.arange(0, self.geno.shape[1])
 
 
@@ -35,9 +48,9 @@ def read_data(
     geno_path: str,
     pheno_path: str,
     covar_path: str,
-    maf_threshold: float = 0.0,
     geno_reader: GenoIO = PlinkReader(),
     pheno_reader: PhenoIO = PheBedReader(),
+    log=None,
 ) -> ReadyDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
@@ -54,9 +67,11 @@ def read_data(
     All these files must contain the same set of individuals (better ordered, but not required)
     Internally we check ordering and guarantee they are in the same order as phenotype data
     """
-    # raw genotype data
+    if log is None:
+        log = get_log()
+
+    # raw genotype data and impute for genotype data
     geno, bim, sample_info = geno_reader(geno_path)
-    geno, bim = geno_reader.filter_geno(geno, bim, maf_threshold)
 
     covar = covar_reader(covar_path)
 
