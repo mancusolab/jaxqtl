@@ -25,6 +25,7 @@ class LinearSolve(eqx.Module, metaclass=ABCMeta):
         y: ArrayLike,
         eta: ArrayLike,
         family: ExponentialFamily,
+        stepsize: float = 1.0,
     ) -> Array:
         pass
 
@@ -36,12 +37,13 @@ class QRSolve(LinearSolve):
         y: ArrayLike,
         eta: ArrayLike,
         family: ExponentialFamily,
+        stepsize: float = 1.0,
     ) -> Array:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
-        r = eta + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k) * stepsize
         w_r = w_half * r
         w_X = w_half * X
 
@@ -57,6 +59,7 @@ class CholeskySolve(LinearSolve):
         y: jnp.ndarray,
         eta: jnp.ndarray,
         family: ExponentialFamily,
+        stepsize: float = 1.0,
     ) -> Array:
 
         # calculate dispersion only for NB model
@@ -67,7 +70,7 @@ class CholeskySolve(LinearSolve):
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
-        r = eta + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k) * stepsize
         w_X = w_half * X
 
         XtWX = w_X.T @ w_X
@@ -84,12 +87,13 @@ class CGSolve(LinearSolve):
         y: ArrayLike,
         eta: ArrayLike,
         family: ExponentialFamily,
+        stepsize: float = 1.0,
     ) -> Array:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
-        r = eta + g_deriv_k * (y - mu_k)
+        r = eta + g_deriv_k * (y - mu_k) * stepsize
         w_half_X = X * w_half
 
         def _matvec(beta):

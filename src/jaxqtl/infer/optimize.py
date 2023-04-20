@@ -24,10 +24,11 @@ def irls(
     eta: jnp.ndarray,
     max_iter: int = 1000,
     tol: float = 1e-3,
+    stepsize: float = 1.0,
 ) -> IRLSState:
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o = val
-        beta = solver(X, y, eta_o, family)
+        beta = solver(X, y, eta_o, family, stepsize)
         # jax.debug.breakpoint()
         eta_n = X @ beta
         likelihood_o = family.loglikelihood(X, y, eta_o)

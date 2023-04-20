@@ -17,6 +17,9 @@ spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
 solver = CholeskySolve
 
+stepsize = 1.0
+maxiter = 100
+
 
 def test_linear_regression():
 
@@ -28,7 +31,8 @@ def test_linear_regression():
         X=spector_data.exog,
         y=spector_data.endog,
         append=False,
-        maxiter=100,
+        maxiter=maxiter,
+        stepsize=stepsize,
     )
 
     glm_state = test_irls.fit()
@@ -39,7 +43,8 @@ def test_linear_regression():
         y=spector_data.endog,
         solver=CholeskySolve(),
         append=False,
-        maxiter=100,
+        maxiter=maxiter,
+        stepsize=stepsize,
     )
     glm_state = test_irls.fit()
     assert_betas_eq(glm_state, sm_state)
@@ -55,7 +60,8 @@ def test_logistic():
         y=spector_data.endog,
         family=Binomial(),
         append=False,
-        maxiter=100,
+        maxiter=maxiter,
+        stepsize=stepsize,
     )
     glm_state = test_logit.fit()
     assert_betas_eq(glm_state, sm_state)
@@ -71,7 +77,8 @@ def test_poisson():
         y=spector_data.endog,
         family=Poisson(),
         append=False,
-        maxiter=100,
+        maxiter=maxiter,
+        stepsize=stepsize,
     )
     glm_state = test_poisson.fit()
     assert_betas_eq(glm_state, sm_state)

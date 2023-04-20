@@ -1,3 +1,4 @@
+anndata
 cyvcf2
 decoupler
 equinox
@@ -6,6 +7,7 @@ jax
 jaxlib
 jaxopt
 numpy
+pandas
 pandas_plink
 pyarrow
 python < 3.11

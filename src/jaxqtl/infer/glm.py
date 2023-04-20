@@ -56,6 +56,7 @@ class GLM:
         maxiter: int = 100,
         tol: float = 1e-3,
         init: Optional[ArrayLike] = None,
+        stepsize: float = 1.0,
     ) -> None:
         nobs = len(y)
         self.maxiter = maxiter
@@ -69,8 +70,9 @@ class GLM:
         self.family = family
         self.solver = solver
         self.init = init if init is not None else family.init_eta(self.y)
+        self.stepsize = stepsize
 
-    def WaldTest(self) -> Tuple[jnp.ndarray, jnp.ndarray, int]:
+    def WaldTest(self) -> Tuple[Array, Array, int]:
         """
         beta_MLE ~ N(beta, I^-1), for large sample size
         """
@@ -84,7 +86,7 @@ class GLM:
 
         return TS, pval, df
 
-    def sumstats(self) -> jnp.ndarray:
+    def sumstats(self) -> Array:
         _, _, weight = self.family.calc_weight(self.X, self.y, self.eta)
         infor = (self.X * weight).T @ self.X
         beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
@@ -92,7 +94,14 @@ class GLM:
 
     def fit(self) -> GLMState:
         beta, self.n_iter, self.converged = irls(
-            self.X, self.y, self.family, self.solver, self.init, self.maxiter, self.tol
+            self.X,
+            self.y,
+            self.family,
+            self.solver,
+            self.init,
+            self.maxiter,
+            self.tol,
+            self.stepsize,
         )
         self.eta = self.X @ beta
         self.mu = self.family.glink.inverse(self.eta)
@@ -102,7 +111,7 @@ class GLM:
 
         return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
 
-    def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> jnp.ndarray:
+    def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.square(y - mu)
 
     def __str__(self) -> str:

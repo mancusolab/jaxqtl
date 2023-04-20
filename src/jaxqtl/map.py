@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Tuple
 
 import numpy as np
 import pandas as pd
@@ -81,8 +81,6 @@ def map_cis(
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
     verbose: bool = True,
-    qvalue_lambda: Optional[np.ndarray] = None,
-    fdr_level: float = 0.05,
     log=None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant

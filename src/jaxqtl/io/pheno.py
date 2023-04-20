@@ -6,9 +6,11 @@ from typing import Any
 
 import decoupler as dc
 import equinox as eqx
+import numpy as np
 import pandas as pd
 import scanpy as sc
 from anndata import AnnData
+from scipy.sparse import diags
 
 
 @dataclass
@@ -18,6 +20,7 @@ class SingleCellFilter:
     id_col: str = "donor_id"
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
+    shifted_y0: float = 1.0
     min_cells: int = 3
     min_genes: int = 200
     n_genes: int = 2500
@@ -63,27 +66,30 @@ class H5AD(PhenoIO):
             pseudo bulk RNA seq data for all cell types
             index by ['donor_id', 'cell_type']
         """
+        # TODO: check these result, make col names consistent
         # filter cells by min number of genes expressed (in place)
         sc.pp.filter_cells(dat, min_genes=SingleCellFilter.min_genes)
+
+        #  filter cells with too many genes expressed (in place)
+        sc.pp.filter_cells(dat, max_genes=SingleCellFilter.n_genes)
+
         # filter genes by min number of cells expressed (in place)
         sc.pp.filter_genes(dat, min_cells=SingleCellFilter.min_cells)
 
-        #  filter cells with too many genes expressed
-        dat = dat[dat.obs["n_genes"] < SingleCellFilter.n_genes, :]
+        # filter cells that have >5% mitochondrial counts
+        # here return the actual sparse matrix instead of View for shifted_transformation_nolog()
+        dat = dat[dat.obs[SingleCellFilter.mt_col] < SingleCellFilter.percent_mt].copy()
 
-        #  filter cells that have >5% mitochondrial counts
-        dat = dat[dat.obs["percent.mt"] < SingleCellFilter.percent_mt, :]
-
-        # normalize by total UMI count: scale factor (in-place change), CPM if target=1e6
-        # every cell has the same total count
-        # TODO: estimate size factor and normalize using AE&Huber suggested method
-        sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)
+        # sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)  # CPM method
+        dat = shifted_transformation_nolog(
+            dat, SingleCellFilter.shifted_y0
+        )  # take < 1min
 
         # mean count for given cell type within individual and create a view
         dat.bulk = dc.get_pseudobulk(
             dat,
-            sample_col="donor_id",
-            groups_col="cell_type",
+            sample_col=SingleCellFilter.id_col,
+            groups_col=SingleCellFilter.celltype_col,
             mode=SingleCellFilter.bulk_method,  # take mean across cells for each individual
             min_prop=SingleCellFilter.bulk_min_prop,  # filter gene
             min_smpls=SingleCellFilter.bulk_min_smpls,  # filter gene
@@ -95,6 +101,7 @@ class H5AD(PhenoIO):
         count = pd.DataFrame(dat.bulk.X)  # sample_cell x gene
         count = count.set_index([dat.bulk.obs["donor_id"], dat.bulk.obs["cell_type"]])
         count.columns = dat.bulk.var.index
+
         return count
 
     @staticmethod
@@ -194,3 +201,22 @@ def load_gene_gft_bed(gtf_bed_path: str) -> pd.DataFrame:
     ]
 
     return gene_map
+
+
+def shifted_transformation_nolog(adata: AnnData, y0: float = 1.0):
+    """Suggested by AE & Huber 2023 paper
+    size factor = (sum_g Y_gc) / L
+    where L = (sum_gc Y_gc) / (number of cells)
+
+    adapt code from: https://github.com/mousepixels/sanbomics_scripts/blob/main/shifted_transformation.ipynb
+    """
+    # X: cell x gene
+    size_factors = adata.X.sum(axis=1) / np.mean(adata.X.sum(axis=1))  # (num cell x 1)
+
+    # array.A1 returns self as a flattened array, same as array.ravel()
+    adata.X = diags(1.0 / size_factors.A1).dot(adata.X)
+    adata.X.data = (
+        adata.X.data + y0
+    )  # !!! add y0 to non-sparse values, not sure if need add y0 to zeros raw count
+
+    return adata
