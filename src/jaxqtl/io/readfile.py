@@ -12,8 +12,6 @@ from jaxqtl.io.geno import GenoIO, PlinkReader
 from jaxqtl.io.pheno import PheBedReader, PhenoIO  # , H5AD, SingleCellFilter
 from jaxqtl.log import get_log
 
-# pd.set_option("display.max_rows", 100000)
-
 
 @dataclass
 class ReadyDataState:
@@ -25,9 +23,10 @@ class ReadyDataState:
 
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
         self.pheno_meta.filter_chr(*chrom)
+
+        # filter bim by chr and maf
         self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
 
-        # filter bim by maf
         assert 0 <= maf_threshold <= 1, "maf threshold must be in range [0, 1]"
         if maf_threshold > 0.0:
             af = np.array(self.geno.mean(axis=0) / 2)
@@ -71,17 +70,22 @@ def read_data(
         log = get_log()
 
     # raw genotype data and impute for genotype data
+    log.info("Load genotype.")
     geno, bim, sample_info = geno_reader(geno_path)
 
+    log.info("Load covariates.")
     covar = covar_reader(covar_path)
 
+    log.info("Load phenotype.")
     pheno = pheno_reader(pheno_path)
 
+    # put gene name (index) back to columns
     pos_df = pheno[["chr", "start", "end"]].reset_index()
     pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
 
     # transpose to sample x genes
     pheno = pheno.T
+    pheno.columns.name = None  # remove column name due to tranpose
     sample_id = pheno.index.to_list()
 
     # filter genotype and covariates by sample id
@@ -96,6 +100,8 @@ def read_data(
     assert (
         covar.index == pheno.index
     ).all(), "samples are not sorted in covariate and count matrix"
+
+    log.info("Finished loading raw data.")
 
     return ReadyDataState(
         geno=jnp.float64(geno),

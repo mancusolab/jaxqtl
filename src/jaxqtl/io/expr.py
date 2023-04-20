@@ -9,15 +9,12 @@ class ExpressionData:
 
     def __init__(self, dat: pd.DataFrame):
         self.count = dat
-        self.gene_list = dat.columns.to_list()
 
     def __iter__(self):
         pass
 
     def __getitem__(self, gene_name: str) -> Array:
-        """Get pseudo bulk data for one cell type
-        Remove genes with all zeros count across samples
-        """
+        """Get count data for one cell type"""
         nobs = self.count.shape[0]
         onegene = self.count[gene_name]
         return jnp.float64(onegene).reshape((nobs, 1))
@@ -37,7 +34,6 @@ class GeneMetaData:
     ):
         """position df for genes
         chr   start   end  phenotype_id
-
         Note: start = end (tss position)
         """
 
@@ -52,13 +48,13 @@ class GeneMetaData:
         # TODO: check with Nick
         assert all(
             isinstance(item, str) for item in chrom
-        ), "Chromosomes must be specified in strings, eg. "
+        ), "Chromosomes must be specified in strings, eg. filter_chr('22', '21', ...) "
         self.gene_map = self.gene_map.loc[self.gene_map.chr.isin(chrom)]
 
     def __iter__(self):
         for _, gene in self.gene_map.iterrows():
-            gene_name = gene.phenotype_id  # gene.ensemble_id
+            gene_name = gene.phenotype_id  # ensemble_id
             chrom = gene.chr
-            start_min = gene.start  # gene.tss_start_min
-            end_max = gene.end  # gene.tss_start_max
+            start_min = gene.start
+            end_max = gene.end
             yield gene_name, chrom, start_min, end_max

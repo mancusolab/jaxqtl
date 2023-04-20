@@ -14,11 +14,12 @@ import pandas as pd
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import read_data
+from jaxqtl.log import get_log
 from jaxqtl.map import map_cis, map_cis_nominal
+from jaxqtl.post.qvalue import add_qvalues
 
 config.update("jax_enable_x64", True)
 # pd.set_option("display.max_columns", 500)
@@ -29,7 +30,7 @@ covar_path = "../example/data/donor_features.n94.tsv"
 pheno_path = "../example/data/CD14_positive_monocyte.n94.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
-
+log = get_log()
 # # Prepare input #
 # # For given cell type, create bed files from h5ad file
 # pheno_reader = H5AD()
@@ -54,12 +55,17 @@ dat = read_data(
     pheno_reader=PheBedReader(),
 )
 
-maf_threshold = 0.01
-dat.filter_geno(maf_threshold, "22", "21")
+maf_threshold = 0.0
+dat.filter_geno(maf_threshold, "22")
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
-mapcis_out = map_cis(dat, family=Poisson(), perm=BetaPerm())
+mapcis_out = map_cis(dat, family=Poisson())
 print(mapcis_out.slope)
+
+pi0 = None
+qvalue_lambda = None
+add_qvalues(mapcis_out, log, 0.05, pi0, qvalue_lambda)
+
 
 map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94")
 

@@ -13,7 +13,6 @@ from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
-from jaxqtl.post.qvalue import add_qvalues
 
 
 @dataclass
@@ -23,12 +22,19 @@ class MapCisSingleState:
     pval_beta: Array
     beta_param: Array
 
-    def get_lead(self) -> Tuple[List, int]:
-
-        # need to break tie
-        # for now return first occurrence
-
-        vdx = int(jnp.argmin(self.cisglm.p))
+    def get_lead(
+        self, key: rdm.PRNGKey, random_tiebreak: bool = False
+    ) -> Tuple[List, int]:
+        # break tie to call lead eQTL
+        if random_tiebreak:
+            key, split_key = rdm.split(key)
+            ties_ind = jnp.argwhere(
+                self.cisglm.p == self.cisglm.p.min()
+            )  # return (k, 1)
+            vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
+        else:
+            # take first occurrence
+            vdx = int(jnp.argmin(self.cisglm.p))
 
         beta_1, beta_2, beta_converged = self.beta_param
         result = [
@@ -45,7 +51,6 @@ class MapCisSingleState:
             self.pval_beta,
         ]
 
-        # TODO: replace this with jnp.ravel()
         result = [element.tolist() for element in result]
 
         return result, vdx
@@ -72,6 +77,7 @@ def map_cis(
     standardize: bool = True,
     seed: int = 123,
     window: int = 500000,
+    random_tiebreak: bool = False,
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
     verbose: bool = True,
@@ -160,7 +166,7 @@ def map_cis(
                 str(rend),
             )
         # get info at lead hit, and lead hit index
-        row, vdx = result.get_lead()
+        row, vdx = result.get_lead(key, random_tiebreak)
 
         # pull SNP info at lead hit index
         snp_id = var_df.iloc[vdx].snp
@@ -173,14 +179,11 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if len(results) > 9:
+        if len(results) > 1:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
-
-    # add qvalue
-    result_df = add_qvalues(result_df, log, fdr_level, qvalue_lambda)
 
     return result_df
 
@@ -239,6 +242,7 @@ def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
     out_path: str,
+    log=None,
     append_intercept: bool = True,
     standardize: bool = True,
     window: int = 500000,
@@ -252,8 +256,8 @@ def map_cis_nominal(
     Returns:
         write out parquet file by chrom for efficient data storage and retrieval
     """
-
-    log = get_log()
+    if log is None:
+        log = get_log()
 
     # TODO: we need to do some validation here...
     X = dat.covar

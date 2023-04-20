@@ -1,7 +1,7 @@
 # Adapt from code in tensorqtl created by Francois Aguet
 import os
 import sys
-from typing import Tuple
+from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -32,14 +32,22 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
         lam.min() >= 0 and lam.max() < 1
     ), "ERROR: qvalue_lambda must be within [0, 1)."
 
-    assert p.max() >= lam.max(), (
-        "ERROR: maximum p-value is smaller than lambda range. "
-        "Change the range of lambda or use qvalue_truncp() for truncated p-values."
-    )
+    if p.max() < lam.max():
+        lam = np.array([0.0])
+        ll = 1
+        log.info(
+            "Warning: maximum p-value is smaller than lambda range. Set lam=0, fall back BH method."
+        )
+    # assert p.max() >= lam.max(), (
+    #     "ERROR: maximum p-value is smaller than lambda range. "
+    #     "Change the range of lambda or use qvalue_truncp() for truncated p-values."
+    # )
 
     # Determines pi0
     if ll == 1:
-        pi0 = np.mean(p >= lam) / (1 - lam)
+        pi0 = np.mean(p >= lam[0]) / (
+            1 - lam[0]
+        )  # extract value from one element array
         pi0 = np.append(pi0, 1).min()
     else:
         # evaluate pi0 for different lambdas
@@ -65,7 +73,7 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
             log.info("qvalues pi0=%.3f, estimated proportion of null features " % pi0)
 
     if pi0 <= 0:
-        pi0 = 1
+        pi0 = 1.0
         log.info(
             "The estimated pi0 <= 0. Setting the pi0 estimate to be 1. "
             "Check that you have valid p-values or use a different range of lambda."
@@ -140,7 +148,11 @@ def calculate_qval(
 
 
 def add_qvalues(
-    cis_df: pd.DataFrame, log, fdr: float = 0.05, qvalue_lambda=None
+    cis_df: pd.DataFrame,
+    log,
+    fdr: float = 0.05,
+    pi0: Optional[float] = None,
+    qvalue_lambda: Optional[np.ndarray] = None,
 ) -> pd.DataFrame:
     """Annotate permutation results with q-values, p-value threshold"""
 
@@ -162,9 +174,7 @@ def add_qvalues(
         )
 
     # calculate q-values
-    if qvalue_lambda is not None:
-        log.info(f"  * Calculating q-values with lambda = {qvalue_lambda:.3f}")
-    qval, pi0 = calculate_qval(cis_df[pval_col], log, lam=qvalue_lambda)
+    qval, pi0 = calculate_qval(np.array(cis_df[pval_col]), log, pi0, lam=qvalue_lambda)
 
     cis_df["qval"] = qval
     log.info(f"  * Proportion of significant phenotypes (1-pi0): {1-pi0:.2f}")
@@ -172,8 +182,10 @@ def add_qvalues(
 
     # determine global min(p) significance threshold and calculate nominal p-value threshold for each gene
     if pval_col == "pval_beta":
-        lb = cis_df.loc[cis_df["qval"] <= fdr, "pval_beta"].sort_values()  # ascending
-        ub = cis_df.loc[cis_df["qval"] > fdr, "pval_beta"].sort_values()
+        lb = (
+            cis_df.loc[cis_df["qval"] <= fdr, "pval_beta"].sort_values().values
+        )  # ascending
+        ub = cis_df.loc[cis_df["qval"] > fdr, "pval_beta"].sort_values().values
 
         if lb.shape[0] > 0:  # significant phenotypes
             lb = lb[-1]

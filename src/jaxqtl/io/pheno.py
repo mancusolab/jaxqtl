@@ -169,6 +169,12 @@ class PheBedReader(PhenoIO):
             inplace=True,
         )
 
+        # ensure chr values are str
+        phenotype_df["chr"] = phenotype_df["chr"].astype(str)
+
+        # set index name
+        phenotype_df.index.name = "phenotype_id"
+
         phenotype_df["start"] += 1  # change to 1-based
 
         return phenotype_df

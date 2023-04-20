@@ -10,6 +10,8 @@ def covar_reader(covar_path: str) -> pd.DataFrame:
     id . .
     varname1 . .
     varname2 . .
+
+    Note: no missing values allowed
     """
     if covar_path.endswith((".bed.gz", ".bed")):
         # wide format
@@ -22,5 +24,9 @@ def covar_reader(covar_path: str) -> pd.DataFrame:
         covar.index.names = ["iid"]
     else:
         raise ValueError("Unsupported covariate file type.")
+
+    assert (
+        not covar.isnull().values.any()
+    ), "Missing values are not allowed in covariate file."
 
     return covar
