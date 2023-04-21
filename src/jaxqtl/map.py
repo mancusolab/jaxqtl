@@ -177,7 +177,7 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if len(results) > 1:
+        if len(results) > 4:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)

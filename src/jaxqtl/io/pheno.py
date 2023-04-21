@@ -13,6 +13,7 @@ from anndata import AnnData
 from scipy.sparse import diags
 
 
+# TODO: need find out commonly used parameters
 @dataclass
 class SingleCellFilter:
     """Filtering metric for single cell data"""
@@ -27,8 +28,10 @@ class SingleCellFilter:
     percent_mt: int = 5  # 5 means 5%
     norm_target_sum: float = 1e6
     bulk_method: str = "mean"
-    bulk_min_prop: float = 0.2
-    bulk_min_smpls: int = 2
+    bulk_min_prop: float = (
+        0.0  # Minimum proportion of cells that express a gene in a sample.
+    )
+    bulk_min_smpls: int = 0  # Minimum number of samples with >= proportion of cells with expression than min_prop
     bulk_min_cells: int = 0
     bulk_min_count: int = 0
 
@@ -81,20 +84,19 @@ class H5AD(PhenoIO):
         dat = dat[dat.obs[SingleCellFilter.mt_col] < SingleCellFilter.percent_mt].copy()
 
         # sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)  # CPM method
-        dat = shifted_transformation_nolog(
-            dat, SingleCellFilter.shifted_y0
-        )  # take < 1min
+        dat = adjust_size_factor(dat)
 
         # mean count for given cell type within individual and create a view
+        # first compute and then filter
         dat.bulk = dc.get_pseudobulk(
             dat,
             sample_col=SingleCellFilter.id_col,
             groups_col=SingleCellFilter.celltype_col,
             mode=SingleCellFilter.bulk_method,  # take mean across cells for each individual
-            min_prop=SingleCellFilter.bulk_min_prop,  # filter gene
-            min_smpls=SingleCellFilter.bulk_min_smpls,  # filter gene
-            min_cells=SingleCellFilter.bulk_min_cells,  # filter sample
-            min_counts=SingleCellFilter.bulk_min_count,  # filter sample
+            min_cells=SingleCellFilter.bulk_min_cells,  # exclude sample with < min cells from calc
+            min_counts=SingleCellFilter.bulk_min_count,  # exclude sample < min # summed count from calc
+            min_prop=SingleCellFilter.bulk_min_prop,  # selects genes that expressed across > % cells in each sample
+            min_smpls=SingleCellFilter.bulk_min_smpls,  # this condition is met across a minimum number of samples
         )
 
         # create pd.Dataframe
@@ -203,7 +205,7 @@ def load_gene_gft_bed(gtf_bed_path: str) -> pd.DataFrame:
     return gene_map
 
 
-def shifted_transformation_nolog(adata: AnnData, y0: float = 1.0):
+def adjust_size_factor(adata: AnnData):
     """Suggested by AE & Huber 2023 paper
     size factor = (sum_g Y_gc) / L
     where L = (sum_gc Y_gc) / (number of cells)
@@ -215,8 +217,10 @@ def shifted_transformation_nolog(adata: AnnData, y0: float = 1.0):
 
     # array.A1 returns self as a flattened array, same as array.ravel()
     adata.X = diags(1.0 / size_factors.A1).dot(adata.X)
-    adata.X.data = (
-        adata.X.data + y0
-    )  # !!! add y0 to non-sparse values, not sure if need add y0 to zeros raw count
+    # adata.X = adata.X.toarray()  # convert to dense array
+    # adata.X = adata.X + y0
+    # adata.X.data = (
+    #     adata.X.data + y0
+    # )  # !!! add y0 to non-sparse values, not sure if need add y0 to zeros raw count
 
     return adata

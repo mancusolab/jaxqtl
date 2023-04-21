@@ -15,11 +15,15 @@ def test_betaperm():
     key, key_random = random.split(key, 2)
 
     true_k = 1.5
-    true_n = 5.0
+    true_n = 1000.0
     expected = jnp.array([true_k, true_n])
     p_perm = random.beta(key_random, a=true_k, b=true_n, shape=(sample_n,))
 
-    init = jnp.ones(2)
+    # init = jnp.ones(2)
+    p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+    k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
+    n_init = k_init * (1 / p_mean - 1)
+    init = jnp.array([k_init, n_init])
 
     res = infer_beta(p_perm, init, stepsize=1.0)
 

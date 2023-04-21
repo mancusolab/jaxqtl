@@ -57,7 +57,7 @@ class DirectPerm(Permutation):
             key, p_key = rdm.split(key)
             y_p = rdm.permutation(p_key, y, axis=0)
             glmstate = cis_scan(X, G, y_p, family)
-            return key, glmstate.p[-1]
+            return key, glmstate.p.min()
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
@@ -210,12 +210,14 @@ class BetaPerm(DirectPerm):
             family,
             key_init,
         )
+        # TODO: calculate true df and adjust every p_perm accordingly
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
         n_init = k_init * (1 / p_mean - 1)
         init = jnp.array([k_init, n_init])
 
+        # infer beta based on adjusted p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
         adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
