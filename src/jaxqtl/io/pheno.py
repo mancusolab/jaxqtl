@@ -23,9 +23,9 @@ class SingleCellFilter:
     mt_col: str = "percent.mt"
     min_cells: int = 3
     min_genes: int = 200
-    n_genes: int = 2500
+    n_genes: int = 2500  # can decide this based on plotting
     percent_mt: int = 5  # 5 means 5%
-    norm_target_sum: float = 1e6
+    norm_target_sum: float = 1e6  # not recommended
     bulk_method: str = "mean"
     bulk_min_prop: float = (
         0.0  # Minimum proportion of cells that express a gene in a sample.
