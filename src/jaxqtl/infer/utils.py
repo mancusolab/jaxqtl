@@ -74,6 +74,8 @@ def cis_scan(
     G: ArrayLike,
     y: ArrayLike,
     family: ExponentialFamily,
+    offset_eta: ArrayLike,
+    projection_covar: ArrayLike,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
@@ -81,14 +83,16 @@ def cis_scan(
     """
 
     def _func(carry, snp):
-        M = jnp.hstack((X, snp[:, jnp.newaxis]))
+        # M = jnp.hstack((X, snp[:, jnp.newaxis]))
+        # regress out projection:
+        M = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
         glmstate = GLM(
             X=M,
             y=y,
             family=family,
-            append=False,
+            append=True,  # append intercept
             maxiter=100,
-        ).fit()
+        ).fit(offset_eta)
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
 

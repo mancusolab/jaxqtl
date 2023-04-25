@@ -1,4 +1,5 @@
 from abc import ABCMeta, abstractmethod
+from typing import Tuple
 
 import equinox as eqx
 import jaxopt.linear_solve as ls
@@ -26,7 +27,8 @@ class LinearSolve(eqx.Module, metaclass=ABCMeta):
         eta: ArrayLike,
         family: ExponentialFamily,
         stepsize: float = 1.0,
-    ) -> Array:
+        offset_eta: ArrayLike = jnp.array([0.0]),
+    ) -> Tuple[Array, Array]:
         pass
 
 
@@ -38,18 +40,19 @@ class QRSolve(LinearSolve):
         eta: ArrayLike,
         family: ExponentialFamily,
         stepsize: float = 1.0,
-    ) -> Array:
+        offset_eta: ArrayLike = jnp.array([0.0]),
+    ) -> Tuple[Array, Array]:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k) * stepsize
-        w_r = w_half * r
-        w_X = w_half * X
+        w_half_r = w_half * r
+        w_half_X = w_half * X
 
-        Q, R = jnpla.qr(w_X)
+        Q, R = jnpla.qr(w_half_X)
 
-        return jspla.solve_triangular(R, Q.T @ w_r)
+        return jspla.solve_triangular(R, Q.T @ w_half_r), w_half_X
 
 
 class CholeskySolve(LinearSolve):
@@ -60,7 +63,8 @@ class CholeskySolve(LinearSolve):
         eta: jnp.ndarray,
         family: ExponentialFamily,
         stepsize: float = 1.0,
-    ) -> Array:
+        offset_eta: ArrayLike = jnp.array([0.0]),
+    ) -> Tuple[Array, Array]:
 
         # calculate dispersion only for NB model
         # family.alpha = family.calc_dispersion(
@@ -71,13 +75,13 @@ class CholeskySolve(LinearSolve):
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k) * stepsize
-        w_X = w_half * X
+        w_half_X = w_half * X
 
-        XtWX = w_X.T @ w_X
+        XtWX = w_half_X.T @ w_half_X
         XtWy = (X * weight).T @ r
         factor = jspla.cho_factor(XtWX, lower=True)
 
-        return jspla.cho_solve(factor, XtWy)
+        return jspla.cho_solve(factor, XtWy), w_half_X
 
 
 class CGSolve(LinearSolve):
@@ -88,7 +92,10 @@ class CGSolve(LinearSolve):
         eta: ArrayLike,
         family: ExponentialFamily,
         stepsize: float = 1.0,
-    ) -> Array:
+        offset_eta: ArrayLike = jnp.array(
+            [0.0]
+        ),  # offset_eta = X @ b from covariate only model
+    ) -> Tuple[Array, Array]:
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
@@ -99,4 +106,7 @@ class CGSolve(LinearSolve):
         def _matvec(beta):
             return w_half_X @ beta
 
-        return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
+        return (
+            ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1))),
+            w_half_X,
+        )

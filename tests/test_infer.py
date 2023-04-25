@@ -2,11 +2,12 @@ import statsmodels.api as sm
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
 )
-from utils import assert_betas_eq
+from utils import assert_array_eq, assert_betas_eq
 
+import jax.numpy as jnp
 from jax.config import config
 
-from jaxqtl.families.distribution import Binomial, Poisson
+from jaxqtl.families.distribution import Binomial, Gaussian, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
 
@@ -19,6 +20,49 @@ solver = CholeskySolve
 
 stepsize = 1.0
 maxiter = 100
+
+test_resid_family = Gaussian()  # Poisson reg result is closer
+
+
+def test_resid_reg():
+    X = spector_data.exog.copy()
+
+    truth = GLM(
+        X=X,
+        y=spector_data.endog,
+        append=False,
+        family=test_resid_family,
+        maxiter=maxiter,
+        stepsize=stepsize,
+    ).fit()
+
+    covar = X.drop("PSI", axis=1)
+
+    glmstate_null = GLM(
+        X=covar,
+        y=spector_data.endog,
+        family=test_resid_family,
+        append=False,
+        maxiter=100,
+    ).fit()
+
+    PSI = jnp.array(X["PSI"])
+    X["PSI_resid"] = (
+        PSI[:, jnp.newaxis] - glmstate_null.projection_covar @ PSI[:, jnp.newaxis]
+    )
+
+    glmstate = GLM(
+        X=X[["const", "PSI_resid"]],
+        y=spector_data.endog,
+        family=test_resid_family,
+        append=False,
+        maxiter=1000,
+    ).fit(glmstate_null.offset_eta)
+
+    print(f"betas: truth={truth.beta[-1]}, est={glmstate.beta[-1]}")
+    print(f"SE: truth={truth.se[-1]}, est={glmstate.se[-1]}")
+    assert_array_eq(glmstate.beta[-1], truth.beta[-1])
+    assert_array_eq(glmstate.se[-1], truth.se[-1])
 
 
 def test_linear_regression():
@@ -47,7 +91,10 @@ def test_linear_regression():
         stepsize=stepsize,
     )
     glm_state = test_irls.fit()
+
     assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
 def test_logistic():
@@ -65,6 +112,8 @@ def test_logistic():
     )
     glm_state = test_logit.fit()
     assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
 def test_poisson():
@@ -82,6 +131,8 @@ def test_poisson():
     )
     glm_state = test_poisson.fit()
     assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
 # -------------------------------------------------#

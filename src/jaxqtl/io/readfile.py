@@ -42,6 +42,12 @@ class ReadyDataState:
         # reset "i" for pulling genotype by position
         self.bim.i = np.arange(0, self.geno.shape[1])
 
+    def transform_y(self, y0: float = 0.0, log_y: bool = False):
+        # add dispersion shift term
+        self.pheno.count = self.pheno.count + y0
+        if log_y:
+            self.pheno.count = jnp.log(self.pheno.count + 1e-3)  # prevent log(0)
+
 
 def read_data(
     geno_path: str,

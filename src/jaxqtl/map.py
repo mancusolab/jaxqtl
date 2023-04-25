@@ -9,10 +9,12 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
+from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
+from jaxqtl.post.qvalue import add_qvalues
 
 
 @dataclass
@@ -82,6 +84,12 @@ def map_cis(
     perm: Permutation = BetaPerm(),
     verbose: bool = True,
     log=None,
+    fdr_level: float = 0.05,
+    pi0: float = None,
+    qvalue_lambda: np.ndarray = None,
+    transform_y: bool = False,
+    transform_y_log: bool = False,
+    transform_y_y0: float = 0.0,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -101,6 +109,10 @@ def map_cis(
 
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    # transform y
+    if transform_y:
+        dat.transform_y(transform_y_y0, transform_y_log)
 
     key = rdm.PRNGKey(seed)
 
@@ -177,12 +189,13 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if len(results) > 4:
+        if len(results) > 2:
             break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
+    result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
     return result_df
 
 
@@ -202,8 +215,18 @@ def map_cis_single(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
+    # fit y ~ cov only
+    glmstate_null = GLM(
+        X=X,
+        y=y,
+        family=family,
+        append=False,
+        maxiter=100,
+    ).fit()
 
-    cisglmstate = cis_scan(X, G, y, family)
+    cisglmstate = cis_scan(
+        X, G, y, family, glmstate_null.offset_eta, glmstate_null.projection_covar
+    )
     beta_key, direct_key = rdm.split(key_init)
 
     pval_beta, beta_param = perm(
@@ -218,7 +241,7 @@ def map_cis_single(
 
     perm_iters_required = round(1 / sig_level)
     directperm = DirectPerm(perm_iters_required)
-    pval_perm, _ = directperm(
+    pval_perm, _, _ = directperm(
         X,
         y,
         G,
@@ -304,7 +327,16 @@ def map_cis_nominal(
                 str(rend),
             )
 
-        result = cis_scan(X, G, y, family)
+        glmstate_null = GLM(
+            X=X,
+            y=y,
+            family=family,
+            append=False,
+            maxiter=100,
+        ).fit()
+        result = cis_scan(
+            X, G, y, family, glmstate_null.offset_eta, glmstate_null.projection_covar
+        )
 
         if verbose:
             log.info(

@@ -21,7 +21,6 @@ class SingleCellFilter:
     id_col: str = "donor_id"
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
-    shifted_y0: float = 1.0
     min_cells: int = 3
     min_genes: int = 200
     n_genes: int = 2500
@@ -212,6 +211,7 @@ def adjust_size_factor(adata: AnnData):
 
     adapt code from: https://github.com/mousepixels/sanbomics_scripts/blob/main/shifted_transformation.ipynb
     """
+    # TODO: need do this by cell type? right now this divide by average across all cells all cell type
     # X: cell x gene
     size_factors = adata.X.sum(axis=1) / np.mean(adata.X.sum(axis=1))  # (num cell x 1)
 

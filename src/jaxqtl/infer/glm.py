@@ -1,14 +1,13 @@
 from typing import NamedTuple, Optional, Tuple
 
-from scipy.stats import t
-
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
-from jax.scipy.stats import norm  # , t (not supported rn), chi2
+from jax.scipy.stats import chi2  # , t (not supported rn), chi2
 from jax.tree_util import register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
+from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
 from jaxqtl.infer.solve import CGSolve, LinearSolve
 
@@ -18,6 +17,8 @@ class GLMState(NamedTuple):
     beta: Array
     se: Array
     p: Array
+    offset_eta: Array
+    projection_covar: Array
     num_iters: Array
     converged: Array
 
@@ -63,8 +64,15 @@ class GLM:
         self.tol = tol
 
         self.X = jnp.asarray(X)  # preprocessed in previous steps
-        if append is True:
+
+        try:
+            self.X.shape[1]
+        except IndexError:
+            self.X = self.X.reshape((len(self.X), 1))  # reshape 1D array
+
+        if append:
             self.X = jnp.column_stack((jnp.ones((nobs, 1)), self.X))
+
         self.y = jnp.asarray(y).reshape((nobs, 1))
 
         self.family = family
@@ -80,9 +88,11 @@ class GLM:
         TS = self.beta / self.beta_se
 
         if isinstance(self.family, Gaussian):
-            pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
+            # pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
+            pval = t_cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
         else:
-            pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
+            # pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
+            pval = 1 - chi2.cdf(jnp.square(TS), 1)
 
         return TS, pval, df
 
@@ -92,8 +102,8 @@ class GLM:
         beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
         return beta_se
 
-    def fit(self) -> GLMState:
-        beta, self.n_iter, self.converged = irls(
+    def fit(self, offset_eta: ArrayLike = jnp.array([0.0])) -> GLMState:
+        beta, self.n_iter, self.converged, w_half_X = irls(
             self.X,
             self.y,
             self.family,
@@ -102,6 +112,7 @@ class GLM:
             self.maxiter,
             self.tol,
             self.stepsize,
+            offset_eta,
         )
         self.eta = self.X @ beta
         self.mu = self.family.glink.inverse(self.eta)
@@ -109,7 +120,17 @@ class GLM:
         self.beta = jnp.reshape(beta, (self.X.shape[1],))
         self.TS, self.pval, self.df = self.WaldTest()
 
-        return GLMState(self.beta, self.beta_se, self.pval, self.n_iter, self.converged)
+        projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T
+
+        return GLMState(
+            self.beta,
+            self.beta_se,
+            self.pval,
+            self.eta,
+            projection_covar,
+            self.n_iter,
+            self.converged,
+        )
 
     def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.square(y - mu)

@@ -12,7 +12,10 @@ from jax.scipy.special import polygamma
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
+from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.utils import cis_scan
+
+# import jaxopt
 
 
 class Permutation(eqx.Module, metaclass=ABCMeta):
@@ -52,18 +55,34 @@ class DirectPerm(Permutation):
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
-    ) -> Tuple[Array, Array]:
+    ) -> Tuple[Array, Array, Array]:
         def _func(key, x):
             key, p_key = rdm.split(key)
             y_p = rdm.permutation(p_key, y, axis=0)
-            glmstate = cis_scan(X, G, y_p, family)
-            return key, glmstate.p.min()
+            glmstate_null = GLM(
+                X=X,
+                y=y_p,
+                family=family,
+                append=False,
+                maxiter=100,
+            ).fit()
+            glmstate = cis_scan(
+                X,
+                G,
+                y_p,
+                family,
+                glmstate_null.offset_eta,
+                glmstate_null.projection_covar,
+            )
+            allTS = jnp.abs(glmstate.beta / glmstate.se)
+            return key, allTS.max()  # glmstate.p.min()
 
-        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-
+        # key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        pvals = pval_from_Zstat(TS, 1.0)
         adj_p = _calc_adjp_naive(obs_p, pvals)
 
-        return adj_p, pvals
+        return adj_p, pvals, TS
 
 
 @jit
@@ -202,7 +221,7 @@ class BetaPerm(DirectPerm):
             k, n estimates
             adjusted p value for lead SNP
         """
-        _, p_perm = super().__call__(
+        _, p_perm, TS = super().__call__(
             X,
             y,
             G,
@@ -210,7 +229,21 @@ class BetaPerm(DirectPerm):
             family,
             key_init,
         )
+
         # TODO: calculate true df and adjust every p_perm accordingly
+        # dof_init = 1.0
+        # # https://github.com/google/jaxopt/blob/main/jaxopt/_src/scipy_wrappers.py  #  Nelder-Mead
+        # # res = scipy.optimize.minimize(lambda x: np.abs(df_cost(TS, x)), dof_init, method='Nelder-Mead', tol=tol)
+        # opt = jaxopt.ScipyMinimize(fun=lambda x: jnp.abs(df_cost(TS, x)),
+        #                            method='Nelder-Mead', tol=1e-3, maxiter=1000)
+        # opt_res = opt.run(init_params=dof_init)
+        #
+        # if opt_res.state.success:
+        #     true_dof = opt_res.params
+        # else:
+        #     true_dof = dof_init
+        # p_perm = pval_from_Zstat(TS, true_dof)
+
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
@@ -223,3 +256,16 @@ class BetaPerm(DirectPerm):
         adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
 
         return adj_p, beta_res
+
+
+def pval_from_Zstat(TS: ArrayLike, dof: float):
+    # TS is the beta / se
+    return 1 - jaxstats.chi2.cdf(jnp.square(TS), dof)
+
+
+def df_cost(TS, dof):
+    """minimize abs(1-alpha) as a function of M_eff"""
+    pval = pval_from_Zstat(TS, dof)
+    mean = jnp.mean(pval)
+    var = jnp.var(pval)
+    return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
