@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -91,6 +91,7 @@ def map_cis(
     transform_y: bool = False,
     transform_y_log: bool = False,
     transform_y_y0: float = 0.0,
+    test_break: Optional[int] = None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -190,8 +191,9 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if len(results) > 2:
-            break
+        if test_break is not None:
+            if len(results) > test_break:
+                break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
@@ -273,6 +275,7 @@ def map_cis_nominal(
     standardize: bool = True,
     window: int = 500000,
     verbose: bool = True,
+    test_break: Optional[int] = None,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -372,9 +375,10 @@ def map_cis_nominal(
         converged.append(result.converged)
         num_var_cis.append(var_df.shape[0])
 
-        # unit test for 3 genes
-        if len(slope) > 1:
-            break
+        # unit test for 2 genes
+        if test_break is not None:
+            if len(gene_mapped_list) > test_break:
+                break
 
     # write result
     start_row = 0
