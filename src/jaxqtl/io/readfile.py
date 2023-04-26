@@ -23,10 +23,11 @@ class ReadyDataState:
     covar: Array  # sample x covariate
 
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
-        self.pheno_meta.filter_chr(*chrom)
+        if len(chrom) > 0:
+            self.pheno_meta.filter_chr(*chrom)
 
-        # filter bim by chr and maf
-        self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
+            # filter bim by chr
+            self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
 
         assert 0 <= maf_threshold <= 1, "maf threshold must be in range [0, 1]"
         if maf_threshold > 0.0:
