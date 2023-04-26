@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Optional
 
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
@@ -17,8 +17,8 @@ class GLMState(NamedTuple):
     beta: Array
     se: Array
     p: Array
-    offset_eta: Array
-    projection_covar: Array
+    eta: Array
+    glm_wt: Array
     num_iters: Array
     converged: Array
 
@@ -80,13 +80,10 @@ class GLM:
         self.init = init if init is not None else family.init_eta(self.y)
         self.stepsize = stepsize
 
-    def WaldTest(self) -> Tuple[Array, Array, int]:
+    def WaldTest(self, TS, df) -> Array:
         """
         beta_MLE ~ N(beta, I^-1), for large sample size
         """
-        df = self.X.shape[0] - self.X.shape[1]
-        TS = self.beta / self.beta_se
-
         if isinstance(self.family, Gaussian):
             # pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
             pval = t_cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
@@ -94,16 +91,15 @@ class GLM:
             # pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
             pval = 1 - chi2.cdf(jnp.square(TS), 1)
 
-        return TS, pval, df
+        return pval
 
-    def sumstats(self) -> Array:
-        _, _, weight = self.family.calc_weight(self.X, self.y, self.eta)
+    def sumstats(self, weight) -> Array:
         infor = (self.X * weight).T @ self.X
         beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
         return beta_se
 
-    def fit(self, offset_eta: ArrayLike = jnp.array([0.0])) -> GLMState:
-        beta, self.n_iter, self.converged, w_half_X = irls(
+    def fit(self, offset_eta: ArrayLike = 0.0) -> GLMState:
+        beta, n_iter, converged = irls(
             self.X,
             self.y,
             self.family,
@@ -114,35 +110,40 @@ class GLM:
             self.stepsize,
             offset_eta,
         )
-        self.eta = self.X @ beta
-        self.mu = self.family.glink.inverse(self.eta)
-        self.beta_se = self.sumstats()
-        self.beta = jnp.reshape(beta, (self.X.shape[1],))
-        self.TS, self.pval, self.df = self.WaldTest()
+        eta = self.X @ beta + offset_eta
+        # mu = self.family.glink.inverse(eta)
 
-        projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T
+        _, _, weight = self.family.calc_weight(self.X, self.y, eta)
+
+        beta_se = self.sumstats(weight)
+        beta = jnp.reshape(beta, (self.X.shape[1],))
+
+        df = self.X.shape[0] - self.X.shape[1]
+        TS = beta / beta_se
+
+        pval = self.WaldTest(TS, df)
 
         return GLMState(
-            self.beta,
-            self.beta_se,
-            self.pval,
-            self.eta,
-            projection_covar,
-            self.n_iter,
-            self.converged,
+            beta,
+            beta_se,
+            pval,
+            eta,
+            weight,
+            n_iter,
+            converged,
         )
 
     def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.square(y - mu)
 
-    def __str__(self) -> str:
-        return f"""
-        jaxQTL
-        beta: {self.beta}
-        se: {self.beta_se}
-        p: {self.pval}
-        converged: {self.converged} in {self.n_iter}
-               """
+    # def __str__(self) -> str:
+    #     return f"""
+    #     jaxQTL
+    #     beta: {self.beta}
+    #     se: {self.beta_se}
+    #     p: {self.pval}
+    #     converged: {self.converged} in {self.n_iter}
+    #            """
 
     def tree_flatten(self):
         children = (self.X, self.y, self.family, self.solver)

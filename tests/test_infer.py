@@ -5,6 +5,7 @@ from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
 from utils import assert_array_eq, assert_betas_eq
 
 import jax.numpy as jnp
+import jax.numpy.linalg as jnpla
 from jax.config import config
 
 from jaxqtl.families.distribution import Binomial, Gaussian, Poisson
@@ -26,10 +27,11 @@ test_resid_family = Gaussian()  # Poisson reg result is closer
 
 def test_resid_reg():
     X = spector_data.exog.copy()
+    y = jnp.array(spector_data.endog)[:, jnp.newaxis]
 
     truth = GLM(
         X=X,
-        y=spector_data.endog,
+        y=y,
         append=False,
         family=test_resid_family,
         maxiter=maxiter,
@@ -40,27 +42,36 @@ def test_resid_reg():
 
     glmstate_null = GLM(
         X=covar,
-        y=spector_data.endog,
+        y=y,
         family=test_resid_family,
         append=False,
         maxiter=100,
     ).fit()
 
     PSI = jnp.array(X["PSI"])
+    w_half_X = jnp.sqrt(glmstate_null.glm_wt) * jnp.array(covar)
+    projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
+
+    # covar_on_g = jnpla.lstsq(jnp.array(covar), PSI[:, jnp.newaxis])[0]
     X["PSI_resid"] = (
-        PSI[:, jnp.newaxis] - glmstate_null.projection_covar @ PSI[:, jnp.newaxis]
+        PSI[:, jnp.newaxis]
+        - projection_covar @ PSI[:, jnp.newaxis]
+        # PSI[:, jnp.newaxis] - jnp.array(covar) @ covar_on_g
     )
 
     glmstate = GLM(
-        X=X[["const", "PSI_resid"]],
-        y=spector_data.endog,
+        X=X["PSI_resid"],
+        y=y,
         family=test_resid_family,
         append=False,
         maxiter=1000,
-    ).fit(glmstate_null.offset_eta)
+    ).fit(glmstate_null.eta)
 
     print(f"betas: truth={truth.beta[-1]}, est={glmstate.beta[-1]}")
     print(f"SE: truth={truth.se[-1]}, est={glmstate.se[-1]}")
+    print(
+        f"Z: truth={truth.beta[-1]/truth.se[-1]}, est={glmstate.beta[-1]/glmstate.se[-1]}"
+    )
     assert_array_eq(glmstate.beta[-1], truth.beta[-1])
     assert_array_eq(glmstate.se[-1], truth.se[-1])
 
@@ -117,12 +128,31 @@ def test_logistic():
 
 
 def test_poisson():
+    # test logistic regression
+    mod = sm.Logit(spector_data.endog, spector_data.exog)
+    sm_state = mod.fit()
+
+    test_logit = GLM(
+        X=spector_data.exog,
+        y=spector_data.endog,
+        family=Binomial(),
+        append=False,
+        maxiter=maxiter,
+        stepsize=stepsize,
+    )
+    glm_state = test_logit.fit()
+    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
+def test_1D_X():
     # test poisson regression
-    mod = smPoisson(spector_data.endog, spector_data.exog)
+    mod = smPoisson(spector_data.endog, spector_data.exog["PSI"])
     sm_state = mod.fit(disp=0)
 
     test_poisson = GLM(
-        X=spector_data.exog,
+        X=spector_data.exog["PSI"],
         y=spector_data.endog,
         family=Poisson(),
         append=False,

@@ -63,9 +63,9 @@ mapcis_out = map_cis(dat, family=Poisson())
 print(mapcis_out.slope)
 
 
-map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94")
+map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94_test")
 
-prefix = "dat_n94"
+prefix = "dat_n94_test"
 out_dir = "./example/result"
 pairs_df = pd.read_parquet(os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.parquet"))
 

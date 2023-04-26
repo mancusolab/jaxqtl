@@ -10,6 +10,8 @@ from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.glm import GLM
 from jaxqtl.io.readfile import ReadyDataState
 
+# import jax.numpy.linalg as jnpla
+
 
 class CisGLMState(NamedTuple):
     af: Array
@@ -74,8 +76,8 @@ def cis_scan(
     G: ArrayLike,
     y: ArrayLike,
     family: ExponentialFamily,
-    offset_eta: ArrayLike,
-    projection_covar: ArrayLike,
+    offset_eta: ArrayLike = 0.0,
+    glm_null_wt: ArrayLike = 1.0,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
@@ -83,14 +85,16 @@ def cis_scan(
     """
 
     def _func(carry, snp):
-        # M = jnp.hstack((X, snp[:, jnp.newaxis]))
+        M = jnp.hstack((X, snp[:, jnp.newaxis]))
         # regress out projection:
-        M = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
+        # w_half_X = glm_null_wt * X  # n x p
+        # projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T
+        # M = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
         glmstate = GLM(
             X=M,
             y=y,
             family=family,
-            append=True,  # append intercept
+            append=False,  # append intercept
             maxiter=100,
         ).fit(offset_eta)
         af = jnp.mean(snp) / 2.0

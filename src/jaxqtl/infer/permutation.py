@@ -12,7 +12,8 @@ from jax.scipy.special import polygamma
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.glm import GLM
+
+# from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.utils import cis_scan
 
 # import jaxopt
@@ -59,20 +60,20 @@ class DirectPerm(Permutation):
         def _func(key, x):
             key, p_key = rdm.split(key)
             y_p = rdm.permutation(p_key, y, axis=0)
-            glmstate_null = GLM(
-                X=X,
-                y=y_p,
-                family=family,
-                append=False,
-                maxiter=100,
-            ).fit()
+            # glmstate_null = GLM(
+            #     X=X,
+            #     y=y_p,
+            #     family=family,
+            #     append=False,
+            #     maxiter=100,
+            # ).fit()
             glmstate = cis_scan(
                 X,
                 G,
                 y_p,
                 family,
-                glmstate_null.offset_eta,
-                glmstate_null.projection_covar,
+                # glmstate_null.eta,
+                # glmstate_null.glm_wt,
             )
             allTS = jnp.abs(glmstate.beta / glmstate.se)
             return key, allTS.max()  # glmstate.p.min()
