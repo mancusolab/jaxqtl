@@ -92,6 +92,7 @@ def map_cis(
     transform_y_log: bool = False,
     transform_y_y0: float = 0.0,
     test_break: Optional[int] = None,
+    direct_perm: bool = False,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -160,15 +161,7 @@ def map_cis(
                 str(lstart),
                 str(rend),
             )
-        result = map_cis_single(
-            X,
-            G,
-            y,
-            family,
-            g_key,
-            sig_level,
-            perm,
-        )
+        result = map_cis_single(X, G, y, family, g_key, sig_level, perm, direct_perm)
         if verbose:
             log.info(
                 "Finished cis-qtl scan for %s over region %s:%s-%s",
@@ -210,6 +203,7 @@ def map_cis_single(
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
+    direct_perm: bool = False,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -246,17 +240,20 @@ def map_cis_single(
         sig_level,
     )
 
-    perm_iters_required = round(1 / sig_level)
-    directperm = DirectPerm(perm_iters_required)
-    pval_perm, _, _ = directperm(
-        X,
-        y,
-        G,
-        jnp.min(cisglmstate.p),
-        family,
-        direct_key,
-        sig_level,
-    )
+    if direct_perm:
+        perm_iters_required = round(1 / sig_level)
+        directperm = DirectPerm(perm_iters_required)
+        pval_perm, _, _ = directperm(
+            X,
+            y,
+            G,
+            jnp.min(cisglmstate.p),
+            family,
+            direct_key,
+            sig_level,
+        )
+    else:
+        pval_perm = -9
 
     return MapCisSingleState(
         cisglm=cisglmstate,
