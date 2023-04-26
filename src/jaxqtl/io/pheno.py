@@ -23,7 +23,7 @@ class SingleCellFilter:
     mt_col: str = "percent.mt"
     min_cells: int = 3
     min_genes: int = 200
-    n_genes: int = 2500  # can decide this based on plotting
+    max_genes: int = 2500  # can decide this based on plotting
     percent_mt: int = 5  # 5 means 5%
     norm_target_sum: float = 1e6  # not recommended
     bulk_method: str = "mean"
@@ -58,6 +58,7 @@ class H5AD(PhenoIO):
         filter_opt=SingleCellFilter,
         id_col: str = "donor_id",
         celltype_col: str = "cell_type",
+        divide_size_factor: bool = True,
     ) -> pd.DataFrame:
         """Filter single cell data and create pseudo-bulk
         dat.X: n_obs (cell) x n_vars (genes)
@@ -73,7 +74,7 @@ class H5AD(PhenoIO):
         sc.pp.filter_cells(dat, min_genes=SingleCellFilter.min_genes)
 
         #  filter cells with too many genes expressed (in place)
-        sc.pp.filter_cells(dat, max_genes=SingleCellFilter.n_genes)
+        sc.pp.filter_cells(dat, max_genes=SingleCellFilter.max_genes)
 
         # filter genes by min number of cells expressed (in place)
         sc.pp.filter_genes(dat, min_cells=SingleCellFilter.min_cells)
@@ -83,7 +84,8 @@ class H5AD(PhenoIO):
         dat = dat[dat.obs[SingleCellFilter.mt_col] < SingleCellFilter.percent_mt].copy()
 
         # sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)  # CPM method
-        dat = adjust_size_factor(dat)
+        if divide_size_factor:
+            dat = adjust_size_factor(dat)
 
         # mean count for given cell type within individual and create a view
         # first compute and then filter

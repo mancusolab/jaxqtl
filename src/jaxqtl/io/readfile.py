@@ -2,6 +2,7 @@ from dataclasses import dataclass
 
 import numpy as np
 import pandas as pd
+from sklearn.decomposition import PCA
 
 import jax.numpy as jnp
 from jax import Array
@@ -42,11 +43,17 @@ class ReadyDataState:
         # reset "i" for pulling genotype by position
         self.bim.i = np.arange(0, self.geno.shape[1])
 
-    def transform_y(self, y0: float = 0.0, log_y: bool = False):
+    def transform_y(self, y0: float = 1.0, log_y: bool = False):
         # add dispersion shift term
         self.pheno.count = self.pheno.count + y0
         if log_y:
-            self.pheno.count = jnp.log(self.pheno.count + 1e-3)  # prevent log(0)
+            self.pheno.count = jnp.log(self.pheno.count)  # prevent log(0)
+
+    def add_covar_pheno_PC(self, k: int):
+        pca_pheno = PCA(n_components=k)
+        pca_res = pca_pheno.fit(self.pheno.count.T)
+        PCs = jnp.array(pca_res.components_.T)  # nxk
+        self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
 
 def read_data(
