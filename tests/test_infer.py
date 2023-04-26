@@ -8,7 +8,7 @@ import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 from jax.config import config
 
-from jaxqtl.families.distribution import Binomial, Gaussian, Poisson
+from jaxqtl.families.distribution import Binomial, Poisson  # , Gaussian
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
 
@@ -22,7 +22,7 @@ solver = CholeskySolve
 stepsize = 1.0
 maxiter = 100
 
-test_resid_family = Gaussian()  # Poisson reg result is closer
+test_resid_family = Binomial()  # Poisson reg result is closer
 
 
 def test_resid_reg():
@@ -50,7 +50,11 @@ def test_resid_reg():
 
     PSI = jnp.array(X["PSI"])
     w_half_X = jnp.sqrt(glmstate_null.glm_wt) * jnp.array(covar)
-    projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
+    w_X = glmstate_null.glm_wt * jnp.array(covar)
+    projection_covar = (
+        jnp.array(covar) @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
+    )  # nxn
+    # projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
 
     # covar_on_g = jnpla.lstsq(jnp.array(covar), PSI[:, jnp.newaxis])[0]
     X["PSI_resid"] = (
@@ -72,6 +76,29 @@ def test_resid_reg():
     print(
         f"Z: truth={truth.beta[-1]/truth.se[-1]}, est={glmstate.beta[-1]/glmstate.se[-1]}"
     )
+
+    mod_null = sm.GLM(spector_data.endog, covar, family=sm.families.Binomial()).fit()
+    mod_null_eta = mod_null.get_prediction(covar, which="linear").predicted
+    mod_null_mu = mod_null.get_prediction(covar, which="mean").predicted
+    glm_wt = mod_null_mu * (1 - mod_null_mu)
+    w_half_X = jnp.sqrt(glm_wt[:, jnp.newaxis]) * jnp.array(covar)
+    w_X = glm_wt[:, jnp.newaxis] * jnp.array(covar)
+    projection_covar = (
+        jnp.array(covar) @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
+    )  # nxn
+    # projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
+
+    X["PSI_resid"] = PSI[:, jnp.newaxis] - projection_covar @ PSI[:, jnp.newaxis]
+    mod_G = sm.GLM(
+        spector_data.endog,
+        X["PSI_resid"],
+        family=sm.families.Binomial(),
+        offset=mod_null_eta,
+    ).fit()
+
+    print(f"statsmodel betas: est={mod_G.params[-1]}")
+    print(f"statsmodel SE: est={mod_G.bse[-1]}")
+
     assert_array_eq(glmstate.beta[-1], truth.beta[-1])
     assert_array_eq(glmstate.se[-1], truth.se[-1])
 
