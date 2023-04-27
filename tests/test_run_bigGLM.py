@@ -14,9 +14,10 @@ import pandas as pd
 from jax.config import config
 
 from jaxqtl.families.distribution import Poisson  # , Gaussian
+from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
-from jaxqtl.io.readfile import read_data
+from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
+from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map import map_cis, map_cis_nominal
 
@@ -29,42 +30,48 @@ covar_path = "../example/data/donor_features.n94.tsv"
 pheno_path = "../example/local/CD14_positive_monocyte.bed.gz"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
+# log = get_log()
+# # Prepare input #
+# # For given cell type, create bed files from h5ad file
+# pheno_reader = H5AD()
+# count_mat = pheno_reader(raw_count_path)
+# count_df = pheno_reader.process(count_mat, SingleCellFilter, divide_size_factor=True)
+#
+# # cell_type = "CD14-positive monocyte"
+# pheno_reader.write_bed(
+#     count_df,
+#     gtf_bed_path="./example/data/Homo_sapiens.GRCh37.87.bed.gz",
+#     out_dir="./example/local/phe_bed",
+#     celltype_path="./example/data/celltype.tsv",
+# )
+
 log = get_log()
-# Prepare input #
-# For given cell type, create bed files from h5ad file
-pheno_reader = H5AD()
-count_mat = pheno_reader(raw_count_path)
-count_df = pheno_reader.process(count_mat, SingleCellFilter, divide_size_factor=True)
 
-# cell_type = "CD14-positive monocyte"
-pheno_reader.write_bed(
-    count_df,
-    gtf_bed_path="./example/data/Homo_sapiens.GRCh37.87.bed.gz",
-    out_dir="./example/local/phe_bed",
-    celltype_path="./example/data/celltype.tsv",
-)
+# raw genotype data and impute for genotype data
+log.info("Load genotype.")
+geno_reader = PlinkReader()
+geno, bim, sample_info = geno_reader(geno_path)
 
+log.info("Load covariates.")
+covar = covar_reader(covar_path)
+
+log.info("Load phenotype.")
+pheno_reader = PheBedReader()
+pheno = pheno_reader(pheno_path)
 
 # run Mapping #
-dat = read_data(
-    geno_path,
-    pheno_path,
-    covar_path,
-    geno_reader=PlinkReader(),
-    pheno_reader=PheBedReader(),
-)
+dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
 
 maf_threshold = 0.0
 dat.filter_geno(maf_threshold, "22", "21")
 
 # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
-dat.add_covar_pheno_PC(k=10)
+dat.add_covar_pheno_PC(k=2)
 
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
 mapcis_out = map_cis(dat, family=Poisson())
 print(mapcis_out.slope)
-
 
 map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94_test")
 

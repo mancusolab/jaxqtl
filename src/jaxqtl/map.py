@@ -91,7 +91,7 @@ def map_cis(
     transform_y: bool = False,
     transform_y_log: bool = False,
     transform_y_y0: float = 0.0,
-    test_break: Optional[int] = None,
+    test_break_n: Optional[int] = None,
     direct_perm: bool = False,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
@@ -184,8 +184,8 @@ def map_cis(
         results.append(result)
 
         # unit test for 2 genes
-        if test_break is not None:
-            if len(results) > test_break:
+        if test_break_n is not None:
+            if len(results) > test_break_n:
                 break
 
     # filter results based on user speicification (e.g., report all, report top, etc)
@@ -253,7 +253,7 @@ def map_cis_single(
             sig_level,
         )
     else:
-        pval_perm = -9
+        pval_perm = jnp.array([-9])
 
     return MapCisSingleState(
         cisglm=cisglmstate,

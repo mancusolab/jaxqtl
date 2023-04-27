@@ -12,7 +12,7 @@ from jax.config import config
 from jaxqtl.families.distribution import Poisson
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
-from jaxqtl.io.readfile import read_data
+from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map import map_cis, map_cis_nominal
 from jaxqtl.post import rfunc
@@ -47,7 +47,7 @@ def run_map(args, log):
     """Wrapper for run QTL mapping"""
 
     # read data
-    dat = read_data(
+    dat = create_readydata(
         args.geno,
         args.pheno,
         args.covar,

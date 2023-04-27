@@ -7,10 +7,7 @@ from sklearn.decomposition import PCA
 import jax.numpy as jnp
 from jax import Array
 
-from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
-from jaxqtl.io.geno import GenoIO, PlinkReader
-from jaxqtl.io.pheno import PheBedReader, PhenoIO  # , H5AD, SingleCellFilter
 from jaxqtl.log import get_log
 
 
@@ -57,13 +54,13 @@ class ReadyDataState:
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
 
-def read_data(
-    geno_path: str,
-    pheno_path: str,
-    covar_path: str,
-    geno_reader: GenoIO = PlinkReader(),
-    pheno_reader: PhenoIO = PheBedReader(),
+def create_readydata(
+    geno: pd.DataFrame,
+    bim: pd.DataFrame,
+    pheno: pd.DataFrame,
+    covar: pd.DataFrame,
     log=None,
+    autosomal_only: bool = True,
 ) -> ReadyDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
@@ -83,15 +80,9 @@ def read_data(
     if log is None:
         log = get_log()
 
-    # raw genotype data and impute for genotype data
-    log.info("Load genotype.")
-    geno, bim, sample_info = geno_reader(geno_path)
-
-    log.info("Load covariates.")
-    covar = covar_reader(covar_path)
-
-    log.info("Load phenotype.")
-    pheno = pheno_reader(pheno_path)
+    # keep genes in autosomals
+    if autosomal_only:
+        pheno = pheno.loc[pheno.chr.isin([str(i) for i in range(1, 23)])]
 
     # put gene name (index) back to columns
     pos_df = pheno[["chr", "start", "end"]].reset_index()
