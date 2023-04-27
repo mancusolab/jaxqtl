@@ -159,19 +159,20 @@ def add_qvalues(
     log.info("Computing q-values")
     log.info(f"  * Number of phenotypes tested: {cis_df.shape[0]}")
 
-    if not cis_df["pval_beta"].isnull().all():
-        pval_col = "pval_beta"
-        r = stats.pearsonr(cis_df["pval_perm"], cis_df["pval_beta"])[
-            0
-        ]  # correlation statistics
-        log.info(
-            f"  * Correlation between Beta-approximated and empirical p-values: {r:.4f}"
-        )
-    else:
-        pval_col = "pval_perm"
-        log.info(
-            "  * WARNING: no beta-approximated p-values found, using permutation p-values instead."
-        )
+    pval_col = "pval_beta"
+    # if not cis_df["pval_beta"].isnull().all():
+    #     pval_col = "pval_beta"
+    #     r = stats.pearsonr(cis_df["pval_perm"], cis_df["pval_beta"])[
+    #         0
+    #     ]  # correlation statistics
+    #     log.info(
+    #         f"  * Correlation between Beta-approximated and empirical p-values: {r:.4f}"
+    #     )
+    # else:
+    #     pval_col = "pval_perm"
+    #     log.info(
+    #         "  * WARNING: no beta-approximated p-values found, using permutation p-values instead."
+    #     )
 
     # calculate q-values
     qval, pi0 = calculate_qval(np.array(cis_df[pval_col]), log, pi0, lam=qvalue_lambda)
