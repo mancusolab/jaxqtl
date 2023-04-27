@@ -65,6 +65,8 @@ dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
 maf_threshold = 0.0
 dat.filter_geno(maf_threshold, "22", "21")
 
+dat.transform_y(y0=1.0, log_y=True)
+
 # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
 dat.add_covar_pheno_PC(k=2)
 

@@ -45,7 +45,7 @@ class ReadyDataState:
         # add dispersion shift term
         self.pheno.count = self.pheno.count + y0
         if log_y:
-            self.pheno.count = jnp.log(self.pheno.count)  # prevent log(0)
+            self.pheno.count = np.log(self.pheno.count)  # prevent log(0)
 
     def add_covar_pheno_PC(self, k: int):
         pca_pheno = PCA(n_components=k)
