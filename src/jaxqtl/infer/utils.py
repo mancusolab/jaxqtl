@@ -77,26 +77,37 @@ def cis_scan(
     y: ArrayLike,
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
-    glm_null_wt: ArrayLike = 1.0,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
+    # fit covariate only model
+    # glmstate_null = GLM(
+    #     X=X,
+    #     y=y,
+    #     family=family,
+    #     append=False,
+    #     maxiter=100,
+    # ).fit(offset_eta=offset_eta)
 
     def _func(carry, snp):
         M = jnp.hstack((X, snp[:, jnp.newaxis]))
-        # regress out projection:
-        # w_half_X = glm_null_wt * X  # n x p
-        # projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T
-        # M = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
+        # full model fit to compare Wald p to Score p
         glmstate = GLM(
             X=M,
             y=y,
             family=family,
-            append=False,  # append intercept
+            append=False,
             maxiter=100,
-        ).fit(offset_eta)
+        ).fit(offset_eta=offset_eta)
+
+        # w_half_X = jnp.diag(jnp.sqrt(glmstate_null.glm_wt)) @ X
+        # w_X = jnp.diag(glmstate_null.glm_wt) @ X
+        # # regress out covar from X2
+        # projection_covar = X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T  # nxn
+        # g = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
+
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
 

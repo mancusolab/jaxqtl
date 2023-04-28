@@ -1,4 +1,4 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple, Optional, Tuple
 
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
@@ -18,6 +18,7 @@ class GLMState(NamedTuple):
     se: Array
     p: Array
     eta: Array
+    mu: Array
     glm_wt: Array
     num_iters: Array
     converged: Array
@@ -80,25 +81,45 @@ class GLM:
         self.init = init if init is not None else family.init_eta(self.y)
         self.stepsize = stepsize
 
-    def WaldTest(self, TS, df) -> Array:
+    def wald_test(self, TS, df) -> Array:
         """
         beta_MLE ~ N(beta, I^-1), for large sample size
         """
         if isinstance(self.family, Gaussian):
-            # pval = t.cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
-            pval = t_cdf(-abs(TS), df) * 2  # follow t(df) for Gaussian
+            pval = t_cdf(-abs(TS), df) * 2  # follow t(n-p-1) for Gaussian
         else:
             # pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
-            pval = 1 - chi2.cdf(jnp.square(TS), 1)
+            pval = 1 - chi2.cdf(jnp.square(TS), 1)  # equivalently chi2(df=1)
 
         return pval
 
-    def sumstats(self, weight) -> Array:
+    @staticmethod
+    def score_test_add_g(
+        family: ExponentialFamily,
+        X: ArrayLike,
+        y: ArrayLike,
+        mu_null: ArrayLike,
+        eta_null: ArrayLike,
+        df: float,
+    ) -> Array:
+        """test for additional covariate g
+        X is the full design matrix containing covariates and g
+        calculate score in full model using the model fitted from null model
+        """
+        score_null = family.score(X, y, mu_null)
+        _, _, weight = family.calc_weight(X, y, eta_null)
+        score_null_info = (X * weight).T @ X
+        TS = (score_null[-1] ** 2) / jnp.diag(score_null_info)[-1]  # get TS for g
+        pval = 1 - chi2.cdf(TS, df)
+        return pval
+
+    def sumstats(self, weight) -> Tuple[Array, Array]:
         infor = (self.X * weight).T @ self.X
         beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
-        return beta_se
+        return beta_se, infor
 
     def fit(self, offset_eta: ArrayLike = 0.0) -> GLMState:
+        """Report Wald test p value"""
         beta, n_iter, converged = irls(
             self.X,
             self.y,
@@ -111,39 +132,28 @@ class GLM:
             offset_eta,
         )
         eta = self.X @ beta + offset_eta
-        # mu = self.family.glink.inverse(eta)
+        mu = self.family.glink.inverse(eta)
 
         _, _, weight = self.family.calc_weight(self.X, self.y, eta)
 
-        beta_se = self.sumstats(weight)
+        beta_se, infor = self.sumstats(weight)
         beta = jnp.reshape(beta, (self.X.shape[1],))
 
         df = self.X.shape[0] - self.X.shape[1]
         TS = beta / beta_se
 
-        pval = self.WaldTest(TS, df)
+        pval_wald = self.wald_test(TS, df)
 
         return GLMState(
             beta,
             beta_se,
-            pval,
+            pval_wald,
             eta,
+            mu,
             weight,
             n_iter,
             converged,
         )
-
-    def calc_resid(self, y: ArrayLike, mu: ArrayLike) -> Array:
-        return jnp.square(y - mu)
-
-    # def __str__(self) -> str:
-    #     return f"""
-    #     jaxQTL
-    #     beta: {self.beta}
-    #     se: {self.beta_se}
-    #     p: {self.pval}
-    #     converged: {self.converged} in {self.n_iter}
-    #            """
 
     def tree_flatten(self):
         children = (self.X, self.y, self.family, self.solver)

@@ -45,12 +45,14 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         pass
 
     @abstractmethod
-    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass
-
-    @abstractmethod
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         pass
+
+    def score(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+        """
+        For canonical link, this is X^t (y - mu)/phi, phi is the self.scale
+        """
+        return X.T @ (y - mu) / self.scale(X, y, mu)
 
     def random_gen(self, mu: ArrayLike, scale: ArrayLike) -> Array:
         pass
@@ -105,9 +107,6 @@ class Gaussian(ExponentialFamily):
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
         return logprob
 
-    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass  # TODO: old implementation was broken...
-
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.ones_like(mu)
 
@@ -140,9 +139,6 @@ class Binomial(ExponentialFamily):
         logprob = jnp.sum(jaxstats.bernoulli.logpmf(y, self.glink.inverse(eta)))
         return logprob
 
-    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass
-
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
@@ -163,9 +159,6 @@ class Poisson(ExponentialFamily):
     def loglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike) -> Array:
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return logprob
-
-    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu
@@ -204,9 +197,6 @@ class NegativeBinomial(ExponentialFamily):
         term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
         term2 = r * jnp.log1p(-p) + y * jnp.log(p)
         return jnp.sum(term1 + term2)
-
-    def score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-        pass
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu + self.alpha * mu ** 2

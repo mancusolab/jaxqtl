@@ -156,18 +156,18 @@ def test_logistic():
 
 def test_poisson():
     # test logistic regression
-    mod = sm.Logit(spector_data.endog, spector_data.exog)
+    mod = smPoisson(spector_data.endog, spector_data.exog)
     sm_state = mod.fit()
 
-    test_logit = GLM(
+    test_poisson = GLM(
         X=spector_data.exog,
         y=spector_data.endog,
-        family=Binomial(),
+        family=Poisson(),
         append=False,
         maxiter=maxiter,
         stepsize=stepsize,
     )
-    glm_state = test_logit.fit()
+    glm_state = test_poisson.fit()
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
@@ -190,6 +190,39 @@ def test_1D_X():
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
+def test_poisson_scoretest():
+    mod_full = GLM(
+        X=spector_data.exog,
+        y=spector_data.endog,
+        family=Poisson(),
+        append=False,
+        maxiter=maxiter,
+        stepsize=stepsize,
+    ).fit()
+    print(mod_full.p[-1])
+
+    mod_null = GLM(
+        X=spector_data.exog.drop("GPA", axis=1),
+        y=spector_data.endog,
+        family=Poisson(),
+        append=False,
+        maxiter=maxiter,
+        stepsize=stepsize,
+    ).fit()
+
+    pval_score = GLM.score_test_add_g(
+        Poisson(),
+        jnp.array(spector_data.exog),
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+        mod_null.mu,
+        mod_null.eta,
+        1.0,
+    )
+
+    # not sure  if the discrepancy is caused by small sample size n=30
+    assert_array_eq(pval_score, mod_full.p[-1])
 
 
 # -------------------------------------------------#

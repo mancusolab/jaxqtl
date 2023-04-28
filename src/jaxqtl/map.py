@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, NamedTuple, Tuple
 
 import numpy as np
 import pandas as pd
@@ -91,8 +91,8 @@ def map_cis(
     transform_y: bool = False,
     transform_y_log: bool = False,
     transform_y_y0: float = 0.0,
-    test_break_n: Optional[int] = None,
     direct_perm: bool = False,
+    genelist: List = None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -103,6 +103,10 @@ def map_cis(
     # TODO: we need to do some validation here...
     X = dat.covar
     n, k = X.shape
+
+    # filter gene list
+    if genelist is not None:
+        dat.filter_gene(genelist)
 
     gene_info = dat.pheno_meta
 
@@ -183,11 +187,6 @@ def map_cis(
         result = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
         results.append(result)
 
-        # unit test for 2 genes
-        if test_break_n is not None:
-            if len(results) > test_break_n:
-                break
-
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
@@ -213,20 +212,12 @@ def map_cis_single(
     perm: Permutation method
     """
     # fit y ~ cov only
-    # glmstate_null = GLM(
-    #     X=X,
-    #     y=y,
-    #     family=family,
-    #     append=False,
-    #     maxiter=100,
-    # ).fit()
 
     cisglmstate = cis_scan(
         X,
         G,
         y,
-        family
-        # , glmstate_null.eta, glmstate_null.glm_wt
+        family,
     )
     beta_key, direct_key = rdm.split(key_init)
 
@@ -272,7 +263,7 @@ def map_cis_nominal(
     standardize: bool = True,
     window: int = 500000,
     verbose: bool = True,
-    test_break: Optional[int] = None,
+    genelist: List = None,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -288,6 +279,10 @@ def map_cis_nominal(
     # TODO: we need to do some validation here...
     X = dat.covar
     n, k = X.shape
+
+    # filter gene list
+    if genelist is not None:
+        dat.filter_gene(genelist)
 
     gene_info = dat.pheno_meta
 
@@ -371,11 +366,6 @@ def map_cis_nominal(
         nominal_p.append(result.p)
         converged.append(result.converged)
         num_var_cis.append(var_df.shape[0])
-
-        # unit test for 2 genes
-        if test_break is not None:
-            if len(gene_mapped_list) > test_break:
-                break
 
     # write result
     start_row = 0

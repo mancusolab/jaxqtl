@@ -28,6 +28,7 @@ geno_path = "../example/data/chr22.n94"
 raw_count_path = "../example/local/Countdata_n100.h5ad"
 covar_path = "../example/data/donor_features.n94.tsv"
 pheno_path = "../example/local/CD14_positive_monocyte.bed.gz"
+genelist_path = "../example/data/genelist.tsv"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
 # log = get_log()
@@ -65,14 +66,18 @@ dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
 maf_threshold = 0.0
 dat.filter_geno(maf_threshold, "22", "21")
 
-dat.transform_y(y0=1.0, log_y=True)
+# filter phenotype (genes)
+gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
+# dat.filter_gene(gene_list)
+
+# dat.transform_y(y0=1.0, log_y=True)
 
 # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
 dat.add_covar_pheno_PC(k=2)
 
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
-mapcis_out = map_cis(dat, family=Poisson())
+mapcis_out = map_cis(dat, family=Poisson(), genelist=gene_list)
 print(mapcis_out.slope)
 
 map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94_test")

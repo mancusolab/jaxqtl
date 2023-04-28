@@ -29,9 +29,9 @@ class SimData:
         # M = 100
 
         X[:, 0] = np.ones((n,))  # intercept
-        X[:, 1] = np.random.binomial(3, maf, (n,))  # genotype (0,1,2)
-        X[:, 2] = np.random.binomial(1, 0.5, (n,))  # sex (0, 1)
-        X[:, 3] = np.random.normal(0, 1, (n,))  # center, standardize age
+        X[:, 1] = np.random.normal(0, 1, (n,))  # center, standardize age
+        X[:, 2] = np.random.binomial(3, maf, (n,))  # genotype (0,1,2)
+        X[:, 3] = np.random.binomial(1, 0.5, (n,))  # sex (0, 1)
         # X[:, 4:11] = np.random.normal(0, 1, (n, 7))
         # X[:, 4] = np.random.normal(0, 1, (n,))  # pseudo PC1
         # X[:, 5] = np.random.normal(0, 1, (n,))  # pseudo PC2

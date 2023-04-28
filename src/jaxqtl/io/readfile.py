@@ -1,4 +1,5 @@
 from dataclasses import dataclass
+from typing import List
 
 import numpy as np
 import pandas as pd
@@ -52,6 +53,17 @@ class ReadyDataState:
         pca_res = pca_pheno.fit(self.pheno.count.T)
         PCs = jnp.array(pca_res.components_.T)  # nxk
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
+
+    def filter_gene(self, gene_list: List):
+        """Filter genes to be mapped"""
+        # filter pheno
+        self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
+            self.pheno_meta.gene_map.phenotype_id.isin(gene_list)
+        ]
+        self.pheno.count = self.pheno.count[gene_list]
+        assert np.sum(
+            self.pheno_meta.gene_map.phenotype_id == self.pheno.count.columns
+        ) == len(gene_list), "gene map does not agree with pheno count matrix"
 
 
 def create_readydata(
