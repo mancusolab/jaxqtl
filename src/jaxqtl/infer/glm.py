@@ -98,19 +98,17 @@ class GLM:
         family: ExponentialFamily,
         X: ArrayLike,
         y: ArrayLike,
-        mu_null: ArrayLike,
-        eta_null: ArrayLike,
+        glm_null_res: GLMState,
         df: float,
     ) -> Array:
         """test for additional covariate g
         X is the full design matrix containing covariates and g
         calculate score in full model using the model fitted from null model
         """
-        score_null = family.score(X, y, mu_null)
-        _, _, weight = family.calc_weight(X, y, eta_null)
-        score_null_info = (X * weight).T @ X
-        TS = (score_null[-1] ** 2) / jnp.diag(score_null_info)[-1]  # get TS for g
-        pval = 1 - chi2.cdf(TS, df)
+        score_null = family.score(X, y, glm_null_res.mu)
+        score_null_info = (X * glm_null_res.glm_wt).T @ X
+        TS_chi2 = score_null.T @ jnpla.inv(score_null_info) @ score_null
+        pval = 1 - chi2.cdf(TS_chi2, df)
         return pval
 
     def sumstats(self, weight) -> Tuple[Array, Array]:

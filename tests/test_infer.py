@@ -24,6 +24,35 @@ maxiter = 100
 
 test_resid_family = Binomial()  # Poisson reg result is closer
 
+# ###
+# mod_full = GLM(
+#     X=spector_data.exog,
+#     y=spector_data.endog,
+#     family=Poisson(),
+#     append=False,
+#     maxiter=maxiter,
+#     stepsize=stepsize,
+# ).fit()
+# print(mod_full.p[-1])
+#
+# mod_null = GLM(
+#     X=spector_data.exog.drop("PSI", axis=1),
+#     y=spector_data.endog,
+#     family=Poisson(),
+#     append=False,
+#     maxiter=maxiter,
+#     stepsize=stepsize,
+# ).fit()
+#
+# pval_score = GLM.score_test_add_g(
+#     Poisson(),
+#     jnp.array(spector_data.exog),
+#     jnp.array(spector_data.endog)[:, jnp.newaxis],
+#     mod_null,
+#     1.0,
+# )
+# ###
+
 
 def test_resid_reg():
     X = spector_data.exog.copy()
@@ -216,12 +245,11 @@ def test_poisson_scoretest():
         Poisson(),
         jnp.array(spector_data.exog),
         jnp.array(spector_data.endog)[:, jnp.newaxis],
-        mod_null.mu,
-        mod_null.eta,
+        mod_null,
         1.0,
     )
 
-    # not sure  if the discrepancy is caused by small sample size n=30
+    # the discrepancy might be caused by small sample size n=30
     assert_array_eq(pval_score, mod_full.p[-1])
 
 
