@@ -116,7 +116,9 @@ class H5AD(PhenoIO):
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
-        cell_type_list = pd.read_csv(celltype_path, sep="\t").iloc[:, 0].to_list()
+        cell_type_list = (
+            pd.read_csv(celltype_path, sep="\t", header=False).iloc[:, 0].to_list()
+        )
 
         for cell_type in cell_type_list:
 
