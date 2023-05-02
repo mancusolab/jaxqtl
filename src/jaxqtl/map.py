@@ -156,7 +156,7 @@ def map_cis(
         if G.shape[1] == 0:
             continue
 
-        key, g_key = rdm.split(key)
+        key, g_key = rdm.split(key, 2)
         if verbose:
             log.info(
                 "Performing cis-qtl scan for %s over region %s:%s-%s",
@@ -372,7 +372,7 @@ def map_cis_nominal(
     end_row = 0
     outdf = var_df_all
     outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
-    outdf = outdf.drop(["cm", "a0", "a1", "tss"], axis=1)
+    outdf = outdf.drop(["cm"], axis=1)
 
     # add additional columns
     outdf["af"] = np.NaN
