@@ -61,9 +61,9 @@ class ReadyDataState:
             self.pheno_meta.gene_map.phenotype_id.isin(gene_list)
         ]
         self.pheno.count = self.pheno.count[gene_list]
-        assert np.sum(
-            self.pheno_meta.gene_map.phenotype_id == self.pheno.count.columns
-        ) == len(gene_list), "gene map does not agree with pheno count matrix"
+        assert set(self.pheno_meta.gene_map.phenotype_id) == set(
+            self.pheno.count.columns
+        ), "gene map does not agree with pheno count matrix"
 
 
 def create_readydata(
