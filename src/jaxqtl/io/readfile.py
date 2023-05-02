@@ -56,11 +56,15 @@ class ReadyDataState:
 
     def filter_gene(self, gene_list: List):
         """Filter genes to be mapped"""
+
+        gene_list_insample = list(
+            set(self.pheno_meta.gene_map.phenotype_id).intersection(set(gene_list))
+        )
         # filter pheno
         self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
-            self.pheno_meta.gene_map.phenotype_id.isin(gene_list)
+            self.pheno_meta.gene_map.phenotype_id.isin(gene_list_insample)
         ]
-        self.pheno.count = self.pheno.count[gene_list]
+        self.pheno.count = self.pheno.count[gene_list_insample]
         assert set(self.pheno_meta.gene_map.phenotype_id) == set(
             self.pheno.count.columns
         ), "gene map does not agree with pheno count matrix"

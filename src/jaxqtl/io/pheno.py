@@ -110,9 +110,11 @@ class H5AD(PhenoIO):
     @staticmethod
     def write_bed(
         pheno: pd.DataFrame,
-        gtf_bed_path: str = "./example/data/Homo_sapiens.GRCh37.87.bed.gz",
-        out_dir: str = "./example/local/phe_bed",
-        celltype_path: str = "./example/data/celltype.tsv",
+        gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
+        out_dir: str = "../example/local/phe_bed",
+        celltype_path: str = "../example/data/celltype.tsv",
+        autosomal_only: bool = True,
+        geneexpr_percent_cutoff: float = 0.0,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
@@ -126,8 +128,12 @@ class H5AD(PhenoIO):
                 pheno.index.get_level_values("cell_type") == cell_type
             ]
 
-            # drop genes with all zero expressions
-            pheno_onetype = pheno_onetype.loc[:, (pheno_onetype != 0).any(axis=0)]
+            # default is filter out genes not expressed in any
+            total_n = len(pheno_onetype.index.get_level_values("donor_id").unique())
+            geneexpr_percent = (pheno_onetype > 0).sum(axis=0) / total_n
+            pheno_onetype = pheno_onetype.loc[
+                :, geneexpr_percent > geneexpr_percent_cutoff
+            ]
 
             # remove cell type index
             pheno_onetype = pheno_onetype.reset_index(level="cell_type", drop=True)
@@ -138,6 +144,11 @@ class H5AD(PhenoIO):
 
             # load gtf file for locating tss
             gene_map = load_gene_gft_bed(gtf_bed_path)
+
+            if autosomal_only:
+                gene_map = gene_map.loc[
+                    gene_map.chr.isin([str(i) for i in range(1, 23)])
+                ]
 
             out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on="ensembl_id")
             out = out.drop("ensemble_id", axis=1)
