@@ -1,3 +1,5 @@
+import numpy as np
+import pandas as pd
 import statsmodels.api as sm
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
@@ -23,35 +25,6 @@ stepsize = 1.0
 maxiter = 100
 
 test_resid_family = Binomial()  # Poisson reg result is closer
-
-# ###
-# mod_full = GLM(
-#     X=spector_data.exog,
-#     y=spector_data.endog,
-#     family=Poisson(),
-#     append=False,
-#     maxiter=maxiter,
-#     stepsize=stepsize,
-# ).fit()
-# print(mod_full.p[-1])
-#
-# mod_null = GLM(
-#     X=spector_data.exog.drop("PSI", axis=1),
-#     y=spector_data.endog,
-#     family=Poisson(),
-#     append=False,
-#     maxiter=maxiter,
-#     stepsize=stepsize,
-# ).fit()
-#
-# pval_score = GLM.score_test_add_g(
-#     Poisson(),
-#     jnp.array(spector_data.exog),
-#     jnp.array(spector_data.endog)[:, jnp.newaxis],
-#     mod_null,
-#     1.0,
-# )
-# ###
 
 
 def test_resid_reg():
@@ -220,6 +193,28 @@ def test_1D_X():
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
+# def test_CGsolve():
+# test poisson regression
+dat = jnp.array(pd.read_csv("./example/local/ENSG00000178607_onesnp.tsv", sep="\t"))
+y = dat[:, -1][:, jnp.newaxis]
+X = dat[:, 0:-1]
+
+sm_state = smPoisson(np.array(y), np.array(X)).fit(disp=0)
+
+glm_state = GLM(
+    X=X,
+    y=y,
+    family=Poisson(),
+    solver=CGSolve(),
+    append=False,
+    maxiter=maxiter,
+    stepsize=stepsize,
+).fit()
+assert_betas_eq(glm_state, sm_state)
+assert_array_eq(glm_state.se, sm_state.bse)
+assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
 def test_poisson_scoretest():
