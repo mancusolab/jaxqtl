@@ -114,7 +114,6 @@ class H5AD(PhenoIO):
         out_dir: str = "../example/local/phe_bed",
         celltype_path: str = "../example/data/celltype.tsv",
         autosomal_only: bool = True,
-        geneexpr_percent_cutoff: float = 0.0,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
@@ -126,13 +125,6 @@ class H5AD(PhenoIO):
 
             pheno_onetype = pheno[
                 pheno.index.get_level_values("cell_type") == cell_type
-            ]
-
-            # default is filter out genes not expressed in any
-            total_n = len(pheno_onetype.index.get_level_values("donor_id").unique())
-            geneexpr_percent = (pheno_onetype > 0).sum(axis=0) / total_n
-            pheno_onetype = pheno_onetype.loc[
-                :, geneexpr_percent > geneexpr_percent_cutoff
             ]
 
             # remove cell type index

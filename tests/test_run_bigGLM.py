@@ -16,7 +16,7 @@ from jax.config import config
 from jaxqtl.families.distribution import Poisson  # , Gaussian
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
+from jaxqtl.io.pheno import PheBedReader  # , SingleCellFilter, H5AD
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map import map_cis, map_cis_nominal
@@ -34,17 +34,18 @@ genelist_path = "../example/data/genelist.tsv"
 # log = get_log()
 # Prepare input #
 # For given cell type, create bed files from h5ad file
-pheno_reader = H5AD()
-count_mat = pheno_reader(raw_count_path)
-count_df = pheno_reader.process(count_mat, SingleCellFilter, divide_size_factor=True)
-
-# cell_type = "CD14-positive monocyte"
-pheno_reader.write_bed(
-    count_df,
-    gtf_bed_path="../example/data/Homo_sapiens.GRCh37.87.bed.gz",
-    out_dir="../example/local/phe_bed",
-    celltype_path="../example/data/celltype.tsv",
-)
+# pheno_reader = H5AD()
+# count_mat = pheno_reader(raw_count_path)
+# count_df = pheno_reader.process(count_mat, SingleCellFilter, divide_size_factor=True)
+#
+# # cell_type = "CD14-positive monocyte"
+# pheno_reader.write_bed(
+#     count_df,
+#     gtf_bed_path="../example/data/Homo_sapiens.GRCh37.87.bed.gz",
+#     out_dir="../example/local/phe_bed",
+#     celltype_path="../example/data/celltype.tsv",
+#     autosomal_only=True
+# )
 
 log = get_log()
 
@@ -68,7 +69,7 @@ dat.filter_geno(maf_threshold, "22", "21")
 
 # filter phenotype (genes)
 gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
-# dat.filter_gene(gene_list)
+dat.filter_gene(gene_list, 0.1)
 
 # dat.transform_y(y0=1.0, log_y=True)
 
