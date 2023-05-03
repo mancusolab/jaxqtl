@@ -28,9 +28,12 @@ mod_null_mu = mod_covar.get_prediction(covar, which="mean").predicted
 glm_weight = mod_null_mu * (1 - mod_null_mu)
 w_half_X = np.diag(np.sqrt(glm_weight)) @ covar
 w_X = np.diag(glm_weight) @ covar
+w_half_g = np.diag(np.sqrt(glm_weight)) @ g
+w_g = np.diag(glm_weight) @ g
 
 # regress out covar from X2
-projection_covar = covar @ npla.inv(w_half_X.T @ w_half_X) @ w_X.T  # nxn
+# projection_covar = covar @ npla.inv(w_half_X.T @ w_half_X) @ w_X.T  # nxn
+projection_covar = w_half_X @ npla.inv(w_half_X.T @ w_half_X) @ w_X.T
 X2_resid = g - projection_covar @ g
 
 # fit model y ~ X2_resid with offset

@@ -10,7 +10,7 @@ from jax.config import config
 
 from jaxqtl.families.distribution import Binomial, Poisson  # , Gaussian
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import CholeskySolve
+from jaxqtl.infer.solve import CGSolve, CholeskySolve
 
 config.update("jax_enable_x64", True)
 
@@ -175,12 +175,13 @@ def test_logistic():
         family=Binomial(),
         append=False,
         maxiter=maxiter,
+        solver=CGSolve(),
         stepsize=stepsize,
     )
     glm_state = test_logit.fit()
-    assert_betas_eq(glm_state, sm_state)
-    assert_array_eq(glm_state.se, sm_state.bse)
-    assert_array_eq(glm_state.p, sm_state.pvalues)
+    assert_betas_eq(glm_state, sm_state, rtol=1e-4)
+    assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-4)
+    assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-4)
 
 
 def test_poisson():

@@ -9,7 +9,7 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
-from jaxqtl.infer.solve import CGSolve, LinearSolve
+from jaxqtl.infer.solve import CholeskySolve, LinearSolve
 
 
 # change jnp.ndarray --> np.ndarray for mutable array
@@ -53,7 +53,7 @@ class GLM:
         X: ArrayLike,
         y: ArrayLike,
         family: ExponentialFamily = Gaussian(),
-        solver: LinearSolve = CGSolve(),
+        solver: LinearSolve = CholeskySolve(),
         append: bool = True,
         maxiter: int = 100,
         tol: float = 1e-3,

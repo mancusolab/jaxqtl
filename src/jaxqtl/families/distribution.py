@@ -142,6 +142,9 @@ class Binomial(ExponentialFamily):
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return mu - mu ** 2
 
+    def init_eta(self, y: ArrayLike) -> Array:
+        return self.glink((y + 0.5) / 2)
+
 
 class Poisson(ExponentialFamily):
     _links = [Identity, Log]  # Sqrt
