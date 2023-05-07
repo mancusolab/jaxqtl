@@ -25,17 +25,17 @@ from jaxqtl.map import map_cis, map_cis_nominal
 config.update("jax_enable_x64", True)
 # pd.set_option("display.max_columns", 500)
 
-# geno_path = "../example/data/chr22.n94"
-# raw_count_path = "../example/local/Countdata_n100.h5ad"
-# covar_path = "../example/data/donor_features.n94.tsv"
-# pheno_path = "../example/local/CD14_positive_monocyte.bed.gz"
-# genelist_path = "../example/data/genelist.tsv"
+geno_path = "../example/data/chr22.n94"
+raw_count_path = "../example/local/Countdata_n100.h5ad"
+covar_path = "../example/data/donor_features.n94.tsv"
+pheno_path = "../example/local/CD14_positive_monocyte.bed.gz"
+genelist_path = "../example/data/genelist.tsv"
 # raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
 
-geno_path = "../example/local/chr17"
-covar_path = "../example/local/donor_features.all.6PC.tsv"
-pheno_path = "../example/local/natural_killer_cell.bed.gz"
-genelist_path = "../example/local/NK_chr17_genelist.tsv"
+# geno_path = "../example/local/chr17"
+# covar_path = "../example/local/donor_features.all.6PC.tsv"
+# pheno_path = "../example/local/natural_killer_cell.bed.gz"
+# genelist_path = "../example/local/NK_chr17_genelist.tsv"
 
 # log = get_log()
 # Prepare input #
@@ -71,11 +71,11 @@ pheno = pheno_reader(pheno_path)
 dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
 
 maf_threshold = 0.0
-dat.filter_geno(maf_threshold, "17")
+dat.filter_geno(maf_threshold, "22")
 
 # filter phenotype (genes)
-# gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
-gene_list = pd.read_csv(genelist_path, sep="\t").iloc[:, 0].to_list()
+gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
+# gene_list = pd.read_csv(genelist_path, sep="\t").iloc[:, 0].to_list()
 dat.filter_gene(geneexpr_percent_cutoff=0.0)
 
 # before filter gene list, calculate library size and set offset
@@ -83,12 +83,12 @@ total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
 # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
-dat.add_covar_pheno_PC(k=2)
+# dat.add_covar_pheno_PC(k=2)
 
 dat.filter_gene(gene_list=gene_list)
 
 # TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
-mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta)
+mapcis_out = map_cis(dat, family=Poisson())  # offset_eta=offset_eta
 print(mapcis_out.slope)
 
 map_cis_nominal(
