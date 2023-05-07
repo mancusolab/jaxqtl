@@ -22,8 +22,6 @@ class ReadyDataState:
 
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
         if len(chrom) > 0:
-            self.pheno_meta.filter_chr(*chrom)
-
             # filter bim by chr
             self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
 

@@ -220,6 +220,7 @@ class BetaPerm(DirectPerm):
         """
         _, p_perm, TS = super().__call__(X, y, G, obs_p, family, key_init, offset_eta)
 
+        ####
         # TODO: calculate true df and adjust every p_perm accordingly
         # dof_init = 1.0
         # # https://github.com/google/jaxopt/blob/main/jaxopt/_src/scipy_wrappers.py  #  Nelder-Mead
@@ -233,6 +234,8 @@ class BetaPerm(DirectPerm):
         # else:
         #     true_dof = dof_init
         # p_perm = pval_from_Zstat(TS, true_dof)
+        # import pdb; pdb.set_trace()
+        #####
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
