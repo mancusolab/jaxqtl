@@ -92,7 +92,7 @@ def map_cis(
     transform_y_log: bool = False,
     transform_y_y0: float = 0.0,
     direct_perm: bool = False,
-    genelist: List = None,
+    offset_eta: ArrayLike = 0.0,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -104,10 +104,6 @@ def map_cis(
     X = dat.covar
     n, k = X.shape
 
-    # filter gene list
-    if genelist is not None:
-        dat.filter_gene(genelist)
-
     gene_info = dat.pheno_meta
 
     # append genotype as the last column
@@ -116,10 +112,6 @@ def map_cis(
 
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    # calculate library size and set offset
-    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-    offset_eta = jnp.log(total_libsize)
 
     # transform y
     if transform_y:
@@ -224,26 +216,14 @@ def map_cis_single(
     beta_key, direct_key = rdm.split(key_init)
 
     pval_beta, beta_param = perm(
-        X,
-        y,
-        G,
-        jnp.min(cisglmstate.p),
-        family,
-        beta_key,
-        sig_level,
+        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta
     )
 
     if direct_perm:
         perm_iters_required = round(1 / sig_level)
         directperm = DirectPerm(perm_iters_required)
         pval_perm, _, _ = directperm(
-            X,
-            y,
-            G,
-            jnp.min(cisglmstate.p),
-            family,
-            direct_key,
-            sig_level,
+            X, y, G, jnp.min(cisglmstate.p), family, direct_key, sig_level, offset_eta
         )
     else:
         pval_perm = jnp.array([-9])
@@ -265,7 +245,7 @@ def map_cis_nominal(
     standardize: bool = True,
     window: int = 500000,
     verbose: bool = True,
-    genelist: List = None,
+    offset_eta: ArrayLike = 0.0,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -282,10 +262,6 @@ def map_cis_nominal(
     X = dat.covar
     n, k = X.shape
 
-    # filter gene list
-    if genelist is not None:
-        dat.filter_gene(genelist)
-
     gene_info = dat.pheno_meta
 
     # append genotype as the last column
@@ -294,10 +270,6 @@ def map_cis_nominal(
 
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    # calculate library size and set offset
-    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-    offset_eta = jnp.log(total_libsize)
 
     af = []
     ma_samples = []

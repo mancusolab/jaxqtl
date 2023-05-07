@@ -55,7 +55,7 @@ class ReadyDataState:
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
     def filter_gene(
-        self, gene_list: Optional[List], geneexpr_percent_cutoff: float = 0.0
+        self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None
     ):
         """Filter genes to be mapped"""
         if gene_list is not None:
