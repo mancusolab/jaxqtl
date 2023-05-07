@@ -55,7 +55,7 @@ class ReadyDataState:
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
     def filter_gene(
-        self, gene_list: Optional[List], geneexpr_percent_cutoff: Optional[float] = None
+        self, gene_list: Optional[List], geneexpr_percent_cutoff: float = 0.0
     ):
         """Filter genes to be mapped"""
         if gene_list is not None:
@@ -72,18 +72,18 @@ class ReadyDataState:
                 self.pheno.count.columns
             ), "gene map does not agree with pheno count matrix after gene list selection"
 
-        if geneexpr_percent_cutoff is not None:
-            total_n = len(self.pheno.count.index.unique())
-            geneexpr_percent = (self.pheno.count > 0).sum(axis=0) / total_n
-            self.pheno.count = self.pheno.count.loc[
-                :, geneexpr_percent > geneexpr_percent_cutoff
-            ]
-            self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
-                self.pheno_meta.gene_map.phenotype_id.isin(self.pheno.count.columns)
-            ]
-            assert set(self.pheno_meta.gene_map.phenotype_id) == set(
-                self.pheno.count.columns
-            ), "gene map does not agree with pheno count matrix after gene expression percent filtering"
+        # filter genes not expressed across samples
+        total_n = len(self.pheno.count.index.unique())
+        geneexpr_percent = (self.pheno.count > 0).sum(axis=0) / total_n
+        self.pheno.count = self.pheno.count.loc[
+            :, geneexpr_percent > geneexpr_percent_cutoff
+        ]
+        self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
+            self.pheno_meta.gene_map.phenotype_id.isin(self.pheno.count.columns)
+        ]
+        assert set(self.pheno_meta.gene_map.phenotype_id) == set(
+            self.pheno.count.columns
+        ), "gene map does not agree with pheno count matrix after gene expression percent filtering"
 
 
 def create_readydata(

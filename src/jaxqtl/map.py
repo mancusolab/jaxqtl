@@ -117,6 +117,10 @@ def map_cis(
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
+    # calculate library size and set offset
+    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+    offset_eta = jnp.log(total_libsize)
+
     # transform y
     if transform_y:
         dat.transform_y(transform_y_y0, transform_y_log)
@@ -165,7 +169,9 @@ def map_cis(
                 str(lstart),
                 str(rend),
             )
-        result = map_cis_single(X, G, y, family, g_key, sig_level, perm, direct_perm)
+        result = map_cis_single(
+            X, G, y, family, g_key, sig_level, perm, direct_perm, offset_eta
+        )
         if verbose:
             log.info(
                 "Finished cis-qtl scan for %s over region %s:%s-%s",
@@ -203,6 +209,7 @@ def map_cis_single(
     sig_level: float = 0.05,
     perm: Permutation = BetaPerm(),
     direct_perm: bool = False,
+    offset_eta: ArrayLike = 0.0,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -213,12 +220,7 @@ def map_cis_single(
     """
     # fit y ~ cov only
 
-    cisglmstate = cis_scan(
-        X,
-        G,
-        y,
-        family,
-    )
+    cisglmstate = cis_scan(X, G, y, family, offset_eta)
     beta_key, direct_key = rdm.split(key_init)
 
     pval_beta, beta_param = perm(
@@ -293,6 +295,10 @@ def map_cis_nominal(
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
+    # calculate library size and set offset
+    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+    offset_eta = jnp.log(total_libsize)
+
     af = []
     ma_samples = []
     ma_count = []
@@ -334,13 +340,7 @@ def map_cis_nominal(
         #     append=False,
         #     maxiter=100,
         # ).fit()
-        result = cis_scan(
-            X,
-            G,
-            y,
-            family
-            # , glmstate_null.eta, glmstate_null.glm_wt
-        )
+        result = cis_scan(X, G, y, family, offset_eta)
 
         if verbose:
             log.info(

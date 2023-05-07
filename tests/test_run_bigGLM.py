@@ -69,7 +69,7 @@ dat.filter_geno(maf_threshold, "22", "21")
 
 # filter phenotype (genes)
 gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
-dat.filter_gene(gene_list, 0.1)
+dat.filter_gene(gene_list, 0.0)
 
 # dat.transform_y(y0=1.0, log_y=True)
 
@@ -81,10 +81,10 @@ dat.add_covar_pheno_PC(k=2)
 mapcis_out = map_cis(dat, family=Poisson(), genelist=gene_list)
 print(mapcis_out.slope)
 
-map_cis_nominal(dat, family=Poisson(), out_path="./example/result/dat_n94_test")
+map_cis_nominal(dat, family=Poisson(), out_path="../example/result/dat_n94_test")
 
 prefix = "dat_n94_test"
-out_dir = "./example/result"
+out_dir = "../example/result"
 pairs_df = pd.read_parquet(os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.parquet"))
 
 # mapcis_df = prepare_cis_output(dat, mapcis_out)
