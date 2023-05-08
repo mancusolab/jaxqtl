@@ -195,26 +195,25 @@ def test_1D_X():
     assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
-# def test_CGsolve():
-# test poisson regression
-dat = jnp.array(pd.read_csv("./example/local/ENSG00000178607_onesnp.tsv", sep="\t"))
-y = dat[:, -1][:, jnp.newaxis]
-X = dat[:, 0:-1]
+def test_CGsolve():
+    dat = jnp.array(pd.read_csv("./example/local/ENSG00000178607_onesnp.tsv", sep="\t"))
+    y = dat[:, -1][:, jnp.newaxis]
+    X = dat[:, 0:-1]
 
-sm_state = smPoisson(np.array(y), np.array(X)).fit(disp=0)
+    sm_state = smPoisson(np.array(y), np.array(X)).fit(disp=0)
 
-glm_state = GLM(
-    X=X,
-    y=y,
-    family=Poisson(),
-    solver=CGSolve(),
-    append=False,
-    maxiter=maxiter,
-    stepsize=stepsize,
-).fit()
-assert_betas_eq(glm_state, sm_state)
-assert_array_eq(glm_state.se, sm_state.bse)
-assert_array_eq(glm_state.p, sm_state.pvalues)
+    glm_state = GLM(
+        X=X,
+        y=y,
+        family=Poisson(),
+        solver=CGSolve(),
+        append=False,
+        maxiter=maxiter,
+        stepsize=stepsize,
+    ).fit()
+    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
 def test_poisson_scoretest():
