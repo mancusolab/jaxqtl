@@ -2,7 +2,6 @@ from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
 import equinox as eqx
-import jaxopt
 
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
@@ -12,12 +11,15 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
+from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 
 # from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.utils import cis_scan
+
+# import jaxopt
 
 
 class Permutation(eqx.Module, metaclass=ABCMeta):
@@ -225,20 +227,20 @@ class BetaPerm(DirectPerm):
         # TODO: calculate true df and adjust every p_perm accordingly
         # https://github.com/google/jaxopt/blob/main/jaxopt/_src/scipy_wrappers.py  #  Nelder-Mead
         # res = scipy.optimize.minimize(lambda x: np.abs(df_cost(TS, x)), dof_init, method='Nelder-Mead', tol=tol)
-        dof_init = 1.0
-        opt = jaxopt.ScipyMinimize(
-            fun=lambda x: jnp.abs(df_cost(TS, x)),
-            method="Newton-CG",
-            tol=1e-3,
-            maxiter=100,
-        )
-        opt_res = opt.run(init_params=dof_init)
-
-        if opt_res.state.success:
-            true_dof = opt_res.params
-            p_perm = pval_from_Zstat(TS, true_dof)
-        else:
-            true_dof = dof_init
+        # dof_init = 1.0
+        # opt = jaxopt.ScipyMinimize(
+        #     fun=lambda x: jnp.abs(df_cost(TS, x)),
+        #     method="Newton-CG",
+        #     tol=1e-3,
+        #     maxiter=100,
+        # )
+        # opt_res = opt.run(init_params=dof_init)
+        #
+        # if opt_res.state.success:
+        #     true_dof = opt_res.params
+        #     p_perm = pval_from_Zstat(TS, true_dof)
+        # else:
+        #     true_dof = dof_init
         #####
 
         # init = jnp.ones(2)  # initialize with 1
@@ -255,9 +257,10 @@ class BetaPerm(DirectPerm):
         return adj_p, beta_res
 
 
-def pval_from_Zstat(TS: ArrayLike, dof: float):
+def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
     # TS is the beta / se
-    return 1 - jaxstats.chi2.cdf(jnp.square(TS), dof)
+    return norm.cdf(-abs(TS)) * 2
+    # return 1 - jaxstats.chi2.cdf(jnp.square(TS), dof)
 
 
 def df_cost(TS, dof):

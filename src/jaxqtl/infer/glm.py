@@ -2,7 +2,7 @@ from typing import NamedTuple, Optional, Tuple
 
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
-from jax.scipy.stats import chi2  # , t (not supported rn), chi2
+from jax.scipy.stats import norm  # , t (not supported rn), chi2
 from jax.tree_util import register_pytree_node_class
 from jax.typing import ArrayLike
 
@@ -88,8 +88,10 @@ class GLM:
         if isinstance(self.family, Gaussian):
             pval = t_cdf(-abs(TS), df) * 2  # follow t(n-p-1) for Gaussian
         else:
-            # pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1)
-            pval = 1 - chi2.cdf(jnp.square(TS), 1)  # equivalently chi2(df=1)
+            pval = (
+                norm.cdf(-abs(TS)) * 2
+            )  # follow Normal(0, 1), this gives more accurate p value than chi2(1)
+            # pval = 1 - chi2.cdf(jnp.square(TS), 1)  # equivalently chi2(df=1)
 
         return pval
 
@@ -108,7 +110,8 @@ class GLM:
         score_null = family.score(X, y, glm_null_res.mu)
         score_null_info = (X * glm_null_res.glm_wt).T @ X
         TS_chi2 = score_null.T @ jnpla.inv(score_null_info) @ score_null
-        pval = 1 - chi2.cdf(TS_chi2, df)
+        # pval = 1 - chi2.cdf(TS_chi2, df)
+        pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
         return pval
 
     def sumstats(self, weight) -> Tuple[Array, Array]:
