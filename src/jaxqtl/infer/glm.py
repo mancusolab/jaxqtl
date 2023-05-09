@@ -1,9 +1,11 @@
+from abc import ABCMeta
 from typing import NamedTuple, Optional, Tuple
+
+import equinox as eqx
 
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm  # , t (not supported rn), chi2
-from jax.tree_util import register_pytree_node_class
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
@@ -24,8 +26,7 @@ class GLMState(NamedTuple):
     converged: Array
 
 
-@register_pytree_node_class
-class GLM:
+class GLM(eqx.Module, metaclass=ABCMeta):
     """
     example:
     model = jaxqtl.GLM(X, y, family="Gaussian", solver="qr", append=True)
@@ -47,6 +48,15 @@ class GLM:
      Tweedie       x     x                        x
      ============= ===== === ===== ====== ======= === ==== ====== ====== ====
     """
+
+    X: ArrayLike
+    y: ArrayLike
+    family: ExponentialFamily
+    solver: LinearSolve
+    init: ArrayLike
+    maxiter: int
+    tol: float
+    stepsize: float
 
     def __init__(
         self,
@@ -155,12 +165,3 @@ class GLM:
             n_iter,
             converged,
         )
-
-    def tree_flatten(self):
-        children = (self.X, self.y, self.family, self.solver)
-        aux = ()
-        return children, aux
-
-    @classmethod
-    def tree_unflatten(cls, aux, children):
-        return cls(*children, False)
