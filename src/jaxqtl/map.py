@@ -226,7 +226,7 @@ def map_cis_single(
             X, y, G, jnp.min(cisglmstate.p), family, direct_key, sig_level, offset_eta
         )
     else:
-        pval_perm = jnp.array([-9])
+        pval_perm = jnp.array(-9)
 
     return MapCisSingleState(
         cisglm=cisglmstate,

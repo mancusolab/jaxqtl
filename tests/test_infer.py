@@ -26,6 +26,17 @@ maxiter = 100
 
 test_resid_family = Binomial()  # Poisson reg result is closer
 
+test_irls = GLM(
+    X=spector_data.exog,
+    y=spector_data.endog,
+    family=Poisson(),
+    append=False,
+    maxiter=maxiter,
+    stepsize=stepsize,
+)
+
+glm_state = test_irls.fit()
+
 
 def test_resid_reg():
     X = spector_data.exog.copy()

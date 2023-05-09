@@ -3,6 +3,7 @@ from typing import NamedTuple, Optional, Tuple
 
 import equinox as eqx
 
+# import jax.debug
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm  # , t (not supported rn), chi2
@@ -124,10 +125,16 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
         return pval
 
-    def sumstats(self, weight) -> Tuple[Array, Array]:
+    def sumstats(self, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array]:
         infor = (self.X * weight).T @ self.X
-        beta_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
-        return beta_se, infor
+        infor_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
+
+        # huber sandwich
+        # score = self.family.score(self.X, self.y, mu)
+        # huber_v = huber_var(self.family, self.X, self.y, weight, mu, score, infor)
+        # huber_se = jnp.sqrt(huber_v)
+
+        return infor_se, infor
 
     def fit(self, offset_eta: ArrayLike = 0.0) -> GLMState:
         """Report Wald test p value"""
@@ -147,7 +154,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         _, _, weight = self.family.calc_weight(self.X, self.y, eta)
 
-        beta_se, infor = self.sumstats(weight)
+        beta_se, infor = self.sumstats(weight, mu)
         beta = jnp.reshape(beta, (self.X.shape[1],))
 
         df = self.X.shape[0] - self.X.shape[1]
@@ -165,3 +172,18 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             n_iter,
             converged,
         )
+
+
+def huber_var(
+    family: ExponentialFamily,
+    X: ArrayLike,
+    y: ArrayLike,
+    mu: ArrayLike,
+    weight: ArrayLike,
+    score: ArrayLike,
+    infor: ArrayLike,
+) -> Array:
+    Bs = jnp.diag((X * ((y - mu) / family.scale(X, y, mu)) ** 2).T @ X)
+    infor_inv = jnpla.inv(infor)
+    Vs = infor_inv * Bs @ infor_inv
+    return jnp.diag(Vs)
