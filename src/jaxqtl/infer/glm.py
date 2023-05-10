@@ -125,16 +125,16 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
         return pval
 
-    def sumstats(self, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array]:
+    def sumstats(self, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array, Array]:
         infor = (self.X * weight).T @ self.X
         infor_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
 
         # huber sandwich
-        # score = self.family.score(self.X, self.y, mu)
-        # huber_v = huber_var(self.family, self.X, self.y, weight, mu, score, infor)
-        # huber_se = jnp.sqrt(huber_v)
+        score = self.family.score(self.X, self.y, mu)
+        huber_v = huber_var(self.family, self.X, self.y, weight, mu, score, infor)
+        huber_se = jnp.sqrt(huber_v)
 
-        return infor_se, infor
+        return infor_se, huber_se, infor
 
     def fit(self, offset_eta: ArrayLike = 0.0) -> GLMState:
         """Report Wald test p value"""
@@ -154,10 +154,11 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         _, _, weight = self.family.calc_weight(self.X, self.y, eta)
 
-        beta_se, infor = self.sumstats(weight, mu)
+        infor_se, huber_se, infor = self.sumstats(weight, mu)
         beta = jnp.reshape(beta, (self.X.shape[1],))
 
         df = self.X.shape[0] - self.X.shape[1]
+        beta_se = infor_se  # use infor or huber SE
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)
@@ -183,7 +184,8 @@ def huber_var(
     score: ArrayLike,
     infor: ArrayLike,
 ) -> Array:
-    Bs = jnp.diag((X * ((y - mu) / family.scale(X, y, mu)) ** 2).T @ X)
+    score_no_x = (y - mu) / family.scale(X, y, mu)
+    Bs = (X * (score_no_x ** 2)).T @ X
     infor_inv = jnpla.inv(infor)
-    Vs = infor_inv * Bs @ infor_inv
+    Vs = infor_inv @ Bs @ infor_inv
     return jnp.diag(Vs)

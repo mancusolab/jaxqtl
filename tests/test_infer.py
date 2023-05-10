@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import statsmodels
 import statsmodels.api as sm
 from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
     Poisson as smPoisson,
@@ -25,17 +26,6 @@ stepsize = 1.0
 maxiter = 100
 
 test_resid_family = Binomial()  # Poisson reg result is closer
-
-test_irls = GLM(
-    X=spector_data.exog,
-    y=spector_data.endog,
-    family=Poisson(),
-    append=False,
-    maxiter=maxiter,
-    stepsize=stepsize,
-)
-
-glm_state = test_irls.fit()
 
 
 def test_resid_reg():
@@ -207,9 +197,11 @@ def test_1D_X():
 
 
 def test_CGsolve():
-    dat = jnp.array(pd.read_csv("./example/local/ENSG00000178607_onesnp.tsv", sep="\t"))
-    y = dat[:, -1][:, jnp.newaxis]
-    X = dat[:, 0:-1]
+    dat = jnp.array(
+        pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
+    )
+    y = dat[:, -2][:, jnp.newaxis]
+    X = dat[:, 0:-2]
 
     sm_state = smPoisson(np.array(y), np.array(X)).fit(disp=0)
 
@@ -257,6 +249,30 @@ def test_poisson_scoretest():
 
     # the discrepancy might be caused by small sample size n=30
     assert_array_eq(pval_score, mod_full.p[-1])
+
+
+def test_sandwich():
+    dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
+    M = jnp.array(dat.iloc[:, 0:12])
+    y = jnp.array(dat["y"])[:, jnp.newaxis]
+    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+
+    sm_mod = sm.GLM(
+        np.array(y),
+        np.array(M),
+        family=sm.families.Poisson(),
+        offset=np.array(library_size).reshape((len(library_size),)),
+    ).fit()
+    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(
+        sm_mod, use_correction=False
+    )
+
+    # full model fit to compare Wald p to Score p
+    glmstate = GLM(
+        X=M, y=y, family=Poisson(), append=False, maxiter=100, solver=CholeskySolve()
+    ).fit(offset_eta=library_size)
+
+    assert_array_eq(glmstate.se ** 2, jnp.diag(white_cov))
 
 
 # -------------------------------------------------#
