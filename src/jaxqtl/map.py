@@ -9,8 +9,6 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-
-# from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState

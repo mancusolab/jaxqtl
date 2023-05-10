@@ -270,7 +270,7 @@ def test_sandwich():
     # full model fit to compare Wald p to Score p
     glmstate = GLM(
         X=M, y=y, family=Poisson(), append=False, maxiter=100, solver=CholeskySolve()
-    ).fit(offset_eta=library_size)
+    ).fit(offset_eta=library_size, robust_se=True)
 
     assert_array_eq(glmstate.se ** 2, jnp.diag(white_cov))
 

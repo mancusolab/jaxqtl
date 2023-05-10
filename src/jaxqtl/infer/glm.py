@@ -136,7 +136,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         return infor_se, huber_se, infor
 
-    def fit(self, offset_eta: ArrayLike = 0.0) -> GLMState:
+    def fit(self, offset_eta: ArrayLike = 0.0, robust_se: bool = False) -> GLMState:
         """Report Wald test p value"""
         beta, n_iter, converged = irls(
             self.X,
@@ -158,7 +158,10 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         beta = jnp.reshape(beta, (self.X.shape[1],))
 
         df = self.X.shape[0] - self.X.shape[1]
-        beta_se = infor_se  # use infor or huber SE
+        if robust_se:
+            beta_se = huber_se  # use infor or huber SE
+        else:
+            beta_se = infor_se
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)

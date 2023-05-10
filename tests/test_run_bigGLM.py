@@ -22,6 +22,8 @@ from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map import map_cis, map_cis_nominal
 
+pd.set_option("display.max_columns", 500)  # see cis output
+
 config.update("jax_enable_x64", True)
 # pd.set_option("display.max_columns", 500)
 
@@ -73,24 +75,21 @@ dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
 maf_threshold = 0.0
 dat.filter_geno(maf_threshold, "22")
 
-# filter phenotype (genes)
+# filter phenotype (5 genes)
 gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
-# gene_list = pd.read_csv(genelist_path, sep="\t").iloc[:, 0].to_list()
-dat.filter_gene(geneexpr_percent_cutoff=0.0)
 
 # before filter gene list, calculate library size and set offset
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-# add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
-# dat.add_covar_pheno_PC(k=2)
+dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 
-dat.filter_gene(gene_list=gene_list)
+# n=94, one gene cis mapping, 2592 variants, 1min 22s
+mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta, direct_perm=False)
 
-# TODO: need error handle singular value (won't stop for now, but Inf estimate in SE)
-mapcis_out = map_cis(dat, family=Poisson())  # offset_eta=offset_eta
-print(mapcis_out.slope)
+print(mapcis_out)
 
+# n=94, one gene nominal mapping, 2592 variants, 916 ms
 map_cis_nominal(
     dat,
     family=Poisson(),
@@ -105,6 +104,25 @@ pairs_df = pd.read_parquet(os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.par
 # mapcis_df = prepare_cis_output(dat, mapcis_out)
 # print(mapcis_df)
 
+
+# def create_bed():
+#     # this takes long
+#     raw_count_path = "../NextProject/data/OneK1K/Count.h5ad"
+#
+#     # Prepare input #
+#     # For given cell type, create bed files from h5ad file
+#     pheno_reader = H5AD()
+#     count_mat = pheno_reader(raw_count_path)
+#     count_df = pheno_reader.process(count_mat, SingleCellFilter, divide_size_factor=True)
+#
+#     # cell_type = "CD14-positive monocyte"
+#     pheno_reader.write_bed(
+#         count_df,
+#         gtf_bed_path="../example/data/Homo_sapiens.GRCh37.87.bed.gz",
+#         out_dir="../example/local/phe_bed",
+#         celltype_path="../example/data/celltype.tsv",
+#         autosomal_only=True
+#     )
 
 # def cis_scan_sm(X, G, y):
 #     """
