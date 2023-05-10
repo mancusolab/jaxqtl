@@ -19,7 +19,6 @@ from jaxqtl.post.qvalue import add_qvalues
 @dataclass
 class MapCisSingleState:
     cisglm: CisGLMState
-    pval_perm: Array
     pval_beta: Array
     beta_param: Array
 
@@ -48,7 +47,6 @@ class MapCisSingleState:
             self.cisglm.p[vdx],
             self.cisglm.beta[vdx],
             self.cisglm.se[vdx],
-            self.pval_perm,
             self.pval_beta,
         ]
 
@@ -80,23 +78,17 @@ def map_cis(
     window: int = 500000,
     random_tiebreak: bool = False,
     sig_level: float = 0.05,
-    perm: Permutation = BetaPerm(),
     verbose: bool = True,
-    log=None,
     fdr_level: float = 0.05,
     pi0: float = None,
     qvalue_lambda: np.ndarray = None,
-    transform_y: bool = False,
-    transform_y_log: bool = False,
-    transform_y_y0: float = 0.0,
     direct_perm: bool = False,
     offset_eta: ArrayLike = 0.0,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
     """
-    if log is None:
-        log = get_log()
+    log = get_log()
 
     # TODO: we need to do some validation here...
     X = dat.covar
@@ -110,10 +102,6 @@ def map_cis(
 
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    # transform y
-    if transform_y:
-        dat.transform_y(transform_y_y0, transform_y_log)
 
     key = rdm.PRNGKey(seed)
 
@@ -132,7 +120,6 @@ def map_cis(
         "pval_nominal",
         "slope",
         "slope_se",
-        "pval_perm",
         "pval_beta",
     ]
 
@@ -159,9 +146,11 @@ def map_cis(
                 str(lstart),
                 str(rend),
             )
+
         result = map_cis_single(
-            X, G, y, family, g_key, sig_level, perm, direct_perm, offset_eta
+            X, G, y, family, g_key, sig_level, offset_eta
         )
+
         if verbose:
             log.info(
                 "Finished cis-qtl scan for %s over region %s:%s-%s",
@@ -197,8 +186,6 @@ def map_cis_single(
     family: ExponentialFamily,
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
-    perm: Permutation = BetaPerm(),
-    direct_perm: bool = False,
     offset_eta: ArrayLike = 0.0,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
@@ -209,26 +196,21 @@ def map_cis_single(
     perm: Permutation method
     """
     # fit y ~ cov only
+    import jax
 
     cisglmstate = cis_scan(X, G, y, family, offset_eta)
+
     beta_key, direct_key = rdm.split(key_init)
 
+    # if we -alwaays- use BetaPerm now, we may as well drop the class aspect and
+    # call function directly...
+    perm = BetaPerm()
     pval_beta, beta_param = perm(
         X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta
     )
 
-    if direct_perm:
-        perm_iters_required = round(1 / sig_level)
-        directperm = DirectPerm(perm_iters_required)
-        pval_perm, _, _ = directperm(
-            X, y, G, jnp.min(cisglmstate.p), family, direct_key, sig_level, offset_eta
-        )
-    else:
-        pval_perm = jnp.array(-9)
-
     return MapCisSingleState(
         cisglm=cisglmstate,
-        pval_perm=pval_perm,
         pval_beta=pval_beta,
         beta_param=beta_param,
     )

@@ -2,8 +2,11 @@ from typing import NamedTuple, Tuple
 
 import pandas as pd
 
+import equinox as eqx
+
 import jax.lax as lax
-from jax import Array, numpy as jnp
+import jax.numpy as jnp
+from jax import jit, Array
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -70,7 +73,7 @@ def _setup_G_y(
 
     return G, jnp.array(y), var_df
 
-
+@eqx.filter_jit
 def cis_scan(
     X: ArrayLike,
     G: ArrayLike,
@@ -90,17 +93,15 @@ def cis_scan(
     #     append=False,
     #     maxiter=100,
     # ).fit(offset_eta=offset_eta)
+    glm = GLM(
+            family=family,
+            maxiter=100,
+        )
 
     def _func(carry, snp):
         M = jnp.hstack((X, snp[:, jnp.newaxis]))
         # full model fit to compare Wald p to Score p
-        glmstate = GLM(
-            X=M,
-            y=y,
-            family=family,
-            append=False,
-            maxiter=100,
-        ).fit(offset_eta=offset_eta)
+        glmstate = glm.fit(M, y, offset_eta=offset_eta)
 
         # w_half_X = jnp.diag(jnp.sqrt(glmstate_null.glm_wt)) @ X
         # w_X = jnp.diag(glmstate_null.glm_wt) @ X

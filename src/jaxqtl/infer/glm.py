@@ -50,46 +50,25 @@ class GLM(eqx.Module, metaclass=ABCMeta):
      ============= ===== === ===== ====== ======= === ==== ====== ====== ====
     """
 
-    X: ArrayLike
-    y: ArrayLike
     family: ExponentialFamily
     solver: LinearSolve
-    init: ArrayLike
     maxiter: int
     tol: float
     stepsize: float
 
     def __init__(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
         family: ExponentialFamily = Gaussian(),
         solver: LinearSolve = CholeskySolve(),
-        append: bool = True,
         maxiter: int = 100,
         tol: float = 1e-3,
-        init: Optional[ArrayLike] = None,
         stepsize: float = 1.0,
     ) -> None:
-        nobs = len(y)
+
         self.maxiter = maxiter
         self.tol = tol
-
-        self.X = jnp.asarray(X)  # preprocessed in previous steps
-
-        try:
-            self.X.shape[1]
-        except IndexError:
-            self.X = self.X.reshape((len(self.X), 1))  # reshape 1D array
-
-        if append:
-            self.X = jnp.column_stack((jnp.ones((nobs, 1)), self.X))
-
-        self.y = jnp.asarray(y).reshape((nobs, 1))
-
         self.family = family
         self.solver = solver
-        self.init = init if init is not None else family.init_eta(self.y)
         self.stepsize = stepsize
 
     def wald_test(self, TS, df) -> Array:
@@ -125,43 +104,43 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
         return pval
 
-    def sumstats(self, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array, Array]:
-        infor = (self.X * weight).T @ self.X
+    def sumstats(self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array, Array]:
+        infor = (X * weight).T @ X
         infor_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
 
         # huber sandwich
-        score = self.family.score(self.X, self.y, mu)
-        huber_v = huber_var(self.family, self.X, self.y, weight, mu, score, infor)
+        score = self.family.score(X, y, mu)
+        huber_v = huber_var(self.family, X, y, weight, mu, score, infor)
         huber_se = jnp.sqrt(huber_v)
 
         return infor_se, huber_se, infor
 
-    def fit(self, offset_eta: ArrayLike = 0.0, robust_se: bool = False) -> GLMState:
+    def fit(self, X, y, offset_eta: ArrayLike = 0.0, robust_se: bool = False) -> GLMState:
+
+        init = self.family.init_eta(y)
         """Report Wald test p value"""
         beta, n_iter, converged = irls(
-            self.X,
-            self.y,
+            X,
+            y,
             self.family,
             self.solver,
-            self.init,
+            init,
             self.maxiter,
             self.tol,
             self.stepsize,
             offset_eta,
         )
-        eta = self.X @ beta + offset_eta
+        eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
 
-        _, _, weight = self.family.calc_weight(self.X, self.y, eta)
+        _, _, weight = self.family.calc_weight(X, y, eta)
 
-        infor_se, huber_se, infor = self.sumstats(weight, mu)
-        beta = jnp.reshape(beta, (self.X.shape[1],))
+        infor_se, huber_se, infor = self.sumstats(X, y, weight, mu)
+        beta = jnp.reshape(beta, (X.shape[1],))
 
-        df = self.X.shape[0] - self.X.shape[1]
-        if robust_se:
-            beta_se = huber_se  # use infor or huber SE
-        else:
-            beta_se = infor_se
+        df = X.shape[0] - X.shape[1]
+        beta_se = jnp.where(robust_se, huber_se, infor_se)
+
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)

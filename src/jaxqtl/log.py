@@ -5,6 +5,7 @@ _log = logging.getLogger()
 
 def get_log():
     """get logger for jaxqtl progress"""
+    global _log
     logger = _log
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
