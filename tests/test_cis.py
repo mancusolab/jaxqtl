@@ -19,9 +19,8 @@ config.update("jax_enable_x64", True)
 
 
 geno_path = "./example/data/chr22.n94"
-raw_count_path = "./example/local/Countdata_n100.h5ad"
 covar_path = "./example/data/donor_features.n94.tsv"
-pheno_path = "./example/local/CD14_positive_monocyte.bed.gz"
+pheno_path = "./example/data/CD14_positive_monocyte.bed.gz"
 genelist_path = "./example/data/genelist.tsv"
 
 log = get_log()
