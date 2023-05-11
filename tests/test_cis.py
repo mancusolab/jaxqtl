@@ -1,4 +1,5 @@
 import os
+import timeit
 
 import pandas as pd
 
@@ -18,10 +19,10 @@ pd.set_option("display.max_columns", 500)  # see cis output
 config.update("jax_enable_x64", True)
 
 
-geno_path = "./example/data/chr22.n94"
-covar_path = "./example/data/donor_features.n94.tsv"
-pheno_path = "./example/data/CD14_positive_monocyte.bed.gz"
-genelist_path = "./example/data/genelist.tsv"
+geno_path = "../example/data/chr22.n94"
+covar_path = "../example/data/donor_features.n94.tsv"
+pheno_path = "../example/data/CD14_positive_monocyte.bed.gz"
+genelist_path = "../example/data/genelist.tsv"
 
 log = get_log()
 
@@ -53,9 +54,11 @@ offset_eta = jnp.log(total_libsize)
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 
 # n=94, one gene cis mapping, 2592 variants, 1min 22s
+start = timeit.default_timer()
 mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta, direct_perm=False)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
 
-print(mapcis_out)
 
 # n=94, one gene nominal mapping, 2592 variants, 916 ms
 map_cis_nominal(

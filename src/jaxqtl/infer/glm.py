@@ -1,5 +1,5 @@
 from abc import ABCMeta
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Tuple
 
 import equinox as eqx
 
@@ -71,7 +71,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         self.solver = solver
         self.stepsize = stepsize
 
-    def wald_test(self, TS, df) -> Array:
+    def wald_test(self, TS: ArrayLike, df: int) -> Array:
         """
         beta_MLE ~ N(beta, I^-1), for large sample size
         """
@@ -81,7 +81,6 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             pval = (
                 norm.cdf(-abs(TS)) * 2
             )  # follow Normal(0, 1), this gives more accurate p value than chi2(1)
-            # pval = 1 - chi2.cdf(jnp.square(TS), 1)  # equivalently chi2(df=1)
 
         return pval
 
@@ -104,18 +103,22 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
         return pval
 
-    def sumstats(self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike) -> Tuple[Array, Array, Array]:
+    def sumstats(
+        self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike
+    ) -> Tuple[Array, Array, Array]:
         infor = (X * weight).T @ X
-        infor_se = jnp.sqrt(jnp.diag(jnpla.inv(infor)))
+        infor_inv = jnpla.inv(infor)
+        infor_se = jnp.sqrt(jnp.diag(infor_inv))
 
         # huber sandwich
-        score = self.family.score(X, y, mu)
-        huber_v = huber_var(self.family, X, y, weight, mu, score, infor)
+        huber_v = huber_var(self.family, X, y, mu, infor_inv)
         huber_se = jnp.sqrt(huber_v)
 
         return infor_se, huber_se, infor
 
-    def fit(self, X, y, offset_eta: ArrayLike = 0.0, robust_se: bool = False) -> GLMState:
+    def fit(
+        self, X, y, offset_eta: ArrayLike = 0.0, robust_se: bool = False
+    ) -> GLMState:
 
         init = self.family.init_eta(y)
         """Report Wald test p value"""
@@ -162,12 +165,9 @@ def huber_var(
     X: ArrayLike,
     y: ArrayLike,
     mu: ArrayLike,
-    weight: ArrayLike,
-    score: ArrayLike,
-    infor: ArrayLike,
+    infor_inv: ArrayLike,
 ) -> Array:
     score_no_x = (y - mu) / family.scale(X, y, mu)
     Bs = (X * (score_no_x ** 2)).T @ X
-    infor_inv = jnpla.inv(infor)
     Vs = infor_inv @ Bs @ infor_inv
     return jnp.diag(Vs)

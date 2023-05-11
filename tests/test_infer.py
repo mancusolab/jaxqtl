@@ -27,29 +27,46 @@ maxiter = 100
 
 test_resid_family = Binomial()  # Poisson reg result is closer
 
+# test linear regression function
+mod = sm.OLS(spector_data.endog, spector_data.exog)
+sm_state = mod.fit()
+
+test_irls = GLM(
+    maxiter=maxiter,
+    stepsize=stepsize,
+)
+
+glm_state = test_irls.fit(
+    jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+)
+assert_betas_eq(glm_state, sm_state)
+
+test_irls = GLM(
+    solver=CholeskySolve(),
+    maxiter=maxiter,
+    stepsize=stepsize,
+)
+glm_state = test_irls.fit(
+    jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+)
+
 
 def test_resid_reg():
     X = spector_data.exog.copy()
     y = jnp.array(spector_data.endog)[:, jnp.newaxis]
 
     truth = GLM(
-        X=X,
-        y=y,
-        append=False,
         family=test_resid_family,
         maxiter=maxiter,
         stepsize=stepsize,
-    ).fit()
+    ).fit(jnp.array(X), y)
 
     covar = X.drop("PSI", axis=1)
 
     glmstate_null = GLM(
-        X=covar,
-        y=y,
         family=test_resid_family,
-        append=False,
         maxiter=100,
-    ).fit()
+    ).fit(jnp.array(covar), y)
 
     PSI = jnp.array(X["PSI"])
     w_half_X = jnp.sqrt(glmstate_null.glm_wt) * jnp.array(covar)
@@ -67,12 +84,9 @@ def test_resid_reg():
     )
 
     glmstate = GLM(
-        X=X["PSI_resid"],
-        y=y,
         family=test_resid_family,
-        append=False,
-        maxiter=1000,
-    ).fit(glmstate_null.eta)
+        maxiter=100,
+    ).fit(jnp.array(X["PSI_resid"])[:, jnp.newaxis], y, glmstate_null.eta)
 
     print(f"betas: truth={truth.beta[-1]}, est={glmstate.beta[-1]}")
     print(f"SE: truth={truth.se[-1]}, est={glmstate.se[-1]}")
@@ -113,25 +127,23 @@ def test_linear_regression():
     sm_state = mod.fit()
 
     test_irls = GLM(
-        X=spector_data.exog,
-        y=spector_data.endog,
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
     )
 
-    glm_state = test_irls.fit()
+    glm_state = test_irls.fit(
+        jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+    )
     assert_betas_eq(glm_state, sm_state)
 
     test_irls = GLM(
-        X=spector_data.exog,
-        y=spector_data.endog,
         solver=CholeskySolve(),
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
     )
-    glm_state = test_irls.fit()
+    glm_state = test_irls.fit(
+        jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+    )
 
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
@@ -144,15 +156,14 @@ def test_logistic():
     sm_state = mod.fit()
 
     test_logit = GLM(
-        X=spector_data.exog,
-        y=spector_data.endog,
         family=Binomial(),
-        append=False,
         maxiter=maxiter,
         solver=CGSolve(),
         stepsize=stepsize,
     )
-    glm_state = test_logit.fit()
+    glm_state = test_logit.fit(
+        jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+    )
     assert_betas_eq(glm_state, sm_state, rtol=1e-4)
     assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-4)
     assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-4)
@@ -164,14 +175,13 @@ def test_poisson():
     sm_state = mod.fit()
 
     test_poisson = GLM(
-        X=spector_data.exog,
-        y=spector_data.endog,
         family=Poisson(),
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
     )
-    glm_state = test_poisson.fit()
+    glm_state = test_poisson.fit(
+        jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
+    )
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
@@ -183,14 +193,14 @@ def test_1D_X():
     sm_state = mod.fit(disp=0)
 
     test_poisson = GLM(
-        X=spector_data.exog["PSI"],
-        y=spector_data.endog,
         family=Poisson(),
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
     )
-    glm_state = test_poisson.fit()
+    glm_state = test_poisson.fit(
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+    )
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
@@ -206,14 +216,11 @@ def test_CGsolve():
     sm_state = smPoisson(np.array(y), np.array(X)).fit(disp=0)
 
     glm_state = GLM(
-        X=X,
-        y=y,
         family=Poisson(),
         solver=CGSolve(),
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
-    ).fit()
+    ).fit(X, y)
     assert_betas_eq(glm_state, sm_state)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
@@ -221,23 +228,16 @@ def test_CGsolve():
 
 def test_poisson_scoretest():
     mod_full = GLM(
-        X=spector_data.exog,
-        y=spector_data.endog,
         family=Poisson(),
-        append=False,
         maxiter=maxiter,
         stepsize=stepsize,
-    ).fit()
+    ).fit(jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis])
     print(mod_full.p[-1])
 
-    mod_null = GLM(
-        X=spector_data.exog.drop("GPA", axis=1),
-        y=spector_data.endog,
-        family=Poisson(),
-        append=False,
-        maxiter=maxiter,
-        stepsize=stepsize,
-    ).fit()
+    mod_null = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize,).fit(
+        jnp.array(spector_data.exog.drop("GPA", axis=1)),
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+    )
 
     pval_score = GLM.score_test_add_g(
         Poisson(),
@@ -268,9 +268,9 @@ def test_sandwich():
     )
 
     # full model fit to compare Wald p to Score p
-    glmstate = GLM(
-        X=M, y=y, family=Poisson(), append=False, maxiter=100, solver=CholeskySolve()
-    ).fit(offset_eta=library_size, robust_se=True)
+    glmstate = GLM(family=Poisson(), maxiter=100, solver=CholeskySolve()).fit(
+        M, y, offset_eta=library_size, robust_se=True
+    )
 
     assert_array_eq(glmstate.se ** 2, jnp.diag(white_cov))
 

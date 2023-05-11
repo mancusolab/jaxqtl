@@ -9,7 +9,7 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.permutation import BetaPerm, DirectPerm, Permutation
+from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
@@ -147,9 +147,7 @@ def map_cis(
                 str(rend),
             )
 
-        result = map_cis_single(
-            X, G, y, family, g_key, sig_level, offset_eta
-        )
+        result = map_cis_single(X, G, y, family, g_key, sig_level, offset_eta)
 
         if verbose:
             log.info(
@@ -196,7 +194,6 @@ def map_cis_single(
     perm: Permutation method
     """
     # fit y ~ cov only
-    import jax
 
     cisglmstate = cis_scan(X, G, y, family, offset_eta)
 

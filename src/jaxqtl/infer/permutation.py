@@ -260,7 +260,6 @@ class BetaPerm(DirectPerm):
 def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
     # TS is the beta / se
     return norm.cdf(-abs(TS)) * 2
-    # return 1 - jaxstats.chi2.cdf(jnp.square(TS), dof)
 
 
 def df_cost(TS, dof):
