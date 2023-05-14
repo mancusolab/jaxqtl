@@ -66,7 +66,7 @@ map_cis_nominal(
     dat,
     family=Poisson(),
     offset_eta=offset_eta,
-    out_path="../example/result/dat_n94_test",
+    out_path="../example/result/dat_n94_test_old",
 )
 
 prefix = "dat_n94_test"
