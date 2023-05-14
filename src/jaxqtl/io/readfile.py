@@ -47,9 +47,14 @@ class ReadyDataState:
             self.pheno.count = np.log(self.pheno.count)  # prevent log(0)
 
     def add_covar_pheno_PC(self, k: int):
+        count_std = self.pheno.count.copy(deep=True)
+        count_std = (
+            count_std - count_std.mean()
+        ) / count_std.std()  # standardize genes
+
         pca_pheno = PCA(n_components=k)
-        pca_res = pca_pheno.fit(self.pheno.count.T)
-        PCs = jnp.array(pca_res.components_.T)  # nxk
+        pca_pheno.fit(count_std)
+        PCs = pca_pheno.fit_transform(count_std)  # nxk
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
     def filter_gene(
