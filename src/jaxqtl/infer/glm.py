@@ -12,7 +12,7 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
-from jaxqtl.infer.solve import FastSolve, LinearSolve
+from jaxqtl.infer.solve import CholeskySolve, LinearSolve
 
 # import jax.scipy.linalg as jspla
 
@@ -61,7 +61,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
     def __init__(
         self,
         family: ExponentialFamily = Gaussian(),
-        solver: LinearSolve = FastSolve(),
+        solver: LinearSolve = CholeskySolve(),
         maxiter: int = 100,
         tol: float = 1e-3,
         stepsize: float = 1.0,
@@ -121,7 +121,6 @@ class GLM(eqx.Module, metaclass=ABCMeta):
     def fit(
         self,
         X: ArrayLike,
-        g: ArrayLike,
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
@@ -129,9 +128,8 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         init = self.family.init_eta(y)
         """Report Wald test p value"""
-        beta, infor_se, n_iter, converged = irls(
+        beta, n_iter, converged = irls(
             X,
-            g,
             y,
             self.family,
             self.solver,
@@ -141,20 +139,17 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             self.stepsize,
             offset_eta,
         )
-        eta = X @ beta[0:-1] + g * beta[-1] + offset_eta
-        # eta = X @ beta + offset_eta
+        eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
 
-        # _, _, weight = self.family.calc_weight(X, y, eta)
+        _, _, weight = self.family.calc_weight(X, y, eta)
 
-        # infor_se, huber_se = self.sumstats(X, y, weight, mu)
+        infor_se, huber_se = self.sumstats(X, y, weight, mu)
 
-        huber_se = 0.0
-        weight = jnp.array([0.0])
         df = X.shape[0] - X.shape[1]
         beta_se = jnp.where(robust_se, huber_se, infor_se)
 
-        beta = beta.squeeze()
+        beta = beta.squeeze()  # (p,)
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)

@@ -10,7 +10,6 @@ from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import FastSolve
 from jaxqtl.io.readfile import ReadyDataState
 
 # import jax.numpy.linalg as jnpla
@@ -86,26 +85,11 @@ def cis_scan(
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    # fit covariate only model
-    # glmstate_null = GLM(
-    #     X=X,
-    #     y=y,
-    #     family=family,
-    #     append=False,
-    #     maxiter=100,
-    # ).fit(offset_eta=offset_eta)
-    glm = GLM(family=family, maxiter=100, solver=FastSolve())
+    glm = GLM(family=family, maxiter=100)
 
     def _func(carry, snp):
-        # M = jnp.hstack((X, snp[:, jnp.newaxis]))
-        # full model fit to compare Wald p to Score p
-        glmstate = glm.fit(X, snp[:, jnp.newaxis], y, offset_eta=offset_eta)
-
-        # w_half_X = jnp.diag(jnp.sqrt(glmstate_null.glm_wt)) @ X
-        # w_X = jnp.diag(glmstate_null.glm_wt) @ X
-        # # regress out covar from X2
-        # projection_covar = X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T  # nxn
-        # g = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
+        M = jnp.hstack((X, snp[:, jnp.newaxis]))
+        glmstate = glm.fit(M, y, offset_eta=offset_eta)
 
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
@@ -129,66 +113,3 @@ def cis_scan(
     _, state = lax.scan(_func, 0.0, G.T)
 
     return state
-
-
-# Note: try vmap (slower than lax.scan); pmap can parallelize across devices
-# def cis_scan(
-#     X: ArrayLike,
-#     G: ArrayLike,
-#     y: ArrayLike,
-#     family: ExponentialFamily,
-#     offset_eta: ArrayLike = 0.0,
-# ) -> CisGLMState:
-#     """
-#     run GLM across variants in a flanking window of given gene
-#     cis-widow: plus and minus W base pairs, total length 2*cis_window
-#     """
-#     # fit covariate only model
-#     # glmstate_null = GLM(
-#     #     X=X,
-#     #     y=y,
-#     #     family=family,
-#     #     append=False,
-#     #     maxiter=100,
-#     # ).fit(offset_eta=offset_eta)
-#     glm = GLM(
-#         family=family,
-#         maxiter=100,
-#     )
-#
-#     def _func(snp):
-#         # M = jnp.hstack((X, snp[:, jnp.newaxis]))
-#         # M = carry.at[:, -1].set(snp)
-#         # full model fit to compare Wald p to Score p
-#         glmstate = glm.fit(X, snp[:, jnp.newaxis], y, offset_eta=offset_eta)
-#
-#         # w_half_X = jnp.diag(jnp.sqrt(glmstate_null.glm_wt)) @ X
-#         # w_X = jnp.diag(glmstate_null.glm_wt) @ X
-#         # # regress out covar from X2
-#         # projection_covar = X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T  # nxn
-#         # g = snp[:, jnp.newaxis] - projection_covar @ snp[:, jnp.newaxis]
-#
-#         af = jnp.mean(snp) / 2.0
-#         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
-#
-#         ma_samples = jnp.sum(
-#             snp > 0
-#         )  # Number of samples carrying at least one minor allele
-#         ma_count = jnp.sum(snp)  # Number of minor alleles
-#
-#         return CisGLMState(
-#             af=af,
-#             ma_samples=ma_samples,
-#             ma_count=ma_count,
-#             beta=glmstate.beta[-1],
-#             se=glmstate.se[-1],
-#             p=glmstate.p[-1],
-#             num_iters=glmstate.num_iters,
-#             converged=glmstate.converged,
-#         )
-#
-#     # _, state = lax.scan(_func, 0.0, G.T)
-#     _vfunc = eqx.filter_jit(vmap(_func, in_axes=0))
-#     state = _vfunc(G.T)
-#
-#     return state

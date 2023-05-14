@@ -11,7 +11,6 @@ from .solve import LinearSolve
 
 class IRLSState(NamedTuple):
     beta: Array
-    infor_se: Array
     num_iters: int
     converged: Array
 
@@ -20,7 +19,6 @@ class IRLSState(NamedTuple):
 @eqx.filter_jit
 def irls(
     X: ArrayLike,
-    g: ArrayLike,
     y: ArrayLike,
     family: ExponentialFamily,
     solver: LinearSolve,
@@ -31,38 +29,25 @@ def irls(
     offset_eta: ArrayLike = 0.0,
 ) -> IRLSState:
     def body_fun(val: Tuple):
-        diff, num_iter, cov_beta_o, g_beta_o, eta_o, infor_se = val
-        cov_beta, g_beta, infor_se = solver(
-            X, g, y, eta_o, family, stepsize, offset_eta
-        )
+        diff, num_iter, beta_o, eta_o = val
+        beta = solver(X, y, eta_o, family, stepsize, offset_eta)
         # jax.debug.breakpoint()
-        eta_n = X @ cov_beta + g * g_beta + offset_eta
-        likelihood_o = family.loglikelihood(X, y, eta_o)  # fine with Poisson
+        eta_n = X @ beta + offset_eta
+        likelihood_o = family.loglikelihood(X, y, eta_o)
         likelihood_n = family.loglikelihood(X, y, eta_n)
         diff = likelihood_n - likelihood_o
 
-        return diff, num_iter + 1, cov_beta, g_beta, eta_n, infor_se
+        return diff, num_iter + 1, beta, eta_n
 
     def cond_fun(val: Tuple):
-        diff, num_iter, cov_beta, g_beta, eta, infor_se = val
+        diff, num_iter, beta, eta = val
         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
         return cond_l
 
     init_beta = jnp.zeros((X.shape[1], 1))
-    init_tuple = (
-        10000.0,
-        0,
-        init_beta,
-        jnp.zeros((1, 1)),
-        eta + offset_eta,
-        jnp.zeros((X.shape[1] + 1,)),
-    )
+    init_tuple = (10000.0, 0, init_beta, eta + offset_eta)
 
-    diff, num_iters, cov_beta, g_beta, eta, infor_se = lax.while_loop(
-        cond_fun, body_fun, init_tuple
-    )
+    diff, num_iters, beta, eta = lax.while_loop(cond_fun, body_fun, init_tuple)
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
-    return IRLSState(
-        jnp.append(cov_beta, g_beta)[:, jnp.newaxis], infor_se, num_iters, converged
-    )
+    return IRLSState(beta, num_iters, converged)
