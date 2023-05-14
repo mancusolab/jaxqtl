@@ -53,9 +53,10 @@ offset_eta = jnp.log(total_libsize)
 
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 
-# n=94, one gene cis mapping, 2592 variants, 1min 22s
+# n=94, one gene cis mapping, 2592 variants, 1min 22s (80s)
+# 109 s
 start = timeit.default_timer()
-mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta, direct_perm=False)
+mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta)
 stop = timeit.default_timer()
 print("Time: ", stop - start)
 
@@ -65,9 +66,9 @@ map_cis_nominal(
     dat,
     family=Poisson(),
     offset_eta=offset_eta,
-    out_path="./example/result/dat_n94_test",
+    out_path="../example/result/dat_n94_test_fast",
 )
 
 prefix = "dat_n94_test"
-out_dir = "./example/result"
+out_dir = "../example/result"
 pairs_df = pd.read_parquet(os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.parquet"))

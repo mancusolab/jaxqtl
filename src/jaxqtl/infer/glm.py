@@ -12,7 +12,9 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
-from jaxqtl.infer.solve import CholeskySolve, LinearSolve
+from jaxqtl.infer.solve import FastSolve, LinearSolve
+
+# import jax.scipy.linalg as jspla
 
 
 # change jnp.ndarray --> np.ndarray for mutable array
@@ -59,7 +61,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
     def __init__(
         self,
         family: ExponentialFamily = Gaussian(),
-        solver: LinearSolve = CholeskySolve(),
+        solver: LinearSolve = FastSolve(),
         maxiter: int = 100,
         tol: float = 1e-3,
         stepsize: float = 1.0,
@@ -105,7 +107,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
     def sumstats(
         self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike
-    ) -> Tuple[Array, Array, Array]:
+    ) -> Tuple[Array, Array]:
         infor = (X * weight).T @ X
         infor_inv = jnpla.inv(infor)
         infor_se = jnp.sqrt(jnp.diag(infor_inv))
@@ -114,16 +116,22 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         huber_v = huber_var(self.family, X, y, mu, infor_inv)
         huber_se = jnp.sqrt(huber_v)
 
-        return infor_se, huber_se, infor
+        return infor_se, huber_se
 
     def fit(
-        self, X, y, offset_eta: ArrayLike = 0.0, robust_se: bool = False
+        self,
+        X: ArrayLike,
+        g: ArrayLike,
+        y: ArrayLike,
+        offset_eta: ArrayLike = 0.0,
+        robust_se: bool = False,
     ) -> GLMState:
 
         init = self.family.init_eta(y)
         """Report Wald test p value"""
-        beta, n_iter, converged = irls(
+        beta, infor_se, n_iter, converged = irls(
             X,
+            g,
             y,
             self.family,
             self.solver,
@@ -133,17 +141,20 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             self.stepsize,
             offset_eta,
         )
-        eta = X @ beta + offset_eta
+        eta = X @ beta[0:-1] + g * beta[-1] + offset_eta
+        # eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
 
-        _, _, weight = self.family.calc_weight(X, y, eta)
+        # _, _, weight = self.family.calc_weight(X, y, eta)
 
-        infor_se, huber_se, infor = self.sumstats(X, y, weight, mu)
-        beta = jnp.reshape(beta, (X.shape[1],))
+        # infor_se, huber_se = self.sumstats(X, y, weight, mu)
 
+        huber_se = 0.0
+        weight = jnp.array([0.0])
         df = X.shape[0] - X.shape[1]
         beta_se = jnp.where(robust_se, huber_se, infor_se)
 
+        beta = beta.squeeze()
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)
@@ -167,6 +178,9 @@ def huber_var(
     mu: ArrayLike,
     infor_inv: ArrayLike,
 ) -> Array:
+    """
+    TODO: this will break
+    """
     score_no_x = (y - mu) / family.scale(X, y, mu)
     Bs = (X * (score_no_x ** 2)).T @ X
     Vs = infor_inv @ Bs @ infor_inv

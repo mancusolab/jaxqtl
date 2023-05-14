@@ -82,7 +82,6 @@ def map_cis(
     fdr_level: float = 0.05,
     pi0: float = None,
     qvalue_lambda: np.ndarray = None,
-    direct_perm: bool = False,
     offset_eta: ArrayLike = 0.0,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
