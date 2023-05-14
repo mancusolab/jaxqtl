@@ -83,6 +83,7 @@ def map_cis(
     pi0: float = None,
     qvalue_lambda: np.ndarray = None,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -146,7 +147,9 @@ def map_cis(
                 str(rend),
             )
 
-        result = map_cis_single(X, G, y, family, g_key, sig_level, offset_eta)
+        result = map_cis_single(
+            X, G, y, family, g_key, sig_level, offset_eta, robust_se
+        )
 
         if verbose:
             log.info(
@@ -184,6 +187,7 @@ def map_cis_single(
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -194,7 +198,7 @@ def map_cis_single(
     """
     # fit y ~ cov only
 
-    cisglmstate = cis_scan(X, G, y, family, offset_eta)
+    cisglmstate = cis_scan(X, G, y, family, offset_eta, robust_se)
 
     beta_key, direct_key = rdm.split(key_init)
 
@@ -202,7 +206,15 @@ def map_cis_single(
     # call function directly...
     perm = BetaPerm()
     pval_beta, beta_param = perm(
-        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta
+        X,
+        y,
+        G,
+        jnp.min(cisglmstate.p),
+        family,
+        beta_key,
+        sig_level,
+        offset_eta,
+        robust_se,
     )
 
     return MapCisSingleState(
@@ -222,6 +234,7 @@ def map_cis_nominal(
     window: int = 500000,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -288,7 +301,7 @@ def map_cis_nominal(
         #     append=False,
         #     maxiter=100,
         # ).fit()
-        result = cis_scan(X, G, y, family, offset_eta)
+        result = cis_scan(X, G, y, family, offset_eta, robust_se)
 
         if verbose:
             log.info(

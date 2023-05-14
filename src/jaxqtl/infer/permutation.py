@@ -41,6 +41,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
+        robust_se: bool = True,
     ) -> Array:
         pass
 
@@ -61,6 +62,7 @@ class DirectPerm(Permutation):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
+        robust_se: bool = True,
     ) -> Tuple[Array, Array, Array]:
         def _func(key, x):
             key, p_key = rdm.split(key)
@@ -72,7 +74,7 @@ class DirectPerm(Permutation):
             #     append=False,
             #     maxiter=100,
             # ).fit()
-            glmstate = cis_scan(X, G, y_p, family, offset_eta)
+            glmstate = cis_scan(X, G, y_p, family, offset_eta, robust_se)
             allTS = jnp.abs(glmstate.beta / glmstate.se)
             return key, allTS.max()  # glmstate.p.min()
 
@@ -213,6 +215,7 @@ class BetaPerm(DirectPerm):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
+        robust_se: bool = True,
     ) -> Tuple[Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
@@ -221,7 +224,9 @@ class BetaPerm(DirectPerm):
             k, n estimates
             adjusted p value for lead SNP
         """
-        _, p_perm, TS = super().__call__(X, y, G, obs_p, family, key_init, offset_eta)
+        _, p_perm, TS = super().__call__(
+            X, y, G, obs_p, family, key_init, offset_eta, robust_se
+        )
 
         ####
         # TODO: calculate true df and adjust every p_perm accordingly
