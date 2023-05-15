@@ -107,19 +107,22 @@ class FastSolve(LinearSolve):
         w_g = weight * g
         u1 = w_X.T @ g
 
-        XtWX = w_X.T @ X
+        # XtWX = w_X.T @ X
+        B = jspla.inv(w_X.T @ X)
         # XtWX = jnp.einsum('ij,ijk->jk', weight, XtX_batch)
 
-        p = X.shape[1]
+        # p = X.shape[1]
 
-        factor = jspla.cho_factor(XtWX, lower=True)
-        u2 = jspla.cho_solve(factor, u1)
+        # factor = jspla.cho_factor(XtWX, lower=True)
+        # u2 = jspla.cho_solve(factor, u1)
+        u2 = B @ u1
 
         d = 1 / (w_g.T @ g - u1.T @ u2)
         # use einsum for outer product
-        F_inv = jspla.cho_solve(
-            factor, jnp.eye(p) + XtWX * d @ (jnp.einsum("ij,jk->ik", u2, u2.T))
-        )
+        # F_inv = jspla.cho_solve(
+        #     factor, jnp.eye(p) + XtWX * d @ (jnp.einsum("ij,jk->ik", u2, u2.T))
+        # )
+        F_inv = B + d * jnp.einsum("ij,jk->ik", u2, u2.T)
         u3 = d * u2
 
         # use block matrix to calculate (XtWX)^-1 XtW

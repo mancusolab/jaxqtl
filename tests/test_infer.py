@@ -1,27 +1,30 @@
 # import numpy as np
 # import pandas as pd
 # import statsmodels
-# import statsmodels.api as sm
-# from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
-#     Poisson as smPoisson,
-# )
-# from utils import assert_array_eq, assert_betas_eq
-#
-# import jax.numpy as jnp
+import statsmodels.api as sm
+from statsmodels.discrete.discrete_model import (  # ,NegativeBinomial
+    Poisson as smPoisson,
+)
+from utils import assert_array_eq, assert_betas_eq
+
+import jax.numpy as jnp
+
 # import jax.numpy.linalg as jnpla
-# from jax.config import config
-#
-# from jaxqtl.families.distribution import Binomial, Gaussian, Poisson
-# from jaxqtl.infer.glm import GLM
-# from jaxqtl.infer.solve import FastSolve  # CholeskySolve, CGSolve
-#
-# config.update("jax_enable_x64", True)
-#
-# # io toy example data from statsmodels to compare
-# spector_data = sm.datasets.spector.load()
-# spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
-#
-#
+from jax.config import config
+
+from jaxqtl.families.distribution import Binomial, Poisson
+from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.solve import FastSolve  # CholeskySolve, CGSolve
+
+config.update("jax_enable_x64", True)
+
+# io toy example data from statsmodels to compare
+spector_data = sm.datasets.spector.load()
+spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
+
+maxiter = 100
+stepsize = 1
+
 # def test_resid_reg():
 #     test_resid_family = Poisson()  # Poisson reg result is closer
 #
@@ -91,75 +94,69 @@
 #
 #     assert_array_eq(glmstate.beta[-1], truth.beta[-1])
 #     assert_array_eq(glmstate.se[-1], truth.se[-1])
-#
-#
-# def test_linear_regression():
-#
-#     # test linear regression function
-#     mod = sm.OLS(spector_data.endog, spector_data.exog)
-#     sm_state = mod.fit()
-#
-#     test_irls = GLM(
-#         maxiter=maxiter,
-#         stepsize=stepsize,
-#     )
-#
-#     glm_state = test_irls.fit(
-#         jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
-#     )
-#     assert_betas_eq(glm_state, sm_state)
-#
-#     test_irls = GLM(
-#         solver=CholeskySolve(),
-#         maxiter=maxiter,
-#         stepsize=stepsize,
-#     )
-#     glm_state = test_irls.fit(
-#         jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
-#     )
-#
-#     assert_betas_eq(glm_state, sm_state)
-#     assert_array_eq(glm_state.se, sm_state.bse)
-#     assert_array_eq(glm_state.p, sm_state.pvalues)
-#
-#
-# def test_logistic():
-#     # test logistic regression
-#     mod = sm.Logit(spector_data.endog, spector_data.exog)
-#     sm_state = mod.fit()
-#
-#     test_logit = GLM(
-#         family=Binomial(),
-#         maxiter=maxiter,
-#         solver=CGSolve(),
-#         stepsize=stepsize,
-#     )
-#     glm_state = test_logit.fit(
-#         jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
-#     )
-#     assert_betas_eq(glm_state, sm_state, rtol=1e-4)
-#     assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-4)
-#     assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-4)
-#
-#
-# def test_poisson():
-#     # test logistic regression
-#     mod = smPoisson(spector_data.endog, spector_data.exog)
-#     sm_state = mod.fit()
-#
-#     test_poisson = GLM(
-#         family=Poisson(),
-#         maxiter=maxiter,
-#         stepsize=stepsize,
-#     )
-#     glm_state = test_poisson.fit(
-#         jnp.array(spector_data.exog), jnp.array(spector_data.endog)[:, jnp.newaxis]
-#     )
-#     assert_betas_eq(glm_state, sm_state)
-#     assert_array_eq(glm_state.se, sm_state.bse)
-#     assert_array_eq(glm_state.p, sm_state.pvalues)
-#
-#
+
+
+def test_linear_regression():
+
+    # test linear regression function
+    mod = sm.OLS(spector_data.endog, spector_data.exog)
+    sm_state = mod.fit()
+
+    test_irls = GLM(
+        solver=FastSolve(),
+        maxiter=maxiter,
+        stepsize=stepsize,
+    )
+    glm_state = test_irls.fit(
+        jnp.array(spector_data.exog)[:, 0:-1],
+        jnp.array(spector_data.exog)[:, -1][:, jnp.newaxis],
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+    )
+
+    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
+def test_logistic():
+    # test logistic regression
+    mod = sm.Logit(spector_data.endog, spector_data.exog)
+    sm_state = mod.fit()
+
+    test_logit = GLM(
+        family=Binomial(),
+        maxiter=maxiter,
+        solver=FastSolve(),
+        stepsize=stepsize,
+    )
+    glm_state = test_logit.fit(
+        jnp.array(spector_data.exog)[:, 0:-1],
+        jnp.array(spector_data.exog)[:, -1][:, jnp.newaxis],
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+    )
+    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
+def test_poisson():
+    # test logistic regression
+    mod = smPoisson(spector_data.endog, spector_data.exog)
+    sm_state = mod.fit()
+
+    test_poisson = GLM(
+        family=Poisson(), maxiter=maxiter, stepsize=stepsize, solver=FastSolve()
+    )
+    glm_state = test_poisson.fit(
+        jnp.array(spector_data.exog)[:, 0:-1],
+        jnp.array(spector_data.exog)[:, -1][:, jnp.newaxis],
+        jnp.array(spector_data.endog)[:, jnp.newaxis],
+    )
+    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.se, sm_state.bse)
+    assert_array_eq(glm_state.p, sm_state.pvalues)
+
+
 # def test_1D_X():
 #     # test poisson regression
 #     mod = smPoisson(spector_data.endog, spector_data.exog["PSI"])
@@ -177,8 +174,8 @@
 #     assert_betas_eq(glm_state, sm_state)
 #     assert_array_eq(glm_state.se, sm_state.bse)
 #     assert_array_eq(glm_state.p, sm_state.pvalues)
-#
-#
+
+
 # def test_CGsolve():
 #     dat = jnp.array(
 #         pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
@@ -197,8 +194,8 @@
 #     assert_betas_eq(glm_state, sm_state)
 #     assert_array_eq(glm_state.se, sm_state.bse)
 #     assert_array_eq(glm_state.p, sm_state.pvalues)
-#
-#
+
+
 # def test_poisson_scoretest():
 #     mod_full = GLM(
 #         family=Poisson(),
@@ -222,8 +219,8 @@
 #
 #     # the discrepancy might be caused by small sample size n=30
 #     assert_array_eq(pval_score, mod_full.p[-1])
-#
-#
+
+
 # def test_sandwich():
 #     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
 #     M = jnp.array(dat.iloc[:, 0:12])
@@ -246,41 +243,41 @@
 #     )
 #
 #     assert_array_eq(glmstate.se ** 2, jnp.diag(white_cov))
-#
-#
-# # -------------------------------------------------#
-#
-# # data = sm.datasets.scotland.io()
-# # data.exog = sm.add_constant(data.exog)
-# # gamma_model = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
-# # gamma_results = gamma_model.fit()
-# # print(gamma_results.summary())
-#
-# # test_Gamma = GLM(
-# #     X=data.exog,
-# #     y=data.endog,
-# #     family="Gamma",
-# #     seed=123,
-# #     solver=solver,
-# #     append=False,
-# # )
-# # test_Gamma.fit()
-# # print(test_Gamma)
-#
-# # data = sm.datasets.scotland.io()
-# # data.exog = sm.add_constant(data.exog)
-# # NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
-# # NB_results = NB_model.fit(maxiter=100)
-# # print(NB_results.summary())
-#
-# # test_NB = GLM(
-# #     X=data.exog,
-# #     y=data.endog,
-# #     family="NB",
-# #     seed=123,
-# #     solver=solver,
-# #     append=False,
-# #     init="default",
-# # )
-# # test_NB.fit()
-# # print(test_NB)
+
+
+# -------------------------------------------------#
+
+# data = sm.datasets.scotland.io()
+# data.exog = sm.add_constant(data.exog)
+# gamma_model = sm.GLM(data.endog, data.exog, family=sm.families.Gamma())
+# gamma_results = gamma_model.fit()
+# print(gamma_results.summary())
+
+# test_Gamma = GLM(
+#     X=data.exog,
+#     y=data.endog,
+#     family="Gamma",
+#     seed=123,
+#     solver=solver,
+#     append=False,
+# )
+# test_Gamma.fit()
+# print(test_Gamma)
+
+# data = sm.datasets.scotland.io()
+# data.exog = sm.add_constant(data.exog)
+# NB_model = NegativeBinomial(spector_data.endog, spector_data.exog)
+# NB_results = NB_model.fit(maxiter=100)
+# print(NB_results.summary())
+
+# test_NB = GLM(
+#     X=data.exog,
+#     y=data.endog,
+#     family="NB",
+#     seed=123,
+#     solver=solver,
+#     append=False,
+#     init="default",
+# )
+# test_NB.fit()
+# print(test_NB)
