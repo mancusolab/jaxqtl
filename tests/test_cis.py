@@ -56,7 +56,9 @@ dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 # n=94, one gene cis mapping, 2592 variants, 1min 22s (80s)
 # 109 s
 start = timeit.default_timer()
-mapcis_out = map_cis(dat, family=Poisson(), offset_eta=offset_eta, robust_se=True)
+mapcis_out = map_cis(
+    dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=1000
+)
 stop = timeit.default_timer()
 print("Time: ", stop - start)
 

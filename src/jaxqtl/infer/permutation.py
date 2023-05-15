@@ -49,7 +49,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
 class DirectPerm(Permutation):
     max_perm_direct: int
 
-    def __init__(self, max_perm_direct: int = 10000):
+    def __init__(self, max_perm_direct: int = 1000):
         self.max_perm_direct = max_perm_direct
 
     def __call__(
@@ -201,7 +201,7 @@ class BetaPerm(DirectPerm):
     max_perm_direct: int
     max_iter_beta: int
 
-    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
+    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 100):
         self.max_iter_beta = max_iter_beta
         super().__init__(max_perm_direct)
 

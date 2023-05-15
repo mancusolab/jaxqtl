@@ -84,6 +84,7 @@ def map_cis(
     qvalue_lambda: np.ndarray = None,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
+    n_perm: int = 1000,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -148,7 +149,7 @@ def map_cis(
             )
 
         result = map_cis_single(
-            X, G, y, family, g_key, sig_level, offset_eta, robust_se
+            X, G, y, family, g_key, sig_level, offset_eta, robust_se, n_perm
         )
 
         if verbose:
@@ -188,6 +189,7 @@ def map_cis_single(
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
+    n_perm: int = 1000,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -204,7 +206,7 @@ def map_cis_single(
 
     # if we -alwaays- use BetaPerm now, we may as well drop the class aspect and
     # call function directly...
-    perm = BetaPerm()
+    perm = BetaPerm(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
         X,
         y,
