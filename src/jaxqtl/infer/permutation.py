@@ -41,7 +41,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
-        robust_se: bool = True,
+        robust_se: bool = False,
     ) -> Array:
         pass
 
@@ -49,7 +49,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
 class DirectPerm(Permutation):
     max_perm_direct: int
 
-    def __init__(self, max_perm_direct: int = 1000):
+    def __init__(self, max_perm_direct: int = 10000):
         self.max_perm_direct = max_perm_direct
 
     def __call__(
@@ -62,7 +62,7 @@ class DirectPerm(Permutation):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
-        robust_se: bool = True,
+        robust_se: bool = False,
     ) -> Tuple[Array, Array, Array]:
         def _func(key, x):
             key, p_key = rdm.split(key)
@@ -201,7 +201,7 @@ class BetaPerm(DirectPerm):
     max_perm_direct: int
     max_iter_beta: int
 
-    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 100):
+    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
         self.max_iter_beta = max_iter_beta
         super().__init__(max_perm_direct)
 
@@ -215,7 +215,7 @@ class BetaPerm(DirectPerm):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
-        robust_se: bool = True,
+        robust_se: bool = False,
     ) -> Tuple[Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
