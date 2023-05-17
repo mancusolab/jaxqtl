@@ -51,13 +51,28 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+dat.filter_gene(gene_list=gene_list)  # filter to one gene
 
 # n=94, one gene cis mapping, 2592 variants, 1min 22s (80s)
 # 109 s
 start = timeit.default_timer()
-mapcis_out = map_cis(
+mapcis_out_1000 = map_cis(
     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=1000
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+
+# 500 looks ok
+start = timeit.default_timer()
+mapcis_out_500 = map_cis(
+    dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=500
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+
+start = timeit.default_timer()
+mapcis_out_100 = map_cis(
+    dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=100
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)

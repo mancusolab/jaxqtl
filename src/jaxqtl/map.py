@@ -85,6 +85,7 @@ def map_cis(
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
     n_perm: int = 1000,
+    add_qval: bool = True,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -176,7 +177,9 @@ def map_cis(
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
-    result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
+    if add_qval:
+        result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
+
     return result_df
 
 
