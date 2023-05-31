@@ -88,9 +88,21 @@ def cis_scan(
     """
     glm = GLM(family=family, maxiter=100)
 
+    # initiate SNP scan with first fit
+    M = jnp.hstack((X, G[:, 0][:, jnp.newaxis]))
+    glmstate_first = glm.fit(
+        M, y, offset_eta=offset_eta, robust_se=robust_se, init=family.init_eta(y)
+    )
+
     def _func(carry, snp):
         M = jnp.hstack((X, snp[:, jnp.newaxis]))
-        glmstate = glm.fit(M, y, offset_eta=offset_eta, robust_se=robust_se)
+        glmstate = glm.fit(
+            M,
+            y,
+            offset_eta=offset_eta,
+            robust_se=robust_se,
+            init=glmstate_first.eta - offset_eta,
+        )
 
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))

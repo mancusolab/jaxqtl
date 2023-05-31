@@ -227,6 +227,7 @@ class BetaPerm(DirectPerm):
         _, p_perm, TS = super().__call__(
             X, y, G, obs_p, family, key_init, offset_eta, robust_se
         )
+        p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
         ####
         # TODO: calculate true df and adjust every p_perm accordingly

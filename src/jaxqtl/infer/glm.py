@@ -1,5 +1,5 @@
 from abc import ABCMeta
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import equinox as eqx
 
@@ -124,9 +124,10 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
+        init: Optional[ArrayLike] = None,
     ) -> GLMState:
 
-        init = self.family.init_eta(y)
+        # init = self.family.init_eta(y)
         """Report Wald test p value"""
         beta, n_iter, converged = irls(
             X,
