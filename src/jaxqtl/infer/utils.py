@@ -81,12 +81,13 @@ def cis_scan(
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
+    maxiter: int = 100,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    glm = GLM(family=family, maxiter=100)
+    glm = GLM(family=family, maxiter=maxiter)
 
     # initiate SNP scan with first fit
     M = jnp.hstack((X, G[:, 0][:, jnp.newaxis]))

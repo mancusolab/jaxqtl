@@ -54,7 +54,7 @@ offset_eta = jnp.log(total_libsize)
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 
 # n=94, one gene cis mapping, 2592 variants
-# 80 s vs.
+# 80 s vs. 60s
 start = timeit.default_timer()
 mapcis_out_1000 = map_cis(
     dat,
