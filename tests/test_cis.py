@@ -90,7 +90,7 @@ map_cis_nominal(
     dat,
     family=Poisson(),
     offset_eta=offset_eta,
-    out_path="../example/result/dat_n94_test_old",
+    out_path="../example/result/dat_n94_test_cov",
     robust_se=True,
 )
 stop = timeit.default_timer()
