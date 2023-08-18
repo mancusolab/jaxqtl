@@ -86,23 +86,28 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         return pval
 
-    @staticmethod
     def score_test_add_g(
-        family: ExponentialFamily,
-        X: ArrayLike,
+        self,
+        g: ArrayLike,
+        X_cov: ArrayLike,
         y: ArrayLike,
         glm_null_res: GLMState,
-        df: float,
+        offset_eta: ArrayLike = 0.0,
     ) -> Array:
         """test for additional covariate g
+        only require fit null model using fitted covariate only model + new vector g
         X is the full design matrix containing covariates and g
         calculate score in full model using the model fitted from null model
         """
-        score_null = family.score(X, y, glm_null_res.mu)
-        score_null_info = (X * glm_null_res.glm_wt).T @ X
-        TS_chi2 = score_null.T @ jnpla.inv(score_null_info) @ score_null
-        # pval = 1 - chi2.cdf(TS_chi2, df)
-        pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
+        x_W = X_cov * glm_null_res.glm_wt
+        score_null_info = (x_W).T @ X_cov
+        g_regout = g - X_cov @ jnpla.inv(score_null_info) @ x_W.T @ g
+        mu_k, g_deriv_k, weight = self.family.calc_weight(X_cov, y, glm_null_res.eta)
+        resid = g_deriv_k * (y - mu_k) * self.stepsize - offset_eta
+
+        w_g_regout = g_regout * glm_null_res.glm_wt
+        Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
+        pval = norm.cdf(-abs(Z)) * 2
         return pval
 
     def sumstats(

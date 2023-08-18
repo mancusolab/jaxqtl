@@ -216,22 +216,21 @@ def test_sandwich():
 def test_poisson_scoretest():
     jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
-    mod_full = jaxqtl_pois.fit(X_arr, y_arr, init=init_pois)
-    print(mod_full.p[-1])
+    mod_full = jaxqtl_pois.fit(X_arr, y_arr, init=init_pois)  # wald test
 
     mod_null = jaxqtl_pois.fit(
         jnp.array(spector_data.exog.drop("GPA", axis=1)), y_arr, init=init_pois
     )
 
-    pval_score = GLM.score_test_add_g(
-        Poisson(),
-        X_arr,
+    pval_score = jaxqtl_pois.score_test_add_g(
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
+        jnp.array(spector_data.exog.drop("GPA", axis=1)),
         y_arr,
         mod_null,
-        1.0,
     )
 
-    # the discrepancy might be due to small sample size n=30
+    # checked with pval of score test in R: 0.07508054, vs. jaxqtl 0.073275
+    # not expect score test has exact p value as wald test, but should be close
     assert_array_eq(pval_score, mod_full.p[-1])
 
 
@@ -239,6 +238,9 @@ def test_resid_reg():
     """
     project out covariates first;
     results are wrong
+    check ref:
+    https://timothy-barry.github.io/posts/2020-07-07-generalized-linear-models/
+    https://github.com/rgcgithub/regenie/blob/master/src/Step2_Models.cpp
     """
     test_resid_family = Binomial()  # Poisson reg result is closer
 
@@ -255,21 +257,16 @@ def test_resid_reg():
     truth = jaxqtl_pois.fit(jnp.array(X), y, init=init_pois)
 
     covar = X.drop("PSI", axis=1)
+    covar_X_arr = jnp.array(covar)
 
-    glmstate_null = jaxqtl_pois.fit(jnp.array(covar), y, init=init_pois)
+    glmstate_null = jaxqtl_pois.fit(covar_X_arr, y, init=init_pois)
 
-    # check this: https://github.com/rgcgithub/regenie/blob/master/src/Step2_Models.cpp
     PSI = jnp.array(X["PSI"])
-    w_half_X = jnp.sqrt(glmstate_null.glm_wt) * jnp.array(covar)
-    # projection_covar = (
-    #     jnp.array(covar) @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
-    # )  # nxn
-    projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
+    w_X = jnp.array(glmstate_null.glm_wt) * covar_X_arr
 
-    X["PSI_resid"] = (
-        PSI[:, jnp.newaxis] * jnp.sqrt(glmstate_null.glm_wt)
-        - projection_covar @ PSI[:, jnp.newaxis]
-    )
+    projection_covar = covar_X_arr @ jnpla.inv(w_X.T @ covar_X_arr) @ w_X.T  # nxn
+
+    X["PSI_resid"] = PSI[:, jnp.newaxis] - projection_covar @ PSI[:, jnp.newaxis]
 
     glmstate = jaxqtl_pois.fit(
         jnp.array(X["PSI_resid"])[:, jnp.newaxis],
@@ -282,15 +279,14 @@ def test_resid_reg():
     print(f"SE: truth={truth.se[-1]}, est={glmstate.se}")
     print(f"Z: truth={truth.beta[-1]/truth.se[-1]}, est={glmstate.beta/glmstate.se}")
 
+    # repeat with statsmodel
     mod_null = sm.GLM(spector_data.endog, covar, family=sm.families.Binomial()).fit()
     mod_null_eta = mod_null.get_prediction(covar, which="linear").predicted
     mod_null_mu = mod_null.get_prediction(covar, which="mean").predicted
     glm_wt = mod_null_mu * (1 - mod_null_mu)
-    w_half_X = jnp.sqrt(glm_wt[:, jnp.newaxis]) * jnp.array(covar)
-    # projection_covar = (
-    #     jnp.array(covar) @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
-    # )  # nxn
-    projection_covar = w_half_X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_half_X.T  # nxn
+    w_X = glm_wt[:, jnp.newaxis] * covar_X_arr
+
+    projection_covar = covar_X_arr @ jnpla.inv(w_X.T @ covar_X_arr) @ w_X.T  # nxn
 
     X["PSI_resid"] = PSI[:, jnp.newaxis] - projection_covar @ PSI[:, jnp.newaxis]
     mod_G = sm.GLM(
