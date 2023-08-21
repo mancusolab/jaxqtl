@@ -127,6 +127,8 @@ def map_cis(
 
     results = []
 
+    # TODO: fit y ~ cov only for all genes
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)

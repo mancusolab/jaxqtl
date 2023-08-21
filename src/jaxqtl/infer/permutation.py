@@ -67,13 +67,9 @@ class DirectPerm(Permutation):
         def _func(key, x):
             key, p_key = rdm.split(key)
             y_p = rdm.permutation(p_key, y, axis=0)
-            # glmstate_null = GLM(
-            #     X=X,
-            #     y=y_p,
-            #     family=family,
-            #     append=False,
-            #     maxiter=100,
-            # ).fit()
+
+            # TODO: fit y ~ cov only for all genes
+
             glmstate = cis_scan(X, G, y_p, family, offset_eta, robust_se)
             allTS = jnp.abs(glmstate.beta / glmstate.se)
             return key, allTS.max()  # glmstate.p.min()

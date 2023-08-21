@@ -223,12 +223,10 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_GPA, pval_GPA = jaxqtl_pois.score_test_add_g(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
-        jnp.log(jnp.array(offset)),
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
 
@@ -236,12 +234,10 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_add_g(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
-        jnp.log(jnp.array(offset)),
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
@@ -249,12 +245,10 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_PSI, pval_PSI = jaxqtl_pois.score_test_add_g(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
-        jnp.log(jnp.array(offset)),
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
@@ -271,31 +265,28 @@ def test_bin_scoretest():
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_GPA, pval_GPA = jaxqtl_bin.score_test_add_g(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_TUCE, pval_TUCE = jaxqtl_bin.score_test_add_g(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    x_W = X_covar * mod_null.glm_wt
+    P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
     Z_PSI, pval_PSI = jaxqtl_bin.score_test_add_g(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
-        X_covar,
-        y_arr,
-        mod_null,
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
