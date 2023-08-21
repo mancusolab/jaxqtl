@@ -83,6 +83,9 @@ def map_cis(
     pi0: float = None,
     qvalue_lambda: np.ndarray = None,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
+    n_perm: int = 1000,
+    add_qval: bool = True,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
@@ -146,7 +149,9 @@ def map_cis(
                 str(rend),
             )
 
-        result = map_cis_single(X, G, y, family, g_key, sig_level, offset_eta)
+        result = map_cis_single(
+            X, G, y, family, g_key, sig_level, offset_eta, robust_se, n_perm
+        )
 
         if verbose:
             log.info(
@@ -172,7 +177,9 @@ def map_cis(
     # filter results based on user speicification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
-    result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
+    if add_qval:
+        result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
+
     return result_df
 
 
@@ -184,6 +191,8 @@ def map_cis_single(
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
+    n_perm: int = 1000,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -194,15 +203,23 @@ def map_cis_single(
     """
     # fit y ~ cov only
 
-    cisglmstate = cis_scan(X, G, y, family, offset_eta)
+    cisglmstate = cis_scan(X, G, y, family, offset_eta, robust_se)
 
     beta_key, direct_key = rdm.split(key_init)
 
     # if we -alwaays- use BetaPerm now, we may as well drop the class aspect and
     # call function directly...
-    perm = BetaPerm()
+    perm = BetaPerm(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
-        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta
+        X,
+        y,
+        G,
+        jnp.min(cisglmstate.p),
+        family,
+        beta_key,
+        sig_level,
+        offset_eta,
+        robust_se,
     )
 
     return MapCisSingleState(
@@ -222,6 +239,7 @@ def map_cis_nominal(
     window: int = 500000,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -288,7 +306,7 @@ def map_cis_nominal(
         #     append=False,
         #     maxiter=100,
         # ).fit()
-        result = cis_scan(X, G, y, family, offset_eta)
+        result = cis_scan(X, G, y, family, offset_eta, robust_se)
 
         if verbose:
             log.info(

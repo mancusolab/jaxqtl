@@ -2,7 +2,7 @@ import os
 import re
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Optional
 
 import decoupler as dc
 import equinox as eqx
@@ -25,7 +25,7 @@ class SingleCellFilter:
     min_genes: int = 200
     max_genes: int = 2500  # can decide this based on plotting
     percent_mt: int = 5  # 5 means 5%
-    norm_target_sum: float = 1e6  # not recommended
+    norm_target_sum: float = 1e5  # not recommended
     bulk_method: str = "mean"
     bulk_min_prop: float = (
         0.0  # Minimum proportion of cells that express a gene in a sample.
@@ -59,6 +59,7 @@ class H5AD(PhenoIO):
         id_col: str = "donor_id",
         celltype_col: str = "cell_type",
         divide_size_factor: bool = True,
+        norm_fix_L: Optional[int] = None,
     ) -> pd.DataFrame:
         """Filter single cell data and create pseudo-bulk
         dat.X: n_obs (cell) x n_vars (genes)
@@ -83,7 +84,9 @@ class H5AD(PhenoIO):
         # here return the actual sparse matrix instead of View for shifted_transformation_nolog()
         dat = dat[dat.obs[SingleCellFilter.mt_col] < SingleCellFilter.percent_mt].copy()
 
-        # sc.pp.normalize_total(dat, target_sum=SingleCellFilter.norm_target_sum)  # CPM method
+        # normalize total
+        if norm_fix_L is not None:
+            sc.pp.normalize_total(dat, target_sum=norm_fix_L)  # fixed L
         if divide_size_factor:
             dat = adjust_size_factor(dat)
 

@@ -1,5 +1,5 @@
 from abc import ABCMeta
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import equinox as eqx
 
@@ -12,7 +12,7 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
-from jaxqtl.infer.solve import FastSolve, LinearSolve
+from jaxqtl.infer.solve import CholeskySolve, LinearSolve
 
 # import jax.scipy.linalg as jspla
 
@@ -61,7 +61,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
     def __init__(
         self,
         family: ExponentialFamily = Gaussian(),
-        solver: LinearSolve = FastSolve(),
+        solver: LinearSolve = CholeskySolve(),
         maxiter: int = 100,
         tol: float = 1e-3,
         stepsize: float = 1.0,
@@ -86,23 +86,28 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         return pval
 
-    @staticmethod
     def score_test_add_g(
-        family: ExponentialFamily,
-        X: ArrayLike,
+        self,
+        g: ArrayLike,
+        X_cov: ArrayLike,
         y: ArrayLike,
         glm_null_res: GLMState,
-        df: float,
+        offset_eta: ArrayLike = 0.0,
     ) -> Array:
         """test for additional covariate g
+        only require fit null model using fitted covariate only model + new vector g
         X is the full design matrix containing covariates and g
         calculate score in full model using the model fitted from null model
         """
-        score_null = family.score(X, y, glm_null_res.mu)
-        score_null_info = (X * glm_null_res.glm_wt).T @ X
-        TS_chi2 = score_null.T @ jnpla.inv(score_null_info) @ score_null
-        # pval = 1 - chi2.cdf(TS_chi2, df)
-        pval = norm.cdf(-abs(jnp.sqrt(TS_chi2))) * 2
+        x_W = X_cov * glm_null_res.glm_wt
+        score_null_info = (x_W).T @ X_cov
+        g_regout = g - X_cov @ jnpla.inv(score_null_info) @ x_W.T @ g
+        mu_k, g_deriv_k, weight = self.family.calc_weight(X_cov, y, glm_null_res.eta)
+        resid = g_deriv_k * (y - mu_k) * self.stepsize - offset_eta
+
+        w_g_regout = g_regout * glm_null_res.glm_wt
+        Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
+        pval = norm.cdf(-abs(Z)) * 2
         return pval
 
     def sumstats(
@@ -121,17 +126,16 @@ class GLM(eqx.Module, metaclass=ABCMeta):
     def fit(
         self,
         X: ArrayLike,
-        g: ArrayLike,
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
+        init: Optional[ArrayLike] = None,
     ) -> GLMState:
 
-        init = self.family.init_eta(y)
+        # init = self.family.init_eta(y)
         """Report Wald test p value"""
-        beta, infor_se, n_iter, converged = irls(
+        beta, n_iter, converged = irls(
             X,
-            g,
             y,
             self.family,
             self.solver,
@@ -141,20 +145,17 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             self.stepsize,
             offset_eta,
         )
-        eta = X @ beta[0:-1] + g * beta[-1] + offset_eta
-        # eta = X @ beta + offset_eta
+        eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
 
-        # _, _, weight = self.family.calc_weight(X, y, eta)
+        _, _, weight = self.family.calc_weight(X, y, eta)
 
-        # infor_se, huber_se = self.sumstats(X, y, weight, mu)
+        infor_se, huber_se = self.sumstats(X, y, weight, mu)
 
-        huber_se = 0.0
-        weight = jnp.array([0.0])
         df = X.shape[0] - X.shape[1]
         beta_se = jnp.where(robust_se, huber_se, infor_se)
 
-        beta = beta.squeeze()
+        beta = beta.squeeze()  # (p,)
         TS = beta / beta_se
 
         pval_wald = self.wald_test(TS, df)
