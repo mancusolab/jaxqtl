@@ -93,7 +93,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         y: ArrayLike,
         glm_null_res: GLMState,
         offset_eta: ArrayLike = 0.0,
-    ) -> Array:
+    ) -> Tuple[Array, Array]:
         """test for additional covariate g
         only require fit null model using fitted covariate only model + new vector g
         X is the full design matrix containing covariates and g
@@ -108,7 +108,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         w_g_regout = g_regout * glm_null_res.glm_wt
         Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
         pval = norm.cdf(-abs(Z)) * 2
-        return pval
+        return Z, pval
 
     def sumstats(
         self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike

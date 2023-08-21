@@ -214,24 +214,85 @@ def test_sandwich():
 
 
 def test_poisson_scoretest():
+    R_res = pd.read_csv("./example/data/spector_scoretest_pois_Rres.tsv", sep="\t")
     jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
-    mod_full = jaxqtl_pois.fit(X_arr, y_arr, init=init_pois)  # wald test
 
-    mod_null = jaxqtl_pois.fit(
-        jnp.array(spector_data.exog.drop("GPA", axis=1)), y_arr, init=init_pois
-    )
-
-    pval_score = jaxqtl_pois.score_test_add_g(
+    X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    Z_GPA, pval_GPA = jaxqtl_pois.score_test_add_g(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
-        jnp.array(spector_data.exog.drop("GPA", axis=1)),
+        X_covar,
         y_arr,
         mod_null,
     )
+    print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
 
-    # checked with pval of score test in R: 0.07508054, vs. jaxqtl 0.073275
-    # not expect score test has exact p value as wald test, but should be close
-    assert_array_eq(pval_score, mod_full.p[-1])
+    X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_add_g(
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis],
+        X_covar,
+        y_arr,
+        mod_null,
+    )
+    print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
+
+    X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    Z_PSI, pval_PSI = jaxqtl_pois.score_test_add_g(
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
+        X_covar,
+        y_arr,
+        mod_null,
+    )
+    print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
+
+    pval_vec = jnp.array([pval_GPA[1], pval_TUCE[1], pval_PSI[1]]).T[0]  # fix shape
+    Z_vec = jnp.array([Z_GPA[1], Z_TUCE[1], Z_PSI[1]]).T[0]  # fix shape
+    assert_array_eq(pval_vec, jnp.array(R_res["pval"]))
+    assert_array_eq(Z_vec, jnp.array(R_res["Z"]))
+
+
+def test_bin_scoretest():
+    R_res = pd.read_csv("../example/data/spector_scoretest_bin_Rres.tsv", sep="\t")
+    jaxqtl_bin = GLM(family=Binomial(), maxiter=maxiter, stepsize=stepsize)
+    init_bin = jaxqtl_bin.family.init_eta(y_arr)
+
+    X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    Z_GPA, pval_GPA = jaxqtl_bin.score_test_add_g(
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
+        X_covar,
+        y_arr,
+        mod_null,
+    )
+    print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
+
+    X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
+    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    Z_TUCE, pval_TUCE = jaxqtl_bin.score_test_add_g(
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis],
+        X_covar,
+        y_arr,
+        mod_null,
+    )
+    print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
+
+    X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
+    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
+    Z_PSI, pval_PSI = jaxqtl_bin.score_test_add_g(
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
+        X_covar,
+        y_arr,
+        mod_null,
+    )
+    print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
+
+    pval_vec = jnp.array([pval_GPA[1], pval_TUCE[1], pval_PSI[1]]).T[0]  # fix shape
+    Z_vec = jnp.array([Z_GPA[1], Z_TUCE[1], Z_PSI[1]]).T[0]  # fix shape
+    assert_array_eq(pval_vec, jnp.array(R_res["pval"]))
+    assert_array_eq(Z_vec, jnp.array(R_res["Z"]))
 
 
 def test_resid_reg():
