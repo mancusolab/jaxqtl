@@ -103,7 +103,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         score_null_info = (x_W).T @ X_cov
         g_regout = g - X_cov @ jnpla.inv(score_null_info) @ x_W.T @ g
         mu_k, g_deriv_k, weight = self.family.calc_weight(X_cov, y, glm_null_res.eta)
-        resid = g_deriv_k * (y - mu_k) * self.stepsize - offset_eta
+        resid = g_deriv_k * (y - mu_k) * self.stepsize  # - offset_eta
 
         w_g_regout = g_regout * glm_null_res.glm_wt
         Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)

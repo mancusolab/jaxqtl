@@ -214,37 +214,47 @@ def test_sandwich():
 
 
 def test_poisson_scoretest():
+    offset = pd.read_csv("./example/data/spector_offset.tsv", sep="\t")
     R_res = pd.read_csv("./example/data/spector_scoretest_pois_Rres.tsv", sep="\t")
     jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    mod_null = jaxqtl_pois.fit(
+        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
+    )
     Z_GPA, pval_GPA = jaxqtl_pois.score_test_add_g(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis],
         X_covar,
         y_arr,
         mod_null,
+        jnp.log(jnp.array(offset)),
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    mod_null = jaxqtl_pois.fit(
+        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
+    )
     Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_add_g(
         jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis],
         X_covar,
         y_arr,
         mod_null,
+        jnp.log(jnp.array(offset)),
     )
-    print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
+    print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois)
+    mod_null = jaxqtl_pois.fit(
+        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
+    )
     Z_PSI, pval_PSI = jaxqtl_pois.score_test_add_g(
         jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis],
         X_covar,
         y_arr,
         mod_null,
+        jnp.log(jnp.array(offset)),
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
@@ -255,7 +265,7 @@ def test_poisson_scoretest():
 
 
 def test_bin_scoretest():
-    R_res = pd.read_csv("../example/data/spector_scoretest_bin_Rres.tsv", sep="\t")
+    R_res = pd.read_csv("./example/data/spector_scoretest_bin_Rres.tsv", sep="\t")
     jaxqtl_bin = GLM(family=Binomial(), maxiter=maxiter, stepsize=stepsize)
     init_bin = jaxqtl_bin.family.init_eta(y_arr)
 
