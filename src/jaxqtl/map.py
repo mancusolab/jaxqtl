@@ -9,8 +9,10 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
+
+# from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.permutation import BetaPerm
-from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan
+from jaxqtl.infer.utils import CisGLMState, _setup_G_y, cis_scan, cis_scan_scoretest
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
 from jaxqtl.post.qvalue import add_qvalues
@@ -127,8 +129,6 @@ def map_cis(
 
     results = []
 
-    # TODO: fit y ~ cov only for all genes
-
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -203,8 +203,6 @@ def map_cis_single(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
-    # fit y ~ cov only
-
     cisglmstate = cis_scan(X, G, y, family, offset_eta, robust_se)
 
     beta_key, direct_key = rdm.split(key_init)
@@ -301,13 +299,6 @@ def map_cis_nominal(
                 str(rend),
             )
 
-        # glmstate_null = GLM(
-        #     X=X,
-        #     y=y,
-        #     family=family,
-        #     append=False,
-        #     maxiter=100,
-        # ).fit()
         result = cis_scan(X, G, y, family, offset_eta, robust_se)
 
         if verbose:
@@ -367,3 +358,136 @@ def map_cis_nominal(
         one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
         one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
         one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.parquet")
+
+
+def map_cis_nominal_scoretest(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    out_path: str,
+    log=None,
+    append_intercept: bool = True,
+    standardize: bool = True,
+    window: int = 500000,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+):
+    """eQTL Mapping for all cis-SNP gene pairs
+
+    append_intercept: add a column of ones in front for intercepts in design matrix
+    standardize: on covariates
+
+    Returns:
+        score test statistics and p value (no effect estimates)
+        write out parquet file by chrom for efficient data storage and retrieval
+    """
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar
+    n, k = X.shape
+
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    if standardize:
+        X = X / jnp.std(X, axis=0)
+
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    af = []
+    ma_samples = []
+    ma_count = []
+    # slope = []
+    # slope_se = []
+    Z = []
+    nominal_p = []
+    converged = []
+    num_var_cis = []
+    gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
+    var_df_all = pd.DataFrame(
+        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
+    )
+
+    for gene in gene_info:
+        gene_name, chrom, start_min, end_max = gene
+        lstart = max(0, start_min - window)
+        rend = end_max + window
+
+        # pull cis G and y for this gene
+        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+
+        # skip if no cis SNPs found
+        if G.shape[1] == 0:
+            continue
+
+        if verbose:
+            log.info(
+                "Performing cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+
+        result = cis_scan_scoretest(X, G, y, family, offset_eta)
+
+        if verbose:
+            log.info(
+                "Finished cis-qtl scan for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+
+        var_df["phenotype_id"] = gene_name
+        var_df["tss"] = start_min
+        var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
+        gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
+
+        # combine results
+        af.append(result.af)
+        ma_samples.append(result.ma_samples)
+        ma_count.append(result.ma_count)
+
+        nominal_p.append(result.p.T[0])
+        Z.append(result.Z.T[0])
+        converged.append(result.converged)
+        num_var_cis.append(var_df.shape[0])
+
+    # write result
+    start_row = 0
+    end_row = 0
+    outdf = var_df_all
+    outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
+    outdf = outdf.drop(["cm"], axis=1)
+
+    # add additional columns
+    outdf["af"] = np.NaN
+    outdf["ma_samples"] = np.NaN
+    outdf["ma_count"] = np.NaN
+    outdf["pval_nominal"] = np.NaN
+    # outdf["slope"] = np.NaN
+    # outdf["slope_se"] = np.NaN
+    outdf["Z"] = np.NaN
+    outdf["converged"] = np.NaN
+
+    for idx, _ in gene_mapped_list.iterrows():
+        end_row += num_var_cis[idx]
+        outdf["af"][start_row:end_row] = af[idx]
+        outdf["ma_samples"][start_row:end_row] = ma_samples[idx]
+        outdf["ma_count"][start_row:end_row] = ma_count[idx]
+        outdf["pval_nominal"][start_row:end_row] = nominal_p[idx].T
+        # outdf["slope"][start_row:end_row] = slope[idx]
+        # outdf["slope_se"][start_row:end_row] = slope_se[idx]
+        outdf["Z"][start_row:end_row] = Z[idx].T
+        outdf["converged"][start_row:end_row] = converged[idx]
+        start_row = end_row
+
+    # split by chrom
+    for chrom in outdf["chrom"].unique().tolist():
+        one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
+        one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
+        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.scoretest.parquet")

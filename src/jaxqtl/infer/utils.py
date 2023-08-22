@@ -5,14 +5,13 @@ import pandas as pd
 
 import jax.lax as lax
 import jax.numpy as jnp
+import jax.numpy.linalg as jnpla
 from jax import Array
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.glm import GLM
 from jaxqtl.io.readfile import ReadyDataState
-
-# import jax.numpy.linalg as jnpla
 
 
 class CisGLMState(NamedTuple):
@@ -24,6 +23,16 @@ class CisGLMState(NamedTuple):
     p: Array
     num_iters: Array
     converged: Array
+
+
+class CisGLMScoreState(NamedTuple):
+    af: Array
+    ma_samples: Array
+    ma_count: Array
+    p: Array
+    num_iters: Array
+    converged: Array
+    Z: Array
 
 
 def _cis_window_cutter(
@@ -121,6 +130,54 @@ def cis_scan(
             p=glmstate.p[-1],
             num_iters=glmstate.num_iters,
             converged=glmstate.converged,
+        )
+
+    _, state = lax.scan(_func, 0.0, G.T)
+
+    return state
+
+
+@eqx.filter_jit
+def cis_scan_scoretest(
+    X: ArrayLike,
+    G: ArrayLike,
+    y: ArrayLike,
+    family: ExponentialFamily,
+    offset_eta: ArrayLike = 0.0,
+    maxiter: int = 100,
+) -> CisGLMState:
+    """
+    run GLM across variants in a flanking window of given gene
+    cis-widow: plus and minus W base pairs, total length 2*cis_window
+    """
+    glm = GLM(family=family, maxiter=maxiter)
+
+    init_val = glm.family.init_eta(y)
+
+    # initiate SNP scan with model with covariate
+    glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=init_val)
+    x_W = X * glmstate_cov_only.glm_wt
+    P = X @ jnpla.inv(glmstate_cov_only.infor) @ x_W.T
+
+    def _func(carry, snp):
+        Z, pval = glm.score_test_add_g(snp[:, jnp.newaxis], y, glmstate_cov_only, P)
+
+        af = jnp.mean(snp) / 2.0
+        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
+
+        ma_samples = jnp.sum(
+            snp > 0
+        )  # Number of samples carrying at least one minor allele
+        ma_count = jnp.sum(snp)  # Number of minor alleles
+
+        return carry, CisGLMScoreState(
+            af=af,
+            ma_samples=ma_samples,
+            ma_count=ma_count,
+            p=pval[0],
+            Z=Z[0],
+            num_iters=glmstate_cov_only.num_iters,
+            converged=glmstate_cov_only.converged,
         )
 
     _, state = lax.scan(_func, 0.0, G.T)
