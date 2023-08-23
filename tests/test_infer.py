@@ -216,10 +216,26 @@ def test_sandwich():
 def test_poisson_scoretest():
     offset = pd.read_csv("./example/data/spector_offset.tsv", sep="\t")
     R_res = pd.read_csv("./example/data/spector_scoretest_pois_Rres.tsv", sep="\t")
+
     jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+
+    # statsmodel result
+    sm_glm = sm.GLM(
+        np.array(y_arr),
+        np.array(X_covar),
+        family=sm.families.Poisson(),
+        offset=np.log(np.array(offset).squeeze()),
+    )
+    sm_res = sm_glm.fit()
+
+    # print(sm_res.summary())
+    chi2, sm_p, _ = sm_res.score_test(
+        params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"]
+    )
+
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
@@ -229,6 +245,7 @@ def test_poisson_scoretest():
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
+    assert_array_eq(pval_GPA, jnp.array(sm_p))  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_pois.fit(
@@ -252,8 +269,8 @@ def test_poisson_scoretest():
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
-    pval_vec = jnp.array([pval_GPA[1], pval_TUCE[1], pval_PSI[1]]).T[0]  # fix shape
-    Z_vec = jnp.array([Z_GPA[1], Z_TUCE[1], Z_PSI[1]]).T[0]  # fix shape
+    pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
+    Z_vec = jnp.array([Z_GPA[0], Z_TUCE[0], Z_PSI[0]])  # fix shape
     assert_array_eq(pval_vec, jnp.array(R_res["pval"]))
     assert_array_eq(Z_vec, jnp.array(R_res["Z"]))
 
@@ -264,6 +281,15 @@ def test_bin_scoretest():
     init_bin = jaxqtl_bin.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+
+    sm_glm = sm.GLM(np.array(y_arr), np.array(X_covar), family=sm.families.Binomial())
+    sm_res = sm_glm.fit()
+
+    # print(sm_res.summary())
+    chi2, sm_p, _ = sm_res.score_test(
+        params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"]
+    )
+
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ jnpla.inv(mod_null.infor) @ x_W.T
@@ -271,6 +297,7 @@ def test_bin_scoretest():
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], y_arr, mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
+    assert_array_eq(pval_GPA, jnp.array(sm_p))  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
@@ -290,8 +317,8 @@ def test_bin_scoretest():
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
-    pval_vec = jnp.array([pval_GPA[1], pval_TUCE[1], pval_PSI[1]]).T[0]  # fix shape
-    Z_vec = jnp.array([Z_GPA[1], Z_TUCE[1], Z_PSI[1]]).T[0]  # fix shape
+    pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
+    Z_vec = jnp.array([Z_GPA[0], Z_TUCE[0], Z_PSI[0]])  # fix shape
     assert_array_eq(pval_vec, jnp.array(R_res["pval"]))
     assert_array_eq(Z_vec, jnp.array(R_res["Z"]))
 

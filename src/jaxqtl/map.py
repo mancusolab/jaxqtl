@@ -91,8 +91,8 @@ class MapCisSingleScoreState:
             self.cisglm.ma_samples[vdx],
             self.cisglm.ma_count[vdx],
             self.cisglm.af[vdx],
-            self.cisglm.p[vdx],
-            self.cisglm.Z[vdx],
+            self.cisglm.p[vdx].squeeze(),
+            self.cisglm.Z[vdx].squeeze(),
             self.pval_beta,
         ]
 
