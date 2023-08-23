@@ -17,7 +17,7 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily
 
 # from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.utils import cis_scan
+from jaxqtl.infer.utils import cis_scan, cis_scan_scoretest
 
 # import jaxopt
 
@@ -63,23 +63,79 @@ class DirectPerm(Permutation):
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
-    ) -> Tuple[Array, Array, Array]:
+    ) -> Array:
         def _func(key, x):
             key, p_key = rdm.split(key)
-            y_p = rdm.permutation(p_key, y, axis=0)
+            # y_p = rdm.permutation(p_key, y, axis=0)
+            perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
+            glmstate = cis_scan(
+                X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se
+            )
+            # jax.debug.print("min p: {}", glmstate.p.min())
+            # allTS = jnp.abs(glmstate.beta / glmstate.se)
+            return key, glmstate.p.min()  # glmstate.p.min()
 
-            # TODO: fit y ~ cov only for all genes
+        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        # key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        # pvals = pval_from_Zstat(TS, 1.0)
 
-            glmstate = cis_scan(X, G, y_p, family, offset_eta, robust_se)
-            allTS = jnp.abs(glmstate.beta / glmstate.se)
-            return key, allTS.max()  # glmstate.p.min()
+        return pvals  # , TS
 
-        # key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        pvals = pval_from_Zstat(TS, 1.0)
-        adj_p = _calc_adjp_naive(obs_p, pvals)
 
-        return adj_p, pvals, TS
+class PermutationScore(eqx.Module, metaclass=ABCMeta):
+    """
+    For a given cis-window around a gene (L variants), perform permutation test to
+    identify (one candidate) eQTL for this gene.
+    direct_perm performs native permutation with max_iters,
+    i.e. for each permutated data, do cis-window scan
+    """
+
+    @abstractmethod
+    def __call__(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
+        family: ExponentialFamily,
+        key_init: rdm.PRNGKey,
+        sig_level: float = 0.05,
+        offset_eta: ArrayLike = 0.0,
+    ) -> Array:
+        pass
+
+
+class DirectPermScore(PermutationScore):
+    max_perm_direct: int
+
+    def __init__(self, max_perm_direct: int = 10000):
+        self.max_perm_direct = max_perm_direct
+
+    def __call__(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
+        family: ExponentialFamily,
+        key_init: rdm.PRNGKey,
+        sig_level: float = 0.05,
+        offset_eta: ArrayLike = 0.0,
+    ) -> Array:
+        def _func(key, x):
+            key, p_key = rdm.split(key)
+            # y_p = rdm.permutation(p_key, y, axis=0)
+            perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
+            glmstate = cis_scan_scoretest(
+                X, G, y[perm_idx], family, offset_eta[perm_idx]
+            )
+            # allTS = jnp.abs(glmstate.beta / glmstate.se)
+            return key, glmstate.p.min()  # glmstate.p.min()
+
+        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        # key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        # pvals = pval_from_Zstat(TS, 1.0)
+        return pvals  # , TS
 
 
 @jit
@@ -220,8 +276,8 @@ class BetaPerm(DirectPerm):
             k, n estimates
             adjusted p value for lead SNP
         """
-        _, p_perm, TS = super().__call__(
-            X, y, G, obs_p, family, key_init, offset_eta, robust_se
+        p_perm = super().__call__(
+            X, y, G, obs_p, family, key_init, sig_level, offset_eta, robust_se
         )
         p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
@@ -244,6 +300,51 @@ class BetaPerm(DirectPerm):
         # else:
         #     true_dof = dof_init
         #####
+
+        # init = jnp.ones(2)  # initialize with 1
+        p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+        k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
+        n_init = k_init * (1 / p_mean - 1)
+        init = jnp.array([k_init, n_init])
+
+        # infer beta based on adjusted p_perm
+        beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
+
+        adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
+
+        return adj_p, beta_res
+
+
+class BetaPermScore(DirectPermScore):
+    max_perm_direct: int
+    max_iter_beta: int
+
+    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
+        self.max_iter_beta = max_iter_beta
+        super().__init__(max_perm_direct)
+
+    def __call__(  # type: ignore
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        G: ArrayLike,
+        obs_p: ArrayLike,
+        family: ExponentialFamily,
+        key_init: rdm.PRNGKey,
+        sig_level: float = 0.05,
+        offset_eta: ArrayLike = 0.0,
+    ) -> Tuple[Array, Array]:
+        """Perform permutation to estimate beta distribution parameters
+        Repeat direct_perm for max_direct_perm times --> vector of lead p values
+        Estimate Beta(k,n) using Newton's gradient descent, step size = 1
+        Returns:
+            k, n estimates
+            adjusted p value for lead SNP
+        """
+        p_perm = super().__call__(
+            X, y, G, obs_p, family, key_init, sig_level, offset_eta
+        )
+        p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)

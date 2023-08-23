@@ -145,7 +145,7 @@ def cis_scan_scoretest(
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
     maxiter: int = 100,
-) -> CisGLMState:
+) -> CisGLMScoreState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
@@ -174,8 +174,8 @@ def cis_scan_scoretest(
             af=af,
             ma_samples=ma_samples,
             ma_count=ma_count,
-            p=pval[0],
-            Z=Z[0],
+            p=pval,
+            Z=Z,
             num_iters=glmstate_cov_only.num_iters,
             converged=glmstate_cov_only.converged,
         )

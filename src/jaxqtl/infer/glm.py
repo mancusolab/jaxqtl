@@ -102,7 +102,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         w_g_regout = g_regout * glm_null_res.glm_wt
         Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
         pval = norm.cdf(-abs(Z)) * 2
-        return Z, pval
+        return Z[0], pval[0]
 
     def sumstats(
         self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike

@@ -13,7 +13,12 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis_nominal, map_cis_nominal_scoretest  # , map_cis
+from jaxqtl.map import (
+    map_cis,
+    map_cis_nominal,
+    map_cis_nominal_scoretest,
+    map_cis_score,
+)
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
@@ -54,19 +59,34 @@ offset_eta = jnp.log(total_libsize)
 
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 
-# # n=94, one gene cis mapping, 2592 variants
-# # 80 s vs. 60s
-# start = timeit.default_timer()
-# mapcis_out_1000 = map_cis(
-#     dat,
-#     family=Poisson(),
-#     offset_eta=offset_eta,
-#     robust_se=False,
-#     n_perm=1000,
-#     add_qval=True,
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
+# n=94, one gene cis mapping, 2592 variants
+# 80 s vs. 60s
+start = timeit.default_timer()
+mapcis_out_score = map_cis_score(
+    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, add_qval=True
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+mapcis_out_score.to_csv(
+    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
+)
+
+# ~250s
+start = timeit.default_timer()
+mapcis_out_wald = map_cis(
+    dat,
+    family=Poisson(),
+    offset_eta=offset_eta,
+    robust_se=False,
+    n_perm=1000,
+    add_qval=True,
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+mapcis_out_wald.to_csv(
+    "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
+)
+
 
 # # 500 looks ok
 # start = timeit.default_timer()
@@ -82,7 +102,6 @@ dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 # )
 # stop = timeit.default_timer()
 # print("Time: ", stop - start)
-#
 
 
 # read Rres for score test and wald test
