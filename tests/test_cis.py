@@ -25,10 +25,11 @@ pd.set_option("display.max_columns", 500)  # see cis output
 config.update("jax_enable_x64", True)
 
 
-geno_path = "./example/data/chr22.n94"
-covar_path = "./example/data/donor_features.n94.tsv"
-pheno_path = "./example/data/n94_CD14_positive_monocyte.bed.gz"
-genelist_path = "./example/data/genelist.tsv"
+geno_path = "../example/data/chr22.n94"
+covar_path = "../example/data/donor_features.n94.tsv"
+pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
+genelist_path = "../example/data/genelist.tsv"
+# genelist_path = "./example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -58,9 +59,11 @@ total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+# dat.filter_gene(gene_list=gene_list[50:70])
+# dat.filter_gene(gene_list=['ENSG00000184113'])
 
 # n=94, one gene cis mapping, 2592 variants
-# 80 s vs. 60s
+# ~4s
 start = timeit.default_timer()
 mapcis_out_score = map_cis_score(
     dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, add_qval=True
@@ -86,23 +89,6 @@ print("Time: ", stop - start)
 mapcis_out_wald.to_csv(
     "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
 )
-
-
-# # 500 looks ok
-# start = timeit.default_timer()
-# mapcis_out_500 = map_cis(
-#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=500
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-#
-# start = timeit.default_timer()
-# mapcis_out_100 = map_cis(
-#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=100
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-
 
 # read Rres for score test and wald test
 R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
@@ -152,3 +138,30 @@ def test_cis_waldtest():
 
     assert_array_eq(pairs_df_wald.slope, jnp.array(R_res["slope"]))
     assert_array_eq(pairs_df_wald.se, jnp.array(R_res["se"]))
+
+
+# # fit lm to check beta distribution estimates
+# start = timeit.default_timer()
+# mapcis_out_lm = map_cis(
+#     dat, family=Gaussian(), offset_eta=jnp.zeros(offset_eta.shape), n_perm=1000, add_qval=True, robust_se=False
+# )
+# stop = timeit.default_timer()
+# print("Time: ", stop - start)
+# mapcis_out_lm.to_csv(
+#     "./example/result/n94_waldtest_lm_res.tsv", sep="\t", index=False
+# )
+
+# # TODO: reduce number of permutation
+# start = timeit.default_timer()
+# mapcis_out_500 = map_cis(
+#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=500
+# )
+# stop = timeit.default_timer()
+# print("Time: ", stop - start)
+#
+# start = timeit.default_timer()
+# mapcis_out_100 = map_cis(
+#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=100
+# )
+# stop = timeit.default_timer()
+# print("Time: ", stop - start)

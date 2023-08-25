@@ -28,7 +28,6 @@ class GLMState(NamedTuple):
     num_iters: Array
     converged: Array
     infor: Array  # for score test
-    g_deriv_k: Array  # for score test
 
 
 class GLM(eqx.Module, metaclass=ABCMeta):
@@ -97,10 +96,10 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         calculate score in full model using the model fitted from null model
         """
         g_regout = g - P @ g
-        resid = glm_null_res.g_deriv_k * (y - glm_null_res.mu) * self.stepsize
-
+        resid = (y - glm_null_res.mu) * self.stepsize
         w_g_regout = g_regout * glm_null_res.glm_wt
-        Z = w_g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
+
+        Z = g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
         pval = norm.cdf(-abs(Z)) * 2
         return Z[0], pval[0]
 
@@ -155,16 +154,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval_wald = self.wald_test(TS, df)
 
         return GLMState(
-            beta,
-            beta_se,
-            pval_wald,
-            eta,
-            mu,
-            weight,
-            n_iter,
-            converged,
-            infor,
-            g_deriv_k,
+            beta, beta_se, pval_wald, eta, mu, weight, n_iter, converged, infor
         )
 
 
