@@ -23,8 +23,8 @@ config.update("jax_enable_x64", True)
 geno_path = "./example/data/chr22.n94"
 covar_path = "./example/data/donor_features.n94.tsv"
 pheno_path = "./example/data/n94_CD14_positive_monocyte.bed.gz"
-genelist_path = "./example/data/genelist.tsv"
-# genelist_path = "../example/data/genelist_chr22.tsv"
+# genelist_path = "../example/data/genelist.tsv"
+genelist_path = "./example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -53,8 +53,8 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
-# dat.filter_gene(gene_list=gene_list[50:70])
+# dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+dat.filter_gene(gene_list=gene_list[50:55])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
 
 # run mapping #

@@ -548,13 +548,13 @@ def map_cis_nominal(
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
-        outdf.loc[start_row:end_row, "af"] = af[idx]
-        outdf.loc[start_row:end_row, "ma_samples"] = ma_samples[idx]
-        outdf.loc[start_row:end_row, "ma_count"] = ma_count[idx]
-        outdf.loc[start_row:end_row, "pval_nominal"] = nominal_p[idx]
-        outdf.loc[start_row:end_row, "slope"] = slope[idx]
-        outdf.loc[start_row:end_row, "slope_se"] = slope_se[idx]
-        outdf.loc[start_row:end_row, "converged"] = converged[idx]
+        outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
+        outdf.loc[np.arange(start_row, end_row), "ma_samples"] = ma_samples[idx]
+        outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
+        outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx]
+        outdf.loc[np.arange(start_row, end_row), "slope"] = slope[idx]
+        outdf.loc[np.arange(start_row, end_row), "slope_se"] = slope_se[idx]
+        outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
         start_row = end_row
 
     # split by chrom
@@ -676,12 +676,12 @@ def map_cis_nominal_score(
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
-        outdf.loc[start_row:end_row, "af"] = af[idx]
-        outdf.loc[start_row:end_row, "ma_samples"] = ma_samples[idx]
-        outdf.loc[start_row:end_row, "ma_count"] = ma_count[idx]
-        outdf.loc[start_row:end_row, "pval_nominal"] = nominal_p[idx].T
-        outdf.loc[start_row:end_row, "Z"] = Z[idx].T
-        outdf.loc[start_row:end_row, "converged"] = converged[idx]
+        outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
+        outdf.loc[np.arange(start_row, end_row), "ma_samples"] = ma_samples[idx]
+        outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
+        outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx].T
+        outdf.loc[np.arange(start_row, end_row), "Z"] = Z[idx].T
+        outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
         start_row = end_row
 
     # split by chrom
