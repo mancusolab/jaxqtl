@@ -17,7 +17,7 @@ from jaxqtl.infer.utils import (
     CisGLMState,
     _setup_G_y,
     cis_scan,
-    cis_scan_scoretest,
+    cis_scan_score,
 )
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
@@ -415,7 +415,7 @@ def map_cis_single_score(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
-    cisglmstate = cis_scan_scoretest(X, G, y, family, offset_eta)
+    cisglmstate = cis_scan_score(X, G, y, family, offset_eta)
 
     beta_key, direct_key = rdm.split(key_init)
 
@@ -548,13 +548,13 @@ def map_cis_nominal(
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
-        outdf["af"][start_row:end_row] = af[idx]
-        outdf["ma_samples"][start_row:end_row] = ma_samples[idx]
-        outdf["ma_count"][start_row:end_row] = ma_count[idx]
-        outdf["pval_nominal"][start_row:end_row] = nominal_p[idx]
-        outdf["slope"][start_row:end_row] = slope[idx]
-        outdf["slope_se"][start_row:end_row] = slope_se[idx]
-        outdf["converged"][start_row:end_row] = converged[idx]
+        outdf.loc[start_row:end_row, "af"] = af[idx]
+        outdf.loc[start_row:end_row, "ma_samples"] = ma_samples[idx]
+        outdf.loc[start_row:end_row, "ma_count"] = ma_count[idx]
+        outdf.loc[start_row:end_row, "pval_nominal"] = nominal_p[idx]
+        outdf.loc[start_row:end_row, "slope"] = slope[idx]
+        outdf.loc[start_row:end_row, "slope_se"] = slope_se[idx]
+        outdf.loc[start_row:end_row, "converged"] = converged[idx]
         start_row = end_row
 
     # split by chrom
@@ -564,7 +564,7 @@ def map_cis_nominal(
         one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.parquet")
 
 
-def map_cis_nominal_scoretest(
+def map_cis_nominal_score(
     dat: ReadyDataState,
     family: ExponentialFamily,
     out_path: str,
@@ -603,8 +603,6 @@ def map_cis_nominal_scoretest(
     af = []
     ma_samples = []
     ma_count = []
-    # slope = []
-    # slope_se = []
     Z = []
     nominal_p = []
     converged = []
@@ -635,7 +633,7 @@ def map_cis_nominal_scoretest(
                 str(rend),
             )
 
-        result = cis_scan_scoretest(X, G, y, family, offset_eta)
+        result = cis_scan_score(X, G, y, family, offset_eta)
 
         if verbose:
             log.info(
@@ -673,21 +671,17 @@ def map_cis_nominal_scoretest(
     outdf["ma_samples"] = np.NaN
     outdf["ma_count"] = np.NaN
     outdf["pval_nominal"] = np.NaN
-    # outdf["slope"] = np.NaN
-    # outdf["slope_se"] = np.NaN
     outdf["Z"] = np.NaN
     outdf["converged"] = np.NaN
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
-        outdf["af"][start_row:end_row] = af[idx]
-        outdf["ma_samples"][start_row:end_row] = ma_samples[idx]
-        outdf["ma_count"][start_row:end_row] = ma_count[idx]
-        outdf["pval_nominal"][start_row:end_row] = nominal_p[idx].T
-        # outdf["slope"][start_row:end_row] = slope[idx]
-        # outdf["slope_se"][start_row:end_row] = slope_se[idx]
-        outdf["Z"][start_row:end_row] = Z[idx].T
-        outdf["converged"][start_row:end_row] = converged[idx]
+        outdf.loc[start_row:end_row, "af"] = af[idx]
+        outdf.loc[start_row:end_row, "ma_samples"] = ma_samples[idx]
+        outdf.loc[start_row:end_row, "ma_count"] = ma_count[idx]
+        outdf.loc[start_row:end_row, "pval_nominal"] = nominal_p[idx].T
+        outdf.loc[start_row:end_row, "Z"] = Z[idx].T
+        outdf.loc[start_row:end_row, "converged"] = converged[idx]
         start_row = end_row
 
     # split by chrom

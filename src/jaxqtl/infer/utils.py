@@ -5,7 +5,6 @@ import pandas as pd
 
 import jax.lax as lax
 import jax.numpy as jnp
-import jax.numpy.linalg as jnpla
 from jax import Array
 from jax.typing import ArrayLike
 
@@ -138,7 +137,7 @@ def cis_scan(
 
 
 @eqx.filter_jit
-def cis_scan_scoretest(
+def cis_scan_score(
     X: ArrayLike,
     G: ArrayLike,
     y: ArrayLike,
@@ -154,13 +153,13 @@ def cis_scan_scoretest(
 
     init_val = glm.family.init_eta(y)
 
-    # initiate SNP scan with model with covariate
+    # fit covariate-only model (null)
     glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=init_val)
     x_W = X * glmstate_cov_only.glm_wt
-    P = X @ jnpla.inv(glmstate_cov_only.infor) @ x_W.T
+    P = X @ glmstate_cov_only.infor_inv @ x_W.T
 
     def _func(carry, snp):
-        Z, pval = glm.score_test_add_g(snp[:, jnp.newaxis], y, glmstate_cov_only, P)
+        Z, pval = glm.score_test_add_g(snp[:, jnp.newaxis], glmstate_cov_only, P)
 
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))

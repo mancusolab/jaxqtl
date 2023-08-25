@@ -17,7 +17,7 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily
 
 # from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.utils import cis_scan, cis_scan_scoretest
+from jaxqtl.infer.utils import cis_scan, cis_scan_score
 
 # import jaxopt
 
@@ -124,17 +124,14 @@ class DirectPermScore(PermutationScore):
     ) -> Array:
         def _func(key, x):
             key, p_key = rdm.split(key)
-            # y_p = rdm.permutation(p_key, y, axis=0)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            glmstate = cis_scan_scoretest(
-                X, G, y[perm_idx], family, offset_eta[perm_idx]
-            )
-            # allTS = jnp.abs(glmstate.beta / glmstate.se)
-            return key, glmstate.p.min()  # glmstate.p.min()
+            glmstate = cis_scan_score(X, G, y[perm_idx], family, offset_eta[perm_idx])
+            return (
+                key,
+                glmstate.p.min(),
+            )  # jnp.where(jnp.isnan(allp), jnp.inf, allp).min()
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        # key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        # pvals = pval_from_Zstat(TS, 1.0)
         return pvals  # , TS
 
 
@@ -361,7 +358,7 @@ class BetaPermScore(DirectPermScore):
 
 
 def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
-    # TS is the beta / se
+    # TS is the beta / se; use chi2(df)?
     return norm.cdf(-abs(TS)) * 2
 
 

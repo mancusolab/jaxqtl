@@ -13,23 +13,18 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import (
-    map_cis,
-    map_cis_nominal,
-    map_cis_nominal_scoretest,
-    map_cis_score,
-)
+from jaxqtl.map import map_cis, map_cis_nominal, map_cis_nominal_score, map_cis_score
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
 config.update("jax_enable_x64", True)
 
 
-geno_path = "../example/data/chr22.n94"
-covar_path = "../example/data/donor_features.n94.tsv"
-pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
-genelist_path = "../example/data/genelist.tsv"
-# genelist_path = "./example/data/genelist_chr22.tsv"
+geno_path = "./example/data/chr22.n94"
+covar_path = "./example/data/donor_features.n94.tsv"
+pheno_path = "./example/data/n94_CD14_positive_monocyte.bed.gz"
+genelist_path = "./example/data/genelist.tsv"
+# genelist_path = "../example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -62,33 +57,7 @@ dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 # dat.filter_gene(gene_list=gene_list[50:70])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
 
-# n=94, one gene cis mapping, 2592 variants
-# ~4s
-start = timeit.default_timer()
-mapcis_out_score = map_cis_score(
-    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, add_qval=True
-)
-stop = timeit.default_timer()
-print("Time: ", stop - start)
-mapcis_out_score.to_csv(
-    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
-)
-
-# ~250s
-start = timeit.default_timer()
-mapcis_out_wald = map_cis(
-    dat,
-    family=Poisson(),
-    offset_eta=offset_eta,
-    robust_se=False,
-    n_perm=1000,
-    add_qval=True,
-)
-stop = timeit.default_timer()
-print("Time: ", stop - start)
-mapcis_out_wald.to_csv(
-    "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
-)
+# run mapping #
 
 # read Rres for score test and wald test
 R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
@@ -97,7 +66,7 @@ R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
 # score test
 def test_cis_scoretest():
     start = timeit.default_timer()
-    map_cis_nominal_scoretest(
+    map_cis_nominal_score(
         dat,
         family=Poisson(),
         offset_eta=offset_eta,
@@ -140,6 +109,34 @@ def test_cis_waldtest():
     assert_array_eq(pairs_df_wald.se, jnp.array(R_res["se"]))
 
 
+# n=94, one gene cis mapping, 2592 variants
+# ~4s
+start = timeit.default_timer()
+mapcis_out_score = map_cis_score(
+    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, add_qval=False
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+mapcis_out_score.to_csv(
+    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
+)
+
+# ~250s
+start = timeit.default_timer()
+mapcis_out_wald = map_cis(
+    dat,
+    family=Poisson(),
+    offset_eta=offset_eta,
+    robust_se=False,
+    n_perm=1000,
+    add_qval=True,
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+mapcis_out_wald.to_csv(
+    "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
+)
+
 # # fit lm to check beta distribution estimates
 # start = timeit.default_timer()
 # mapcis_out_lm = map_cis(
@@ -153,8 +150,8 @@ def test_cis_waldtest():
 
 # # TODO: reduce number of permutation
 # start = timeit.default_timer()
-# mapcis_out_500 = map_cis(
-#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=500
+# mapcis_out_score = map_cis_score(
+#     dat, family=Poisson(), offset_eta=offset_eta, n_perm=500, add_qval=False
 # )
 # stop = timeit.default_timer()
 # print("Time: ", stop - start)

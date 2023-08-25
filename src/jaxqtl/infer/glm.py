@@ -1,5 +1,5 @@
 from abc import ABCMeta
-from typing import NamedTuple, Optional, Tuple
+from typing import NamedTuple, Tuple
 
 import equinox as eqx
 
@@ -27,7 +27,8 @@ class GLMState(NamedTuple):
     glm_wt: Array
     num_iters: Array
     converged: Array
-    infor: Array  # for score test
+    infor_inv: Array  # for score test
+    resid: Array  # for score test, not the working resid!
 
 
 class GLM(eqx.Module, metaclass=ABCMeta):
@@ -88,7 +89,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         return pval
 
     def score_test_add_g(
-        self, g: ArrayLike, y: ArrayLike, glm_null_res: GLMState, P: ArrayLike
+        self, g: ArrayLike, glm_null_res: GLMState, P: ArrayLike
     ) -> Tuple[Array, Array]:
         """test for additional covariate g
         only require fit null model using fitted covariate only model + new vector g
@@ -96,12 +97,12 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         calculate score in full model using the model fitted from null model
         """
         g_regout = g - P @ g
-        resid = (y - glm_null_res.mu) * self.stepsize
         w_g_regout = g_regout * glm_null_res.glm_wt
 
-        Z = g_regout.T @ resid / jnp.sqrt(w_g_regout.T @ g_regout)
+        # TODO: SPA test; now using normal approximation
+        Z = g_regout.T @ glm_null_res.resid / jnp.sqrt(w_g_regout.T @ g_regout)
         pval = norm.cdf(-abs(Z)) * 2
-        return Z[0], pval[0]
+        return jnp.ravel(Z), jnp.ravel(pval)  # flatten [[val]] --> [val]
 
     def sumstats(
         self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike
@@ -114,7 +115,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         huber_v = huber_var(self.family, X, y, mu, infor_inv)
         huber_se = jnp.sqrt(huber_v)
 
-        return infor_se, huber_se, infor
+        return infor_se, huber_se, infor_inv
 
     def fit(
         self,
@@ -122,7 +123,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
-        init: Optional[ArrayLike] = None,
+        init: ArrayLike = None,
     ) -> GLMState:
 
         # init = self.family.init_eta(y)
@@ -140,10 +141,11 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         )
         eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
+        resid = y - mu  # note: this is not the working resid
 
-        _, g_deriv_k, weight = self.family.calc_weight(X, y, eta)
+        _, _, weight = self.family.calc_weight(X, y, eta)
 
-        infor_se, huber_se, infor = self.sumstats(X, y, weight, mu)
+        infor_se, huber_se, infor_inv = self.sumstats(X, y, weight, mu)
 
         df = X.shape[0] - X.shape[1]
         beta_se = jnp.where(robust_se, huber_se, infor_se)
@@ -154,7 +156,16 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         pval_wald = self.wald_test(TS, df)
 
         return GLMState(
-            beta, beta_se, pval_wald, eta, mu, weight, n_iter, converged, infor
+            beta,
+            beta_se,
+            pval_wald,
+            eta,
+            mu,
+            weight,
+            n_iter,
+            converged,
+            infor_inv,
+            resid,
         )
 
 
