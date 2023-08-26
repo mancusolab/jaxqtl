@@ -21,6 +21,7 @@ class SingleCellFilter:
     id_col: str = "donor_id"
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
+    geneid_col: str = "ensemble_id"
     min_cells: int = 3
     min_genes: int = 200
     max_genes: int = 2500  # can decide this based on plotting
@@ -56,8 +57,6 @@ class H5AD(PhenoIO):
         self,
         dat: AnnData,
         filter_opt=SingleCellFilter,
-        id_col: str = "donor_id",
-        celltype_col: str = "cell_type",
         divide_size_factor: bool = True,
         norm_fix_L: Optional[int] = None,
     ) -> pd.DataFrame:
@@ -72,17 +71,18 @@ class H5AD(PhenoIO):
         """
         # TODO: check these result, make col names consistent
         # filter cells by min number of genes expressed (in place)
-        sc.pp.filter_cells(dat, min_genes=SingleCellFilter.min_genes)
+        sc.pp.filter_cells(dat, min_genes=filter_opt.min_genes)
 
         #  filter cells with too many genes expressed (in place)
-        sc.pp.filter_cells(dat, max_genes=SingleCellFilter.max_genes)
+        sc.pp.filter_cells(dat, max_genes=filter_opt.max_genes)
 
         # filter genes by min number of cells expressed (in place)
-        sc.pp.filter_genes(dat, min_cells=SingleCellFilter.min_cells)
+        sc.pp.filter_genes(dat, min_cells=filter_opt.min_cells)
 
         # filter cells that have >5% mitochondrial counts
         # here return the actual sparse matrix instead of View for shifted_transformation_nolog()
-        dat = dat[dat.obs[SingleCellFilter.mt_col] < SingleCellFilter.percent_mt].copy()
+        # dat = dat[dat.obs[filter_opt.mt_col] < filter_opt.percent_mt, :].copy()
+        dat = dat[dat.obs[filter_opt.mt_col] < filter_opt.percent_mt, :]
 
         # normalize total
         if norm_fix_L is not None:
@@ -94,25 +94,28 @@ class H5AD(PhenoIO):
         # first compute and then filter
         dat.bulk = dc.get_pseudobulk(
             dat,
-            sample_col=SingleCellFilter.id_col,
-            groups_col=SingleCellFilter.celltype_col,
-            mode=SingleCellFilter.bulk_method,  # take mean across cells for each individual
-            min_cells=SingleCellFilter.bulk_min_cells,  # exclude sample with < min cells from calc
-            min_counts=SingleCellFilter.bulk_min_count,  # exclude sample < min # summed count from calc
-            min_prop=SingleCellFilter.bulk_min_prop,  # selects genes that expressed across > % cells in each sample
-            min_smpls=SingleCellFilter.bulk_min_smpls,  # this condition is met across a minimum number of samples
+            sample_col=filter_opt.id_col,
+            groups_col=filter_opt.celltype_col,
+            mode=filter_opt.bulk_method,  # take mean across cells for each individual
+            min_cells=filter_opt.bulk_min_cells,  # exclude sample with < min cells from calc
+            min_counts=filter_opt.bulk_min_count,  # exclude sample < min # summed count from calc
+            min_prop=filter_opt.bulk_min_prop,  # selects genes that expressed across > % cells in each sample
+            min_smpls=filter_opt.bulk_min_smpls,  # this condition is met across a minimum number of samples
         )
 
         # create pd.Dataframe
         count = pd.DataFrame(dat.bulk.X)  # sample_cell x gene
-        count = count.set_index([dat.bulk.obs["donor_id"], dat.bulk.obs["cell_type"]])
-        count.columns = dat.bulk.var.index
+        count = count.set_index(
+            [dat.bulk.obs[filter_opt.id_col], dat.bulk.obs[filter_opt.celltype_col]]
+        )
+        count.columns = dat.bulk.var.index  # use var.index as gene names
 
         return count
 
     @staticmethod
     def write_bed(
         pheno: pd.DataFrame,
+        filter_opt=SingleCellFilter,
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
         celltype_path: str = "../example/data/celltype.tsv",
@@ -127,11 +130,13 @@ class H5AD(PhenoIO):
         for cell_type in cell_type_list:
 
             pheno_onetype = pheno[
-                pheno.index.get_level_values("cell_type") == cell_type
+                pheno.index.get_level_values(filter_opt.celltype_col) == cell_type
             ]
 
             # remove cell type index
-            pheno_onetype = pheno_onetype.reset_index(level="cell_type", drop=True)
+            pheno_onetype = pheno_onetype.reset_index(
+                level=filter_opt.celltype_col, drop=True
+            )
 
             # transpose s.t samples on columns, put ensembl_id back to column
             bed = pheno_onetype.T
@@ -145,7 +150,10 @@ class H5AD(PhenoIO):
                     gene_map.chr.isin([str(i) for i in range(1, 23)])
                 ]
 
-            out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on="ensembl_id")
+            # inner join
+            out = pd.merge(
+                gene_map, bed, left_on="ensemble_id", right_on=filter_opt.geneid_col
+            )
             out = out.drop("ensemble_id", axis=1)
             out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
 
