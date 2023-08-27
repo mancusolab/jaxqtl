@@ -144,11 +144,13 @@ def map_cis(
     robust_se: bool = True,
     n_perm: int = 1000,
     add_qval: bool = True,
+    log=None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
     """
-    log = get_log()
+    if log is None:
+        log = get_log()
 
     # TODO: we need to do some validation here...
     X = dat.covar
@@ -257,11 +259,13 @@ def map_cis_score(
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
     add_qval: bool = True,
+    log=None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
     """
-    log = get_log()
+    if log is None:
+        log = get_log()
 
     # TODO: we need to do some validation here...
     X = dat.covar
