@@ -76,7 +76,7 @@ class ReadyDataState:
             ), "gene map does not agree with pheno count matrix after gene list selection"
 
         # filter genes not expressed across samples
-        total_n = len(self.pheno.count.index.unique())
+        total_n = len(self.pheno.count.index.unique())  # number of individuals
         geneexpr_percent = (self.pheno.count > 0).sum(axis=0) / total_n
         self.pheno.count = self.pheno.count.loc[
             :, geneexpr_percent > geneexpr_percent_cutoff
