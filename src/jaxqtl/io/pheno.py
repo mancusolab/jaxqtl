@@ -8,6 +8,8 @@ import decoupler as dc
 import equinox as eqx
 import numpy as np
 import pandas as pd
+import qtl.io
+import qtl.norm
 import scanpy as sc
 from anndata import AnnData
 from scipy.sparse import diags
@@ -242,3 +244,28 @@ def adjust_size_factor(adata: AnnData):
     # )  # !!! add y0 to non-sparse values, not sure if need add y0 to zeros raw count
 
     return adata
+
+
+def bed_transform_y(pheno_path: str, mode: str = "log1p"):
+    """
+    count_df: rows are genes, columns are individual ID
+    """
+    count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})
+
+    if mode == "log1p":
+        count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
+    elif mode == "tmm":
+        tmm_counts_df = qtl.norm.edger_cpm(
+            count_df.iloc[:, 4:], normalized_lib_sizes=True
+        )
+        # # mask is filter by gene
+        norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
+        count_df.iloc[:, 4:] = norm_df
+    elif mode == "qn":
+        pass
+        # qn_df = qtl.norm.normalize_quantiles(tpm_df.loc[mask])
+        # norm_df = qtl.norm.inverse_normal_transform(qn_df)
+    else:
+        raise ValueError(f"Unsupported mode {mode}")
+
+    return count_df

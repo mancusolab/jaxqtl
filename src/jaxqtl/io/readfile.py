@@ -3,6 +3,8 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
+import qtl.io
+import qtl.norm
 from sklearn.decomposition import PCA
 
 import jax.numpy as jnp
@@ -40,11 +42,22 @@ class ReadyDataState:
         # reset "i" for pulling genotype by position
         self.bim.i = np.arange(0, self.geno.shape[1])
 
-    def transform_y(self, y0: float = 1.0, log_y: bool = False):
-        # add dispersion shift term
-        self.pheno.count = self.pheno.count + y0
-        if log_y:
-            self.pheno.count = np.log(self.pheno.count)  # prevent log(0)
+    def transform_y(self, mode: str = "log1p"):
+        if mode == "log1p":
+            self.pheno.count = np.log1p(self.pheno.count)  # prevent log(0)
+        elif mode == "tmm":
+            tmm_counts_df = qtl.norm.edger_cpm(
+                self.pheno.count.iloc[:, 4:], normalized_lib_sizes=True
+            )
+            # # mask is filter by gene
+            norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
+            self.pheno.count.iloc[:, 4:] = norm_df
+        elif mode == "qn":
+            pass
+            # qn_df = qtl.norm.normalize_quantiles(tpm_df.loc[mask])
+            # norm_df = qtl.norm.inverse_normal_transform(qn_df)
+        else:
+            raise ValueError(f"Unsupported mode {mode}")
 
     def add_covar_pheno_PC(self, k: int):
         count_std = self.pheno.count.copy(deep=True)
