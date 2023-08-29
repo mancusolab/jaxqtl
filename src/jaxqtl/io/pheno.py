@@ -251,6 +251,8 @@ def bed_transform_y(pheno_path: str, mode: str = "log1p"):
     count_df: rows are genes, columns are individual ID
     """
     count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})
+    # filter genes with zero expression
+    count_df = count_df[count_df.iloc[:, 4:].sum(axis=1) > 0]
 
     if mode == "log1p":
         count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
