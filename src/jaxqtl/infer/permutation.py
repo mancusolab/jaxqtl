@@ -73,6 +73,8 @@ class DirectPerm(Permutation):
             )
             # jax.debug.print("min p: {}", glmstate.p.min())
             # allTS = jnp.abs(glmstate.beta / glmstate.se)
+
+            # TODO: remove NA values before take min
             return key, glmstate.p.min()  # glmstate.p.min()
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
@@ -126,6 +128,8 @@ class DirectPermScore(PermutationScore):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = cis_scan_score(X, G, y[perm_idx], family, offset_eta[perm_idx])
+
+            # TODO: remove NA values before take min
             return (
                 key,
                 glmstate.p.min(),
@@ -233,6 +237,52 @@ def infer_beta(
     )
     # jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
     return jnp.array([params[0], params[1], converged])
+
+
+# infer beta from tensorqtl
+# def calculate_beta_approx_pval(r2_perm, r2_nominal, dof_init, tol=1e-4):
+#     """
+#       r2_nominal: nominal max. r2 (scalar or array)
+#       r2_perm:    array of max. r2 values from permutations
+#       dof_init:   degrees of freedom
+#     """
+#     beta_shape1, beta_shape2, true_dof = fit_beta_parameters(r2_perm, dof_init, tol)
+#     pval_true_dof = pval_from_corr(r2_nominal, true_dof)
+#     pval_beta = stats.beta.cdf(pval_true_dof, beta_shape1, beta_shape2)
+#     return pval_beta, beta_shape1, beta_shape2, true_dof, pval_true_dof
+
+
+# def fit_beta_parameters(r2_perm, dof_init, tol=1e-4, return_minp=False):
+#     """
+#       r2_perm:    array of max. r2 values from permutations
+#       dof_init:   degrees of freedom
+#     """
+#     try:
+#         true_dof = scipy.optimize.newton(lambda x: df_cost(r2_perm, x), dof_init, tol=tol, maxiter=50)
+#     except:
+#         print('WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)')
+#         res = scipy.optimize.minimize(lambda x: np.abs(df_cost(r2_perm, x)), dof_init, method='Nelder-Mead', tol=tol)
+#         true_dof = res.x[0]
+#
+#     pval = pval_from_corr(r2_perm, true_dof)
+#     mean, var = np.mean(pval), np.var(pval)
+#     beta_shape1 = mean * (mean * (1 - mean) / var - 1)
+#     beta_shape2 = beta_shape1 * (1/mean - 1)
+#     res = scipy.optimize.minimize(lambda s: beta_log_likelihood(pval, s[0], s[1]), [beta_shape1, beta_shape2],
+#                                   method='Nelder-Mead', tol=tol)
+#     beta_shape1, beta_shape2 = res.x
+#     if return_minp:
+#         return beta_shape1, beta_shape2, true_dof, pval
+#     else:
+#         return beta_shape1, beta_shape2, true_dof
+
+
+# def df_cost(r2, dof):
+#     """minimize abs(1-alpha) as a function of M_eff"""
+#     pval = pval_from_corr(r2, dof)
+#     mean = np.mean(pval)
+#     var = np.var(pval)
+#     return mean * (mean * (1.0-mean) / var - 1.0) - 1.0
 
 
 @jit
