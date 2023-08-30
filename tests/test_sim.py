@@ -51,7 +51,7 @@ def test_sim_poisson():
         family=Poisson(),
         solver=CholeskySolve(),
         append=False,
-        maxiter=100,
+        max_iter=100,
     )
     glm_state = jaxqtl_poisson.fit()
     assert_betas_eq(glm_state, sm_state)
@@ -74,7 +74,7 @@ def test_sim_poisson_scoretest():
         family=Poisson(),
         solver=CholeskySolve(),
         append=False,
-        maxiter=100,
+        max_iter=100,
     ).fit()
     print(mod_full.p[-1])
 
@@ -84,7 +84,7 @@ def test_sim_poisson_scoretest():
         family=Poisson(),
         solver=CholeskySolve(),
         append=False,
-        maxiter=100,
+        max_iter=100,
     ).fit()
 
     pval_score = GLM.score_test_snp(Poisson(), X, y, mod_null, 1.0)

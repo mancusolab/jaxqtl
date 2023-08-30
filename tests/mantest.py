@@ -28,7 +28,7 @@ jaxqtl_poisson = GLM(
     family=Poisson(),
     solver=CholeskySolve(),
     append=False,
-    maxiter=1000,
+    max_iter=1000,
 )
 
 glm_state = jaxqtl_poisson.fit()

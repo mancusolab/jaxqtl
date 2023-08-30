@@ -36,8 +36,8 @@ def test_linear_regression_cho():
 
     jaxqtl_cho = GLM(
         solver=CholeskySolve(),
-        maxiter=maxiter,
-        stepsize=stepsize,
+        max_iter=maxiter,
+        step_size=stepsize,
     )
 
     init_lm = jaxqtl_cho.family.init_eta(jnp.array(spector_data.endog)[:, jnp.newaxis])
@@ -56,9 +56,9 @@ def test_binomial_cg():
 
     jaxqtl_bin_cg = GLM(
         family=Binomial(),
-        maxiter=maxiter,
+        max_iter=maxiter,
         solver=CGSolve(),
-        stepsize=stepsize,
+        step_size=stepsize,
     )
     init_logistic = jaxqtl_bin_cg.family.init_eta(y_arr)
     glm_state = jaxqtl_bin_cg.fit(X_arr, y_arr, init=init_logistic)
@@ -75,9 +75,9 @@ def test_binomial_cho():
 
     jaxqtl_bin_cho = GLM(
         family=Binomial(),
-        maxiter=maxiter,
+        max_iter=maxiter,
         solver=CholeskySolve(),
-        stepsize=stepsize,
+        step_size=stepsize,
     )
     init_logistic = jaxqtl_bin_cho.family.init_eta(y_arr)
     glm_state = jaxqtl_bin_cho.fit(X_arr, y_arr, init=init_logistic)
@@ -94,9 +94,9 @@ def test_poisson_qr():
 
     jaxqtl_poisson_qr = GLM(
         family=Poisson(),
-        maxiter=maxiter,
+        max_iter=maxiter,
         solver=QRSolve(),
-        stepsize=stepsize,
+        step_size=stepsize,
     )
     init_pois = jaxqtl_poisson_qr.family.init_eta(y_arr)
     glm_state = jaxqtl_poisson_qr.fit(X_arr, y_arr, init=init_pois)
@@ -113,9 +113,9 @@ def test_poisson_cho():
 
     jaxqtl_poisson_cho = GLM(
         family=Poisson(),
-        maxiter=maxiter,
+        max_iter=maxiter,
         solver=CholeskySolve(),
-        stepsize=stepsize,
+        step_size=stepsize,
     )
     init_pois = jaxqtl_poisson_cho.family.init_eta(y_arr)
     glm_state = jaxqtl_poisson_cho.fit(X_arr, y_arr, init=init_pois)
@@ -132,9 +132,9 @@ def test_poisson_cg():
 
     jaxqtl_poisson_cg = GLM(
         family=Poisson(),
-        maxiter=maxiter,
+        max_iter=maxiter,
         solver=CGSolve(),
-        stepsize=stepsize,
+        step_size=stepsize,
     )
     init_pois = jaxqtl_poisson_cg.family.init_eta(y_arr)
     glm_state = jaxqtl_poisson_cg.fit(X_arr, y_arr, init=init_pois)
@@ -157,7 +157,7 @@ def test_CGsolve_realdata():
     sm_state = smPoisson(np.array(y), np.array(X)).fit()
 
     jaxqtl_poisson_cg = GLM(
-        family=Poisson(), maxiter=maxiter, solver=CGSolve(), stepsize=stepsize
+        family=Poisson(), max_iter=maxiter, solver=CGSolve(), step_size=stepsize
     )
     init_pois = jaxqtl_poisson_cg.family.init_eta(y)
     glm_state = jaxqtl_poisson_cg.fit(X, y, init=init_pois)
@@ -175,7 +175,7 @@ def test_1D_X():
     X_arr = jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis]
     y_arr = jnp.array(spector_data.endog)[:, jnp.newaxis]
 
-    jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
+    jaxqtl_pois = GLM(family=Poisson(), max_iter=maxiter, step_size=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
     glm_state = jaxqtl_pois.fit(X_arr, y_arr, init=init_pois)
 
@@ -203,7 +203,7 @@ def test_sandwich():
         sm_mod, use_correction=False
     )
 
-    jaxqtl_pois = GLM(family=Poisson(), maxiter=100, solver=CholeskySolve())
+    jaxqtl_pois = GLM(family=Poisson(), max_iter=100, solver=CholeskySolve())
     init_pois = jaxqtl_pois.family.init_eta(y)
 
     glmstate = jaxqtl_pois.fit(
@@ -217,7 +217,7 @@ def test_poisson_scoretest():
     offset = pd.read_csv("./example/data/spector_offset.tsv", sep="\t")
     R_res = pd.read_csv("./example/data/spector_scoretest_pois_Rres.tsv", sep="\t")
 
-    jaxqtl_pois = GLM(family=Poisson(), maxiter=maxiter, stepsize=stepsize)
+    jaxqtl_pois = GLM(family=Poisson(), max_iter=maxiter, step_size=stepsize)
     init_pois = jaxqtl_pois.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
@@ -277,7 +277,7 @@ def test_poisson_scoretest():
 
 def test_bin_scoretest():
     R_res = pd.read_csv("./example/data/spector_scoretest_bin_Rres.tsv", sep="\t")
-    jaxqtl_bin = GLM(family=Binomial(), maxiter=maxiter, stepsize=stepsize)
+    jaxqtl_bin = GLM(family=Binomial(), max_iter=maxiter, step_size=stepsize)
     init_bin = jaxqtl_bin.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
@@ -338,8 +338,8 @@ def test_resid_reg():
 
     jaxqtl_pois = GLM(
         family=test_resid_family,
-        maxiter=maxiter,
-        stepsize=stepsize,
+        max_iter=maxiter,
+        step_size=stepsize,
         solver=CholeskySolve(),
     )
     init_pois = jaxqtl_pois.family.init_eta(y)

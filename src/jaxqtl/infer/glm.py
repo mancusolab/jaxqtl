@@ -53,23 +53,23 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
     family: ExponentialFamily
     solver: LinearSolve
-    maxiter: int
+    max_iter: int
     tol: float
-    stepsize: float
+    step_size: float
 
     def __init__(
         self,
         family: ExponentialFamily = Gaussian(),
         solver: LinearSolve = CholeskySolve(),
-        maxiter: int = 100,
+        max_iter: int = 100,
         tol: float = 1e-3,
-        stepsize: float = 1.0,
+        step_size: float = 1.0,
     ) -> None:
-        self.maxiter = maxiter
+        self.max_iter = max_iter
         self.tol = tol
         self.family = family
         self.solver = solver
-        self.stepsize = stepsize
+        self.step_size = step_size
 
     def wald_test(self, TS: ArrayLike, df: int) -> Array:
         """
@@ -113,9 +113,9 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             self.family,
             self.solver,
             init,
-            self.maxiter,
+            self.max_iter,
             self.tol,
-            self.stepsize,
+            self.step_size,
             offset_eta,
         )
         eta = X @ beta + offset_eta

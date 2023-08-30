@@ -7,7 +7,6 @@ import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 
-# import jax.scipy.optimize
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
@@ -15,11 +14,7 @@ from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-
-# from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.utils import cis_scan, cis_scan_score
-
-# import jaxopt
 
 
 class Permutation(eqx.Module, metaclass=ABCMeta):
@@ -136,10 +131,10 @@ class DirectPermScore(PermutationScore):
             )  # jnp.where(jnp.isnan(allp), jnp.inf, allp).min()
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        return pvals  # , TS
+        return pvals
 
 
-@jit
+@eqx.filter_jit
 def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
     """
     obs_pval: the strongest nominal p value
@@ -147,7 +142,7 @@ def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
     return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
 
 
-@jit
+@eqx.filter_jit
 def infer_beta(
     p_perm: ArrayLike,
     init: ArrayLike,
@@ -401,7 +396,7 @@ class BetaPermScore(DirectPermScore):
         n_init = k_init * (1 / p_mean - 1)
         init = jnp.array([k_init, n_init])
 
-        # infer beta based on adjusted p_perm
+        # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
         adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])

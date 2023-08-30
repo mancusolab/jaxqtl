@@ -87,8 +87,6 @@ class MapCisSingleScoreState:
             beta_1,
             beta_2,
             beta_converged,
-            self.cisglm.ma_count[vdx],
-            self.cisglm.af[vdx],
             self.cisglm.p[vdx].squeeze(),
             self.cisglm.Z[vdx].squeeze(),
             self.pval_beta,
@@ -122,6 +120,11 @@ class MapCisScoreOutState(NamedTuple):
     num_var_cis: List
     var_leading_df: pd.DataFrame
     gene_mapped_list: pd.DataFrame
+
+
+class _GenoInfo(NamedTuple):
+    af: Array
+    ma_count: Array
 
 
 # write this assuming this is bulk data
@@ -285,11 +288,11 @@ def map_cis_score(
         "num_var",
         "variant_id",
         "tss_distance",
+        "ma_count",
+        "af",
         "beta_shape1",
         "beta_shape2",
         "beta_converged",
-        "ma_count",
-        "af",
         "pval_nominal",
         "Z",
         "pval_beta",
@@ -332,7 +335,6 @@ def map_cis_score(
         result = map_cis_single_score(
             X, G, y, family, g_key, sig_level, offset_eta, n_perm
         )
-
         if verbose:
             log.info(
                 "Finished cis-qtl scan for %s over region %s:%s-%s",
@@ -341,17 +343,29 @@ def map_cis_score(
                 str(lstart),
                 str(rend),
             )
+
+        g_info = _get_geno_info(G)
         # get info at lead hit, and lead hit index
         row, vdx = result.get_lead(key, random_tiebreak)
 
         # pull SNP info at lead hit index
+        af = g_info.af[vdx]
+        ma_count = g_info.ma_count[vdx]
         snp_id = var_df.iloc[vdx].snp
         snp_pos = var_df.iloc[vdx].pos
         tss_distance = snp_pos - start_min
 
         # combine lead hit info and gene meta data
         num_var_cis = G.shape[1]
-        result_out = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
+        result_out = [
+            gene_name,
+            chrom,
+            num_var_cis,
+            snp_id,
+            tss_distance,
+            ma_count,
+            af,
+        ] + row
         results.append(result_out)
 
     # filter results based on user specification (e.g., report all, report top, etc)
@@ -513,7 +527,7 @@ def map_cis_nominal(
             )
 
         result = cis_scan(X, G, y, family, offset_eta, robust_se)
-
+        g_info = _get_geno_info(G)
         if verbose:
             log.info(
                 "Finished cis-qtl scan for %s over region %s:%s-%s",
@@ -529,8 +543,8 @@ def map_cis_nominal(
         gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
 
         # combine results
-        af.append(result.af)
-        ma_count.append(result.ma_count)
+        af.append(g_info.af)
+        ma_count.append(g_info.ma_count)
 
         slope.append(result.beta)
         slope_se.append(result.se)
@@ -640,6 +654,7 @@ def map_cis_nominal_score(
             )
 
         result = cis_scan_score(X, G, y, family, offset_eta)
+        g_info = _get_geno_info(G)
 
         if verbose:
             log.info(
@@ -656,8 +671,8 @@ def map_cis_nominal_score(
         gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
 
         # combine results
-        af.append(result.af)
-        ma_count.append(result.ma_count)
+        af.append(g_info.af)
+        ma_count.append(g_info.ma_count)
 
         nominal_p.append(result.p)
         Z.append(result.Z)
@@ -692,3 +707,13 @@ def map_cis_nominal_score(
         one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
         one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
         one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.scoretest.parquet")
+
+
+def _get_geno_info(G: ArrayLike) -> _GenoInfo:
+    n, p = G.shape
+    counts = jnp.sum(G, axis=0)
+    af = counts / (2.0 * n)
+    flag = af <= 0.5
+    ma_counts = jnp.where(flag, counts, 2 - counts)
+
+    return _GenoInfo(af, ma_counts)

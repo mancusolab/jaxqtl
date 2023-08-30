@@ -26,8 +26,6 @@ class CisGLMState(NamedTuple):
 
 
 class CisGLMScoreState(NamedTuple):
-    af: Array
-    ma_count: Array
     p: Array
     Z: Array
     num_iters: Array
@@ -95,7 +93,7 @@ def cis_scan(
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    glm = GLM(family=family, maxiter=maxiter)
+    glm = GLM(family=family, max_iter=maxiter)
 
     # initiate SNP scan with model with covariate
     glmstate_cov_only = glm.fit(
@@ -138,32 +136,22 @@ def cis_scan_score(
     y: ArrayLike,
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
-    maxiter: int = 100,
+    max_iter: int = 100,
 ) -> CisGLMScoreState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    glm = GLM(family=family, maxiter=maxiter)
+    glm = GLM(family=family, max_iter=max_iter)
 
     init_val = glm.family.init_eta(y)
-
-    # shape params
-    n, p = G.shape
 
     # fit covariate-only model (null)
     glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=init_val)
 
-    counts = jnp.sum(G, axis=0)
-    af = counts / (2.0 * n)
-    mask = af <= 0.5
-    ma_counts = jnp.where(mask, counts, 2 - counts)
-
     Z, pval = score_test_snp(G, X, glmstate_cov_only)
 
     return CisGLMScoreState(
-        af=af,
-        ma_count=ma_counts,
         p=pval,
         Z=Z,
         num_iters=glmstate_cov_only.num_iters,
