@@ -130,7 +130,6 @@ class H5AD(PhenoIO):
         )
 
         for cell_type in cell_type_list:
-
             pheno_onetype = pheno[
                 pheno.index.get_level_values(filter_opt.celltype_col) == cell_type
             ]

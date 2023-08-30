@@ -6,16 +6,17 @@ import pandas as pd
 import jax.lax as lax
 import jax.numpy as jnp
 from jax import Array
+from jax.numpy.linalg import multi_dot
+from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.glm import GLM, GLMState
 from jaxqtl.io.readfile import ReadyDataState
 
 
 class CisGLMState(NamedTuple):
     af: Array
-    ma_samples: Array
     ma_count: Array
     beta: Array
     se: Array
@@ -26,12 +27,11 @@ class CisGLMState(NamedTuple):
 
 class CisGLMScoreState(NamedTuple):
     af: Array
-    ma_samples: Array
     ma_count: Array
     p: Array
+    Z: Array
     num_iters: Array
     converged: Array
-    Z: Array
 
 
 def _cis_window_cutter(
@@ -114,15 +114,10 @@ def cis_scan(
 
         af = jnp.mean(snp) / 2.0
         snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
-
-        ma_samples = jnp.sum(
-            snp > 0
-        )  # Number of samples carrying at least one minor allele
         ma_count = jnp.sum(snp)  # Number of minor alleles
 
         return carry, CisGLMState(
             af=af,
-            ma_samples=ma_samples,
             ma_count=ma_count,
             beta=glmstate.beta[-1],
             se=glmstate.se[-1],
@@ -153,32 +148,48 @@ def cis_scan_score(
 
     init_val = glm.family.init_eta(y)
 
+    # shape params
+    n, p = G.shape
+
     # fit covariate-only model (null)
     glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=init_val)
-    x_W = X * glmstate_cov_only.glm_wt
-    P = X @ glmstate_cov_only.infor_inv @ x_W.T
 
-    def _func(carry, snp):
-        Z, pval = glm.score_test_add_g(snp[:, jnp.newaxis], glmstate_cov_only, P)
+    counts = jnp.sum(G, axis=0)
+    af = counts / (2.0 * n)
+    mask = af <= 0.5
+    ma_counts = jnp.where(mask, counts, 2 - counts)
 
-        af = jnp.mean(snp) / 2.0
-        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
+    Z, pval = score_test_snp(G, X, glmstate_cov_only)
 
-        ma_samples = jnp.sum(
-            snp > 0
-        )  # Number of samples carrying at least one minor allele
-        ma_count = jnp.sum(snp)  # Number of minor alleles
+    return CisGLMScoreState(
+        af=af,
+        ma_count=ma_counts,
+        p=pval,
+        Z=Z,
+        num_iters=glmstate_cov_only.num_iters,
+        converged=glmstate_cov_only.converged,
+    )
 
-        return carry, CisGLMScoreState(
-            af=af,
-            ma_samples=ma_samples,
-            ma_count=ma_count,
-            p=pval,
-            Z=Z,
-            num_iters=glmstate_cov_only.num_iters,
-            converged=glmstate_cov_only.converged,
-        )
 
-    _, state = lax.scan(_func, 0.0, G.T)
+def score_test_snp(
+    G: ArrayLike, X: ArrayLike, glm_null_res: GLMState
+) -> Tuple[Array, Array]:
+    """test for additional covariate g
+    only require fit null model using fitted covariate only model + new vector g
+    X is the full design matrix containing covariates and g
+    calculate score in full model using the model fitted from null model
+    """
+    y_resid = jnp.squeeze(glm_null_res.resid, -1)
+    x_W = X * glm_null_res.glm_wt
+    sqrt_wgt = jnp.sqrt(glm_null_res.glm_wt)
 
-    return state
+    g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
+    w_g_resid = g_resid * sqrt_wgt
+    g_var = jnp.sum(w_g_resid**2, axis=0)
+
+    # TODO: SPA test; now using normal approximation
+    Z = (g_resid.T @ y_resid) / jnp.sqrt(g_var)
+
+    pval = norm.cdf(-abs(Z)) * 2
+
+    return Z, pval

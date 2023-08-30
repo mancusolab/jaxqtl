@@ -140,7 +140,7 @@ class Binomial(ExponentialFamily):
         return logprob
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return mu - mu ** 2
+        return mu - mu**2
 
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + 0.5) / 2)
@@ -202,16 +202,16 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.sum(term1 + term2)
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return mu + self.alpha * mu ** 2
+        return mu + self.alpha * mu**2
 
     def alpha_score(self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike) -> Array:
         """
         trigammma(x) = polygamma(1,x)
         """
         alpha_inv = 1 / alpha
-        term1 = alpha_inv ** 2 * jnp.log1p(alpha * mu)
-        term2 = (y - mu) / (mu * (alpha ** 2) + alpha)
-        term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv ** 2
+        term1 = alpha_inv**2 * jnp.log1p(alpha * mu)
+        term2 = (y - mu) / (mu * (alpha**2) + alpha)
+        term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv**2
 
         return jnp.sum(term1 + term2 + term3)
 
@@ -220,12 +220,12 @@ class NegativeBinomial(ExponentialFamily):
         trigammma(x) = polygamma(1,x)
         """
         alpha_inv = 1 / alpha
-        term1 = -2 / (alpha ** 3) * jnp.log1p(alpha * mu)
-        term2 = -mu / (mu * (alpha ** 3) + alpha ** 2)
-        term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha ** 2 * mu + alpha) ** 2
-        term4 = 2 / (alpha ** 3) * (digamma(y + alpha_inv) - digamma(alpha_inv))
+        term1 = -2 / (alpha**3) * jnp.log1p(alpha * mu)
+        term2 = -mu / (mu * (alpha**3) + alpha**2)
+        term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha**2 * mu + alpha) ** 2
+        term4 = 2 / (alpha**3) * (digamma(y + alpha_inv) - digamma(alpha_inv))
         term5 = (
-            1 / (alpha ** 4) * (polygamma(1, y + alpha_inv) - polygamma(1, alpha_inv))
+            1 / (alpha**4) * (polygamma(1, y + alpha_inv) - polygamma(1, alpha_inv))
         )
         return jnp.sum(term1 + term2 + term3 + term4 + term5)
 

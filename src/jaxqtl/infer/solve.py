@@ -67,7 +67,6 @@ class CholeskySolve(LinearSolve):
         stepsize: float = 1.0,
         offset_eta: ArrayLike = 0.0,
     ) -> Array:
-
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
 
         r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta

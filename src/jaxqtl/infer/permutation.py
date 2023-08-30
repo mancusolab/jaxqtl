@@ -218,7 +218,7 @@ def infer_beta(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param - stepsize * direction - 0.5 * stepsize ** 2 * adjustment
+        new_param = old_param - stepsize * direction - 0.5 * stepsize**2 * adjustment
 
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik

@@ -214,7 +214,6 @@ def create_map_parser(subparser):
 
 
 def _main(argsv):
-
     # top level parser
     global_parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
     global_parser.add_argument(

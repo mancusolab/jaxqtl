@@ -87,6 +87,6 @@ def test_sim_poisson_scoretest():
         maxiter=100,
     ).fit()
 
-    pval_score = GLM.score_test_add_g(Poisson(), X, y, mod_null, 1.0)
+    pval_score = GLM.score_test_snp(Poisson(), X, y, mod_null, 1.0)
 
     assert_array_eq(pval_score, mod_full.p[-1])

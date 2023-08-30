@@ -241,7 +241,7 @@ def test_poisson_scoretest():
     )
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_GPA, pval_GPA = jaxqtl_pois.score_test_add_g(
+    Z_GPA, pval_GPA = jaxqtl_pois.score_test_snp(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
@@ -253,7 +253,7 @@ def test_poisson_scoretest():
     )
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_add_g(
+    Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_snp(
         jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
@@ -264,7 +264,7 @@ def test_poisson_scoretest():
     )
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_PSI, pval_PSI = jaxqtl_pois.score_test_add_g(
+    Z_PSI, pval_PSI = jaxqtl_pois.score_test_snp(
         jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
@@ -293,7 +293,7 @@ def test_bin_scoretest():
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_GPA, pval_GPA = jaxqtl_bin.score_test_add_g(
+    Z_GPA, pval_GPA = jaxqtl_bin.score_test_snp(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
@@ -303,7 +303,7 @@ def test_bin_scoretest():
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_TUCE, pval_TUCE = jaxqtl_bin.score_test_add_g(
+    Z_TUCE, pval_TUCE = jaxqtl_bin.score_test_snp(
         jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
@@ -312,7 +312,7 @@ def test_bin_scoretest():
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
     x_W = X_covar * mod_null.glm_wt
     P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_PSI, pval_PSI = jaxqtl_bin.score_test_add_g(
+    Z_PSI, pval_PSI = jaxqtl_bin.score_test_snp(
         jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], mod_null, P
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")

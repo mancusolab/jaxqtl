@@ -49,7 +49,6 @@ class MapCisSingleState:
             beta_1,
             beta_2,
             beta_converged,
-            self.cisglm.ma_samples[vdx],
             self.cisglm.ma_count[vdx],
             self.cisglm.af[vdx],
             self.cisglm.p[vdx],
@@ -88,7 +87,6 @@ class MapCisSingleScoreState:
             beta_1,
             beta_2,
             beta_converged,
-            self.cisglm.ma_samples[vdx],
             self.cisglm.ma_count[vdx],
             self.cisglm.af[vdx],
             self.cisglm.p[vdx].squeeze(),
@@ -176,7 +174,6 @@ def map_cis(
         "beta_shape1",
         "beta_shape2",
         "beta_converged",
-        "ma_samples",
         "ma_count",
         "af",
         "pval_nominal",
@@ -258,7 +255,7 @@ def map_cis_score(
     qvalue_lambda: np.ndarray = None,
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
-    add_qval: bool = True,
+    compute_qvalue: bool = True,
     log=None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
@@ -291,7 +288,6 @@ def map_cis_score(
         "beta_shape1",
         "beta_shape2",
         "beta_converged",
-        "ma_samples",
         "ma_count",
         "af",
         "pval_nominal",
@@ -310,7 +306,17 @@ def map_cis_score(
         G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
 
         # skip if no cis SNPs found
-        if G.shape[1] == 0:
+        if (
+            G.shape[1] == 0
+        ):  # TODO: double check that you have a non-None G that has 2-dim when no cis-SNPs exist
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
             continue
 
         key, g_key = rdm.split(key, 2)
@@ -348,10 +354,10 @@ def map_cis_score(
         result_out = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
         results.append(result_out)
 
-    # filter results based on user speicification (e.g., report all, report top, etc)
+    # filter results based on user specification (e.g., report all, report top, etc)
     result_df = pd.DataFrame.from_records(results, columns=out_columns)
 
-    if add_qval:
+    if compute_qvalue:
         result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
 
     return result_df
@@ -423,7 +429,7 @@ def map_cis_single_score(
 
     beta_key, direct_key = rdm.split(key_init)
 
-    # if we -alwaays- use BetaPerm now, we may as well drop the class aspect and
+    # if we -always- use BetaPerm now, we may as well drop the class aspect and
     # call function directly...
     perm = BetaPermScore(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
@@ -474,7 +480,6 @@ def map_cis_nominal(
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
     af = []
-    ma_samples = []
     ma_count = []
     slope = []
     slope_se = []
@@ -525,7 +530,6 @@ def map_cis_nominal(
 
         # combine results
         af.append(result.af)
-        ma_samples.append(result.ma_samples)
         ma_count.append(result.ma_count)
 
         slope.append(result.beta)
@@ -543,7 +547,6 @@ def map_cis_nominal(
 
     # add additional columns
     outdf["af"] = np.NaN
-    outdf["ma_samples"] = np.NaN
     outdf["ma_count"] = np.NaN
     outdf["pval_nominal"] = np.NaN
     outdf["slope"] = np.NaN
@@ -553,7 +556,6 @@ def map_cis_nominal(
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
         outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
-        outdf.loc[np.arange(start_row, end_row), "ma_samples"] = ma_samples[idx]
         outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
         outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx]
         outdf.loc[np.arange(start_row, end_row), "slope"] = slope[idx]
@@ -588,6 +590,7 @@ def map_cis_nominal_score(
         score test statistics and p value (no effect estimates)
         write out parquet file by chrom for efficient data storage and retrieval
     """
+
     if log is None:
         log = get_log()
 
@@ -605,7 +608,6 @@ def map_cis_nominal_score(
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
     af = []
-    ma_samples = []
     ma_count = []
     Z = []
     nominal_p = []
@@ -655,11 +657,10 @@ def map_cis_nominal_score(
 
         # combine results
         af.append(result.af)
-        ma_samples.append(result.ma_samples)
         ma_count.append(result.ma_count)
 
-        nominal_p.append(result.p.T[0])
-        Z.append(result.Z.T[0])
+        nominal_p.append(result.p)
+        Z.append(result.Z)
         converged.append(result.converged)
         num_var_cis.append(var_df.shape[0])
 
@@ -672,7 +673,6 @@ def map_cis_nominal_score(
 
     # add additional columns
     outdf["af"] = np.NaN
-    outdf["ma_samples"] = np.NaN
     outdf["ma_count"] = np.NaN
     outdf["pval_nominal"] = np.NaN
     outdf["Z"] = np.NaN
@@ -681,7 +681,6 @@ def map_cis_nominal_score(
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
         outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
-        outdf.loc[np.arange(start_row, end_row), "ma_samples"] = ma_samples[idx]
         outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
         outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx].T
         outdf.loc[np.arange(start_row, end_row), "Z"] = Z[idx].T

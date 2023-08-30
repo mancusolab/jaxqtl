@@ -66,6 +66,7 @@ R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
 # score test
 def test_cis_scoretest():
     start = timeit.default_timer()
+
     map_cis_nominal_score(
         dat,
         family=Poisson(),
@@ -113,29 +114,29 @@ def test_cis_waldtest():
 # ~4s
 start = timeit.default_timer()
 mapcis_out_score = map_cis_score(
-    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, add_qval=False
+    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, compute_qvalue=False
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-mapcis_out_score.to_csv(
-    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
-)
+# mapcis_out_score.to_csv(
+#     "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
+# )
 
-# ~250s
-start = timeit.default_timer()
-mapcis_out_wald = map_cis(
-    dat,
-    family=Poisson(),
-    offset_eta=offset_eta,
-    robust_se=False,
-    n_perm=1000,
-    add_qval=True,
-)
-stop = timeit.default_timer()
-print("Time: ", stop - start)
-mapcis_out_wald.to_csv(
-    "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
-)
+# # ~250s
+# start = timeit.default_timer()
+# mapcis_out_wald = map_cis(
+#     dat,
+#     family=Poisson(),
+#     offset_eta=offset_eta,
+#     robust_se=False,
+#     n_perm=1000,
+#     add_qval=True,
+# )
+# stop = timeit.default_timer()
+# print("Time: ", stop - start)
+# mapcis_out_wald.to_csv(
+#     "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
+# )
 
 # # fit lm to check beta distribution estimates
 # start = timeit.default_timer()

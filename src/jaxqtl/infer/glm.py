@@ -3,7 +3,6 @@ from typing import NamedTuple, Tuple
 
 import equinox as eqx
 
-# import jax.debug
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm  # , t (not supported rn), chi2
@@ -13,8 +12,6 @@ from jaxqtl.families.distribution import ExponentialFamily, Gaussian
 from jaxqtl.families.utils import t_cdf
 from jaxqtl.infer.optimize import irls
 from jaxqtl.infer.solve import CholeskySolve, LinearSolve
-
-# import jax.scipy.linalg as jspla
 
 
 # change jnp.ndarray --> np.ndarray for mutable array
@@ -68,7 +65,6 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         tol: float = 1e-3,
         stepsize: float = 1.0,
     ) -> None:
-
         self.maxiter = maxiter
         self.tol = tol
         self.family = family
@@ -87,22 +83,6 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             )  # follow Normal(0, 1), this gives more accurate p value than chi2(1)
 
         return pval
-
-    def score_test_add_g(
-        self, g: ArrayLike, glm_null_res: GLMState, P: ArrayLike
-    ) -> Tuple[Array, Array]:
-        """test for additional covariate g
-        only require fit null model using fitted covariate only model + new vector g
-        X is the full design matrix containing covariates and g
-        calculate score in full model using the model fitted from null model
-        """
-        g_regout = g - P @ g
-        w_g_regout = g_regout * glm_null_res.glm_wt
-
-        # TODO: SPA test; now using normal approximation
-        Z = g_regout.T @ glm_null_res.resid / jnp.sqrt(w_g_regout.T @ g_regout)
-        pval = norm.cdf(-abs(Z)) * 2
-        return jnp.ravel(Z), jnp.ravel(pval)  # flatten [[val]] --> [val]
 
     def sumstats(
         self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike
@@ -125,7 +105,6 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         robust_se: bool = False,
         init: ArrayLike = None,
     ) -> GLMState:
-
         # init = self.family.init_eta(y)
         """Report Wald test p value"""
         beta, n_iter, converged = irls(
@@ -180,6 +159,6 @@ def huber_var(
     TODO: this will break
     """
     score_no_x = (y - mu) / family.scale(X, y, mu)
-    Bs = (X * (score_no_x ** 2)).T @ X
+    Bs = (X * (score_no_x**2)).T @ X
     Vs = infor_inv @ Bs @ infor_inv
     return jnp.diag(Vs)
