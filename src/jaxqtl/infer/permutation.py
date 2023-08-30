@@ -291,6 +291,8 @@ def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
     p_obs is a vector of nominal p value in cis window
     """
     k, n = params
+
+    # TODO: sometimes give wrong values
     p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
 
     return p_adj
