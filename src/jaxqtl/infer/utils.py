@@ -58,15 +58,18 @@ def _cis_window_cutter(
         & (var_info["pos"] <= end)
     ]
 
+    # subset G to cis variants (nxp)
     G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i), axis=1)
 
     # check monomorphic: G.T[:, [0]] find first occurrence on all genotype, var x 1
     mono_var = (G_tocheck.T == G_tocheck.T[:, [0]]).all(
         1
     )  # bool (var, ), show whether given variant is monomorphic
-    not_mono_var = jnp.invert(mono_var)
-    G = G_tocheck.T[not_mono_var].T  # take genotype that are NOT monomorphic
+    not_mono_var = jnp.invert(mono_var)  # reverse False and True (same as "~" operator)
+    G = G_tocheck[:, not_mono_var]  # take genotype that are NOT monomorphic
     cis_var_info = cis_var_info.loc[not_mono_var.tolist()]
+
+    # note: if no variants taken, then G has shape (n,0), cis_var_info has shape (0, 7); both 2-dim
     return G, cis_var_info
 
 
@@ -173,7 +176,7 @@ def score_test_snp(
 
     g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
     w_g_resid = g_resid * sqrt_wgt
-    g_var = jnp.sum(w_g_resid**2, axis=0)
+    g_var = jnp.sum(w_g_resid ** 2, axis=0)
 
     # TODO: SPA test; now using normal approximation
     Z = (g_resid.T @ y_resid) / jnp.sqrt(g_var)

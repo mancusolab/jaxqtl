@@ -87,8 +87,8 @@ class MapCisSingleScoreState:
             beta_1,
             beta_2,
             beta_converged,
-            self.cisglm.p[vdx].squeeze(),
-            self.cisglm.Z[vdx].squeeze(),
+            self.cisglm.p[vdx],
+            self.cisglm.Z[vdx],
             self.pval_beta,
         ]
 
@@ -197,6 +197,14 @@ def map_cis(
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
             continue
 
         key, g_key = rdm.split(key, 2)
@@ -460,7 +468,6 @@ def map_cis_single_score(
 def map_cis_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    out_path: str,
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -515,6 +522,14 @@ def map_cis_nominal(
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
             continue
 
         if verbose:
@@ -577,17 +592,12 @@ def map_cis_nominal(
         outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
         start_row = end_row
 
-    # split by chrom
-    for chrom in outdf["chrom"].unique().tolist():
-        one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
-        one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
-        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.parquet")
+    return outdf
 
 
 def map_cis_nominal_score(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    out_path: str,
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -642,6 +652,14 @@ def map_cis_nominal_score(
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
             continue
 
         if verbose:
@@ -702,18 +720,25 @@ def map_cis_nominal_score(
         outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
         start_row = end_row
 
+    return outdf
+
+
+def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
+    """
+    write parquet file for nominal scan (split by chr)
+    """
     # split by chrom
     for chrom in outdf["chrom"].unique().tolist():
         one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
         one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
-        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.scoretest.parquet")
+        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.{method}.parquet")
 
 
 def _get_geno_info(G: ArrayLike) -> _GenoInfo:
     n, p = G.shape
-    counts = jnp.sum(G, axis=0)
+    counts = jnp.sum(G, axis=0)  # count REF allele
     af = counts / (2.0 * n)
     flag = af <= 0.5
-    ma_counts = jnp.where(flag, counts, 2 - counts)
+    ma_counts = jnp.where(flag, counts, 2 * n - counts)
 
     return _GenoInfo(af, ma_counts)

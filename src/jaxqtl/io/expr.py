@@ -14,7 +14,7 @@ class ExpressionData:
         pass
 
     def __getitem__(self, gene_name: str) -> Array:
-        """Get count data for one cell type"""
+        """Get count data for one gene"""
         nobs = self.count.shape[0]
         onegene = self.count[gene_name]
         return jnp.float64(onegene).reshape((nobs, 1))
@@ -38,18 +38,6 @@ class GeneMetaData:
         """
 
         self.gene_map = pos_df
-
-    def filter_chr(self, *chrom: str):
-        """filter gene meta data by chromosome for faster loop over genes
-
-        *chrome should be specified as: filter_chr("22", "21")
-        the args chrom will be turned into Tuple
-        """
-        # TODO: check with Nick
-        assert all(
-            isinstance(item, str) for item in chrom
-        ), "Chromosomes must be specified in strings, eg. filter_chr('22', '21', ...) "
-        self.gene_map = self.gene_map.loc[self.gene_map.chr.isin(chrom)]
 
     def __iter__(self):
         for _, gene in self.gene_map.iterrows():

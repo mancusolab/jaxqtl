@@ -141,7 +141,7 @@ def create_readydata(
     pheno.columns.name = None  # remove column name due to tranpose
     sample_id = pheno.index.to_list()
 
-    # filter genotype and covariates by sample id
+    # filter genotype and covariates by sample id of pheno data
     geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
     covar = covar.loc[covar.index.isin(sample_id)].sort_index(level=sample_id)
 

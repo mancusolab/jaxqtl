@@ -1,4 +1,3 @@
-import os
 import timeit
 
 import pandas as pd
@@ -13,7 +12,13 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis, map_cis_nominal, map_cis_nominal_score, map_cis_score
+from jaxqtl.map import (
+    map_cis,
+    map_cis_nominal,
+    map_cis_nominal_score,
+    map_cis_score,
+    write_parqet,
+)
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
@@ -67,22 +72,15 @@ R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
 def test_cis_scoretest():
     start = timeit.default_timer()
 
-    map_cis_nominal_score(
-        dat,
-        family=Poisson(),
-        offset_eta=offset_eta,
-        out_path="./example/result/dat_n94_test_scoretest",
-    )
+    outdf = map_cis_nominal_score(dat, family=Poisson(), offset_eta=offset_eta)
     stop = timeit.default_timer()
     print("Time: ", stop - start)
-
-    prefix = "dat_n94_test_scoretest"
-    out_dir = "./example/result"
-    pairs_df_scoretest = pd.read_parquet(
-        os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.scoretest.parquet")
+    write_parqet(
+        outdf=outdf, method="scoretest", out_path="./example/result/dat_n94_test"
     )
 
-    assert_array_eq(pairs_df_scoretest.Z, jnp.array(R_res["Z_scoretest"]))
+    assert_array_eq(outdf.Z, jnp.array(R_res["Z_scoretest"]))
+    assert_array_eq(outdf.pval_nominal, jnp.array(R_res["pval_scoretest"]))
 
 
 # Wald test and slope, se estimates
@@ -90,24 +88,15 @@ def test_cis_waldtest():
     # n=94, one gene nominal mapping, 2592 variants, 916 ms
     # 0.86s vs. 0.90
     start = timeit.default_timer()
-    map_cis_nominal(
-        dat,
-        family=Poisson(),
-        offset_eta=offset_eta,
-        out_path="./example/result/dat_n94_test_wald",
-        robust_se=False,
+    outdf = map_cis_nominal(
+        dat, family=Poisson(), offset_eta=offset_eta, robust_se=False
     )
     stop = timeit.default_timer()
     print("Time: ", stop - start)
+    write_parqet(outdf=outdf, method="wald", out_path="./example/result/dat_n94_test")
 
-    prefix = "dat_n94_test_wald"
-    out_dir = "./example/result"
-    pairs_df_wald = pd.read_parquet(
-        os.path.join(out_dir, f"{prefix}.cis_qtl_pairs.22.parquet")
-    )
-
-    assert_array_eq(pairs_df_wald.slope, jnp.array(R_res["slope"]))
-    assert_array_eq(pairs_df_wald.se, jnp.array(R_res["se"]))
+    assert_array_eq(outdf.slope, jnp.array(R_res["slope"]))
+    assert_array_eq(outdf.se, jnp.array(R_res["se"]))
 
 
 # n=94, one gene cis mapping, 2592 variants
@@ -118,48 +107,22 @@ mapcis_out_score = map_cis_score(
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-# mapcis_out_score.to_csv(
-#     "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
-# )
+mapcis_out_score.to_csv(
+    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
+)
 
-# # ~250s
-# start = timeit.default_timer()
-# mapcis_out_wald = map_cis(
-#     dat,
-#     family=Poisson(),
-#     offset_eta=offset_eta,
-#     robust_se=False,
-#     n_perm=1000,
-#     add_qval=True,
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-# mapcis_out_wald.to_csv(
-#     "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
-# )
-
-# # fit lm to check beta distribution estimates
-# start = timeit.default_timer()
-# mapcis_out_lm = map_cis(
-#     dat, family=Gaussian(), offset_eta=jnp.zeros(offset_eta.shape), n_perm=1000, add_qval=True, robust_se=False
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-# mapcis_out_lm.to_csv(
-#     "./example/result/n94_waldtest_lm_res.tsv", sep="\t", index=False
-# )
-
-# # TODO: reduce number of permutation
-# start = timeit.default_timer()
-# mapcis_out_score = map_cis_score(
-#     dat, family=Poisson(), offset_eta=offset_eta, n_perm=500, add_qval=False
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-#
-# start = timeit.default_timer()
-# mapcis_out_100 = map_cis(
-#     dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, n_perm=100
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
+# ~250s
+start = timeit.default_timer()
+mapcis_out_wald = map_cis(
+    dat,
+    family=Poisson(),
+    offset_eta=offset_eta,
+    robust_se=False,
+    n_perm=1000,
+    add_qval=True,
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+mapcis_out_wald.to_csv(
+    "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
+)
