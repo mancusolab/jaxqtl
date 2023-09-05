@@ -416,7 +416,7 @@ class BetaPermScore(DirectPermScore):
             method="Nelder-Mead",
             tol=1e-3,
         )
-        true_dof = res.x.squeez()
+        true_dof = res.x.squeeze()
 
         p_perm = pval_from_Zstat(Z_perm, true_dof)
         p_perm = p_perm[~jnp.isnan(p_perm)]
