@@ -402,30 +402,28 @@ class BetaPermScore(DirectPermScore):
         Z_perm = Z_perm[~jnp.isnan(p_perm)]
 
         dof_init = 1.0
-        res = scipy.optimize.newton(
-            lambda x: df_cost(Z_perm, x),
+        # try:
+        #     true_dof = scipy.optimize.newton(
+        #         lambda x: df_cost(Z_perm, x),
+        #         dof_init,
+        #         tol=1e-3,
+        #         maxiter=50
+        #     )
+        # except:
+        #     log.info(
+        #         "WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)"
+        #     )
+        res = scipy.optimize.minimize(
+            lambda x: jnp.abs(df_cost(Z_perm, x)),
             dof_init,
+            method="Nelder-Mead",
             tol=1e-3,
-            maxiter=50,
-            full_output=True,
         )
-        if res[1].converged:
-            true_dof = res[0]
+        if res.success:
+            true_dof = res.x.squeeze()
         else:
-            log.info(
-                "WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)"
-            )
-            res = scipy.optimize.minimize(
-                lambda x: jnp.abs(df_cost(Z_perm, x)),
-                dof_init,
-                method="Nelder-Mead",
-                tol=1e-3,
-            )
-            if res.success:
-                true_dof = res.x.squeeze()
-            else:
-                log.info("both newton and Nelder-Mead not converge; use true_dof=1")
-                true_dof = 1.0
+            log.info("Nelder-Mead not converge; use true_dof=1")
+            true_dof = 1.0
 
         p_perm = pval_from_Zstat(Z_perm, true_dof)
         p_perm = p_perm[~jnp.isnan(p_perm)]
