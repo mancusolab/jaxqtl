@@ -10,7 +10,7 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
-from jax.scipy.stats import chi2  # , norm
+from jax.scipy.stats import chi2, norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -438,7 +438,9 @@ class BetaPermScore(DirectPermScore):
         # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
-        adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
+        # adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
+        adj_obs_p = pval_from_Zstat(norm.ppf(obs_p / 2), true_dof)
+        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
 
         return adj_p, beta_res
 
