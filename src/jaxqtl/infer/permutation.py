@@ -398,8 +398,8 @@ class BetaPermScore(DirectPermScore):
         Z_perm = super().__call__(
             X, y, G, obs_p, family, key_init, sig_level, offset_eta
         )
-        p_perm = pval_from_Zstat(Z_perm, 1.0)
-        Z_perm = Z_perm[~jnp.isnan(p_perm)]
+        # p_perm = pval_from_Zstat(Z_perm, 1.0)
+        # Z_perm = Z_perm[~jnp.isnan(p_perm)]
 
         dof_init = 1.0
         # try:
@@ -445,7 +445,7 @@ class BetaPermScore(DirectPermScore):
 
 def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
     # TS is the beta / se; use chi2(df)?
-    return (1 - chi2.cdf(TS ** 2, dof)) * 2  # norm.cdf(-abs(TS)) * 2
+    return 1 - chi2.cdf(TS ** 2, dof)  # norm.cdf(-abs(TS)) * 2
 
 
 def df_cost(TS, dof):
