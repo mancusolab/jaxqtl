@@ -341,7 +341,7 @@ def map_cis_score(
             )
 
         result = map_cis_single_score(
-            X, G, y, family, g_key, sig_level, offset_eta, n_perm
+            X, G, y, family, g_key, sig_level, offset_eta, n_perm, log
         )
         if verbose:
             log.info(
@@ -439,6 +439,7 @@ def map_cis_single_score(
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
+    log=None,
 ) -> MapCisSingleScoreState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -455,7 +456,7 @@ def map_cis_single_score(
     # call function directly...
     perm = BetaPermScore(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
-        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta
+        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta, log
     )
 
     return MapCisSingleScoreState(
