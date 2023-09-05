@@ -2,15 +2,15 @@ from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
 import equinox as eqx
+import scipy
 
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
-
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
-from jax.scipy.stats import norm
+from jax.scipy.stats import chi2  # , norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -127,11 +127,14 @@ class DirectPermScore(PermutationScore):
             # TODO: remove NA values before take min
             return (
                 key,
-                glmstate.p.min(),
+                # glmstate.p.min(),
+                jnp.abs(glmstate.Z).max(),
             )  # jnp.where(jnp.isnan(allp), jnp.inf, allp).min()
 
-        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        return pvals
+        # key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        key, Z = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+
+        return Z
 
 
 @eqx.filter_jit
@@ -213,7 +216,7 @@ def infer_beta(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param - stepsize * direction - 0.5 * stepsize**2 * adjustment
+        new_param = old_param - stepsize * direction - 0.5 * stepsize ** 2 * adjustment
 
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
@@ -377,6 +380,7 @@ class BetaPermScore(DirectPermScore):
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
+        log=None,
     ) -> Tuple[Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
@@ -385,10 +389,38 @@ class BetaPermScore(DirectPermScore):
             k, n estimates
             adjusted p value for lead SNP
         """
-        p_perm = super().__call__(
+        # p_perm = super().__call__(
+        #     X, y, G, obs_p, family, key_init, sig_level, offset_eta
+        # )
+        # p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
+
+        # infer true_dof
+        Z_perm = super().__call__(
             X, y, G, obs_p, family, key_init, sig_level, offset_eta
         )
-        p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
+        p_perm = pval_from_Zstat(Z_perm, 1.0)
+        Z_perm = Z_perm[~jnp.isnan(p_perm)]
+
+        dof_init = 1.0
+        # try:
+        #     true_dof = scipy.optimize.newton(
+        #         lambda x: df_cost(Z_perm, x), dof_init, tol=1e-3, maxiter=50
+        #     )
+        # except:
+        #     log.info(
+        #         "WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)"
+        #     )
+        res = scipy.optimize.minimize(
+            lambda x: jnp.abs(df_cost(Z_perm, x)),
+            dof_init,
+            method="Nelder-Mead",
+            tol=1e-3,
+        )
+        true_dof = res.x.squeez()
+
+        p_perm = pval_from_Zstat(Z_perm, true_dof)
+        p_perm = p_perm[~jnp.isnan(p_perm)]
+        #
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
@@ -406,7 +438,7 @@ class BetaPermScore(DirectPermScore):
 
 def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
     # TS is the beta / se; use chi2(df)?
-    return norm.cdf(-abs(TS)) * 2
+    return (1 - chi2.cdf(TS ** 2, dof)) * 2  # norm.cdf(-abs(TS)) * 2
 
 
 def df_cost(TS, dof):
