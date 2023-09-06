@@ -398,17 +398,12 @@ class BetaPermScore(DirectPermScore):
         Z_perm = super().__call__(
             X, y, G, obs_p, family, key_init, sig_level, offset_eta
         )
-        # p_perm = pval_from_Zstat(Z_perm, 1.0)
-        # Z_perm = Z_perm[~jnp.isnan(p_perm)]
+        p_perm = pval_from_Zstat(Z_perm, 1.0)
+        Z_perm = Z_perm[~jnp.isnan(p_perm)]
 
         dof_init = 1.0
         # try:
-        #     true_dof = scipy.optimize.newton(
-        #         lambda x: df_cost(Z_perm, x),
-        #         dof_init,
-        #         tol=1e-3,
-        #         maxiter=50
-        #     )
+        #     true_dof = scipy.optimize.newton(lambda x: df_cost(Z_perm, x), dof_init, tol=1e-3,maxiter=50)
         # except:
         #     log.info(
         #         "WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)"
@@ -439,8 +434,8 @@ class BetaPermScore(DirectPermScore):
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
         # adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
-        adj_obs_p = pval_from_Zstat(norm.ppf(obs_p / 2), true_dof)
-        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
+        obs_p_true_dof = pval_from_Zstat(norm.ppf(obs_p / 2), true_dof)
+        adj_p = _calc_adjp_beta(obs_p_true_dof, beta_res[0:2])
 
         return adj_p, beta_res
 

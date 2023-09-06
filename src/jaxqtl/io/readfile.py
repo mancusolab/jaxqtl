@@ -43,13 +43,18 @@ class ReadyDataState:
         self.bim.i = np.arange(0, self.geno.shape[1])
 
     def transform_y(self, mode: str = "log1p"):
+        """
+        tmm: normalize between individuals to make them comparable (differential library size)
+        """
         if mode == "log1p":
             self.pheno.count = np.log1p(self.pheno.count)  # prevent log(0)
         elif mode == "tmm":
+            # use edger TMM method to calculate size factor and convert to counts per million
             tmm_counts_df = qtl.norm.edger_cpm(
                 self.pheno.count.iloc[:, 4:], normalized_lib_sizes=True
             )
             # # mask is filter by gene
+            # inverse normal transformation on each gene (row)
             norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
             self.pheno.count.iloc[:, 4:] = norm_df
         elif mode == "qn":
