@@ -14,6 +14,7 @@ from jax.config import config
 from jaxqtl.families.distribution import Binomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
+from jaxqtl.infer.utils import score_test_snp
 
 config.update("jax_enable_x64", True)
 
@@ -239,10 +240,8 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_GPA, pval_GPA = jaxqtl_pois.score_test_snp(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], mod_null, P
+    Z_GPA, pval_GPA = score_test_snp(
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p))  # check result with statsmodel
@@ -251,10 +250,9 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_TUCE, pval_TUCE = jaxqtl_pois.score_test_snp(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], mod_null, P
+
+    Z_TUCE, pval_TUCE = score_test_snp(
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
@@ -262,10 +260,9 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_PSI, pval_PSI = jaxqtl_pois.score_test_snp(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], mod_null, P
+
+    Z_PSI, pval_PSI = score_test_snp(
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
@@ -291,29 +288,23 @@ def test_bin_scoretest():
     )
 
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_GPA, pval_GPA = jaxqtl_bin.score_test_snp(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], mod_null, P
+    Z_GPA, pval_GPA = score_test_snp(
+        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p))  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_TUCE, pval_TUCE = jaxqtl_bin.score_test_snp(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], mod_null, P
+    Z_TUCE, pval_TUCE = score_test_snp(
+        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    x_W = X_covar * mod_null.glm_wt
-    P = X_covar @ mod_null.infor_inv @ x_W.T
-    Z_PSI, pval_PSI = jaxqtl_bin.score_test_snp(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], mod_null, P
+    Z_PSI, pval_PSI = score_test_snp(
+        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 

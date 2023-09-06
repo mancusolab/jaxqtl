@@ -2,7 +2,6 @@ from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
 import equinox as eqx
-import scipy
 
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
@@ -10,7 +9,7 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
-from jax.scipy.stats import chi2, norm
+from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
@@ -127,14 +126,12 @@ class DirectPermScore(PermutationScore):
             # TODO: remove NA values before take min
             return (
                 key,
-                # glmstate.p.min(),
-                jnp.abs(glmstate.Z).max(),
+                glmstate.p.min(),
             )  # jnp.where(jnp.isnan(allp), jnp.inf, allp).min()
 
-        # key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        key, Z = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
-        return Z
+        return pvals
 
 
 @eqx.filter_jit
@@ -389,40 +386,10 @@ class BetaPermScore(DirectPermScore):
             k, n estimates
             adjusted p value for lead SNP
         """
-        # p_perm = super().__call__(
-        #     X, y, G, obs_p, family, key_init, sig_level, offset_eta
-        # )
-        # p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
-
-        # infer true_dof
-        Z_perm = super().__call__(
+        p_perm = super().__call__(
             X, y, G, obs_p, family, key_init, sig_level, offset_eta
         )
-        p_perm = pval_from_Zstat(Z_perm, 1.0)
-        Z_perm = Z_perm[~jnp.isnan(p_perm)]
-
-        dof_init = 1.0
-        # try:
-        #     true_dof = scipy.optimize.newton(lambda x: df_cost(Z_perm, x), dof_init, tol=1e-3,maxiter=50)
-        # except:
-        #     log.info(
-        #         "WARNING: scipy.optimize.newton failed to converge (running scipy.optimize.minimize)"
-        #     )
-        res = scipy.optimize.minimize(
-            lambda x: jnp.abs(df_cost(Z_perm, x)),
-            dof_init,
-            method="Nelder-Mead",
-            tol=1e-3,
-        )
-        if res.success:
-            true_dof = res.x.squeeze()
-        else:
-            log.info("Nelder-Mead not converge; use true_dof=1")
-            true_dof = 1.0
-
-        p_perm = pval_from_Zstat(Z_perm, true_dof)
-        p_perm = p_perm[~jnp.isnan(p_perm)]
-        #
+        p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
@@ -433,16 +400,14 @@ class BetaPermScore(DirectPermScore):
         # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
-        # adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
-        obs_p_true_dof = pval_from_Zstat(norm.ppf(obs_p / 2), true_dof)
-        adj_p = _calc_adjp_beta(obs_p_true_dof, beta_res[0:2])
+        adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
 
         return adj_p, beta_res
 
 
 def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
     # TS is the beta / se; use chi2(df)?
-    return 1 - chi2.cdf(TS ** 2, dof)  # norm.cdf(-abs(TS)) * 2
+    return norm.cdf(-abs(TS)) * 2
 
 
 def df_cost(TS, dof):

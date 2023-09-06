@@ -25,10 +25,10 @@ pd.set_option("display.max_columns", 500)  # see cis output
 config.update("jax_enable_x64", True)
 
 
-geno_path = "../example/data/chr22.n94"
-covar_path = "../example/data/donor_features.n94.tsv"
-pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
-genelist_path = "../example/data/genelist.tsv"
+geno_path = "./example/data/chr22.n94"
+covar_path = "./example/data/donor_features.n94.tsv"
+pheno_path = "./example/data/n94_CD14_positive_monocyte.bed.gz"
+genelist_path = "./example/data/genelist.tsv"
 # genelist_path = "./example/data/genelist_chr22.tsv"
 
 log = get_log()
@@ -108,7 +108,7 @@ mapcis_out_score = map_cis_score(
 stop = timeit.default_timer()
 print("Time: ", stop - start)
 mapcis_out_score.to_csv(
-    "./example/result/n94_scoretest_pois_res_newbeta.tsv", sep="\t", index=False
+    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
 )
 
 # ~250s
