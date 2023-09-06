@@ -40,7 +40,7 @@ pheno_reader = PheBedReader()
 pheno = pheno_reader(pheno_path)
 
 transform_method = "tmm"  # log1p, tmm
-pheno_transform = bed_transform_y(pheno_path, mode=transform_method)
+pheno_transform = bed_transform_y(pheno_path, method=transform_method)
 pheno_transform.to_csv(
     f"../example/data/n94_CD14_positive_monocyte.{transform_method}.bed.gz",
     index=False,

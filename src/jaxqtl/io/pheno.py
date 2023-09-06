@@ -245,7 +245,7 @@ def adjust_size_factor(adata: AnnData):
     return adata
 
 
-def bed_transform_y(pheno_path: str, mode: str = "log1p"):
+def bed_transform_y(pheno_path: str, method: str = "log1p"):
     """
     count_df: rows are genes, columns are individual ID
     """
@@ -253,20 +253,22 @@ def bed_transform_y(pheno_path: str, mode: str = "log1p"):
     # filter genes with zero expression
     count_df = count_df[count_df.iloc[:, 4:].sum(axis=1) > 0]
 
-    if mode == "log1p":
+    if method == "log1p":
         count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
-    elif mode == "tmm":
+    elif method == "tmm":
+        # use edger TMM method to calculate size factor and convert to counts per million
         tmm_counts_df = qtl.norm.edger_cpm(
             count_df.iloc[:, 4:], normalized_lib_sizes=True
         )
         # # mask is filter by gene
+        # inverse normal transformation on each gene (row)
         norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
         count_df.iloc[:, 4:] = norm_df
-    elif mode == "qn":
+    elif method == "qn":
         pass
         # qn_df = qtl.norm.normalize_quantiles(tpm_df.loc[mask])
         # norm_df = qtl.norm.inverse_normal_transform(qn_df)
     else:
-        raise ValueError(f"Unsupported mode {mode}")
+        raise ValueError(f"Unsupported mode {method}")
 
     return count_df
