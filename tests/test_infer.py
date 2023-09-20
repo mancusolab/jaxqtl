@@ -185,7 +185,7 @@ def test_1D_X():
     assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
-def test_sandwich():
+def test_robust_SE():
     """
     Compare sandwitch estimator from stats model to jaxqtl
     """

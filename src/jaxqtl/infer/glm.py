@@ -154,11 +154,12 @@ def huber_var(
     y: ArrayLike,
     mu: ArrayLike,
     infor_inv: ArrayLike,
+    phi: ArrayLike = 1,
 ) -> Array:
     """
-    TODO: this will break
+    Huber white sandwich estimator
     """
-    score_no_x = (y - mu) / family.scale(X, y, mu)
-    Bs = (X * (score_no_x**2)).T @ X
+    score_no_x = (y - mu) / family.scale(X, y, mu) * phi
+    Bs = (X * (score_no_x ** 2)).T @ X
     Vs = infor_inv @ Bs @ infor_inv
     return jnp.diag(Vs)
