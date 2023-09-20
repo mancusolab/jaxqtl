@@ -17,6 +17,7 @@ from jaxqtl.infer.utils import (
     CisGLMState,
     _setup_G_y,
     cis_scan,
+    cis_scan_intercept_only,
     cis_scan_score,
 )
 from jaxqtl.io.readfile import ReadyDataState
@@ -733,6 +734,40 @@ def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
         one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
         one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
         one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.{method}.parquet")
+
+
+def map_fit_intercept_only(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    log=None,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+):
+    """fit intercept only model for each gene and output fitted values
+
+    Returns:
+        write out tsv file by chrom for efficient data storage and retrieval
+    """
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    n, k = dat.covar.shape
+    X = jnp.ones((n, 1))  # intercept only
+
+    if verbose:
+        log.info("Begin mapping")
+
+    result = cis_scan_intercept_only(X, jnp.array(dat.pheno.count), family, offset_eta)
+
+    if verbose:
+        log.info("Finished mapping")
+
+    # write result
+    outdf = pd.DataFrame.from_records(result.T)
+    outdf.columns = dat.pheno.count.columns
+
+    return outdf
 
 
 def _get_geno_info(G: ArrayLike) -> _GenoInfo:

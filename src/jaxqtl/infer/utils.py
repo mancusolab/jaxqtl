@@ -162,6 +162,37 @@ def cis_scan_score(
     )
 
 
+@eqx.filter_jit
+def cis_scan_intercept_only(
+    X: ArrayLike,
+    Y: ArrayLike,
+    family: ExponentialFamily,
+    offset_eta: ArrayLike = 0.0,
+    maxiter: int = 100,
+) -> Array:
+    """
+    run GLM across variants in a flanking window of given gene
+    cis-widow: plus and minus W base pairs, total length 2*cis_window
+    """
+    glm = GLM(family=family, max_iter=maxiter)
+    n, _ = Y.shape
+
+    def _func(carry, y):
+        init_val = glm.family.init_eta(y.reshape((n, 1)))
+        glmstate = glm.fit(
+            X,
+            y.reshape((n, 1)),
+            offset_eta=offset_eta,
+            init=init_val,
+        )
+
+        return carry, glmstate.mu.reshape((n,))
+
+    _, state = lax.scan(_func, 0.0, Y.T)
+
+    return state
+
+
 def score_test_snp(
     G: ArrayLike, X: ArrayLike, glm_null_res: GLMState
 ) -> Tuple[Array, Array]:
