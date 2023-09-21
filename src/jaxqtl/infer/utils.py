@@ -186,7 +186,8 @@ def cis_scan_intercept_only(
             init=init_val,
         )
 
-        return carry, glmstate.mu.reshape((n,))
+        # return resid
+        return carry, y.reshape((n, 1)) - glmstate.mu.reshape((n,))
 
     _, state = lax.scan(_func, 0.0, Y.T)
 
