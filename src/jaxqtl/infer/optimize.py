@@ -30,6 +30,7 @@ def irls(
 ) -> IRLSState:
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o = val
+        # TODO: estimate alpha
         beta = solver(X, y, eta_o, family, stepsize, offset_eta)
         # jax.debug.breakpoint()
         eta_n = X @ beta + offset_eta

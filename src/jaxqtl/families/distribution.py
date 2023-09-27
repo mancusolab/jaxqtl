@@ -140,7 +140,7 @@ class Binomial(ExponentialFamily):
         return logprob
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return mu - mu**2
+        return mu - mu ** 2
 
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + 0.5) / 2)
@@ -202,16 +202,17 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.sum(term1 + term2)
 
     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return mu + self.alpha * mu**2
+        return mu + self.alpha * mu ** 2
 
     def alpha_score(self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike) -> Array:
         """
         trigammma(x) = polygamma(1,x)
         """
+        # TODO: rewrite this using jax.grad
         alpha_inv = 1 / alpha
-        term1 = alpha_inv**2 * jnp.log1p(alpha * mu)
-        term2 = (y - mu) / (mu * (alpha**2) + alpha)
-        term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv**2
+        term1 = alpha_inv ** 2 * jnp.log1p(alpha * mu)
+        term2 = (y - mu) / (mu * (alpha ** 2) + alpha)
+        term3 = (digamma(alpha_inv) - digamma(y + alpha_inv)) * alpha_inv ** 2
 
         return jnp.sum(term1 + term2 + term3)
 
@@ -219,13 +220,14 @@ class NegativeBinomial(ExponentialFamily):
         """
         trigammma(x) = polygamma(1,x)
         """
+        # TODO: rewrite this using jax.grad
         alpha_inv = 1 / alpha
-        term1 = -2 / (alpha**3) * jnp.log1p(alpha * mu)
-        term2 = -mu / (mu * (alpha**3) + alpha**2)
-        term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha**2 * mu + alpha) ** 2
-        term4 = 2 / (alpha**3) * (digamma(y + alpha_inv) - digamma(alpha_inv))
+        term1 = -2 / (alpha ** 3) * jnp.log1p(alpha * mu)
+        term2 = -mu / (mu * (alpha ** 3) + alpha ** 2)
+        term3 = (y - mu) * (2 * alpha * mu + 1) / (alpha ** 2 * mu + alpha) ** 2
+        term4 = 2 / (alpha ** 3) * (digamma(y + alpha_inv) - digamma(alpha_inv))
         term5 = (
-            1 / (alpha**4) * (polygamma(1, y + alpha_inv) - polygamma(1, alpha_inv))
+            1 / (alpha ** 4) * (polygamma(1, y + alpha_inv) - polygamma(1, alpha_inv))
         )
         return jnp.sum(term1 + term2 + term3 + term4 + term5)
 
@@ -251,71 +253,5 @@ class NegativeBinomial(ExponentialFamily):
 
         return alpha
 
-    # def calc_dispersion(self, y: ArrayLike, mu: ArrayLike, alpha_old, tol=1e-3, max_iter=1000) -> Array:
-    #     diff = 1000
-    #     old = self.alpha
-    #     idx = 1
-    #
-    #     # while jnp.logical_and(diff > tol, idx <= max_iter):
-    #     while diff > tol:
-    #         score = self.alpha_score(y, mu, old)
-    #         hess = self.alpha_hess(y, mu, old)
-    #         new = old - score / hess
-    #         idx += 1
-    #         diff = jnp.abs(new - old)
-    #         old = new
-    #
-    #     return new
-
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n
-
-
-# class Gamma(AbstractExponential):
-#     """
-#     wierd link function...need work on this
-#     """
-#
-#     def __init__(
-#         self,
-#         glink: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#         glink_inv: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#         glink_der: Optional[Callable[[jnp.ndarray], jnp.ndarray]] = None,
-#     ) -> None:
-#         # super().__init__()
-#         self.glink = glink if glink is not None else (lambda x: 1 / x)
-#         self.glink_inv = glink_inv if glink_inv is not None else (lambda x: 1 / x)
-#         self.glink_der = glink_der if glink_der is not None else (lambda x: -1 / x ** 2)
-#
-#     def random_gen(
-#         self, alpha: ArrayLike, beta: ArrayLike, shape: tuple
-#     ) -> np.ndarray:
-#         y = np.random.gamma(alpha, beta, shape)
-#         return y
-#
-#       def calc_phi(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-#         """
-#         method of moment estimator for phi
-#         """
-#         mu = self.glink_inv(pred)
-#         df = y.shape[0] - X.shape[1]
-#         phi = jnp.sum(jnp.square(mu - y) / jnp.square(mu)) / df
-#         return phi
-#
-#     def log_prob(self, y: score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-#         pass
-#
-#     def score(self, score(self, y: ArrayLike, eta: ArrayLike) -> Array:
-#         pass
-#
-#     def variance(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-#         return mu ** 2
-#
-#     def init_mu(self, p: int, seed: Optional[int]) -> Array:
-#         # need check with link function
-#         key = jax.random.PRNGKey(seed)
-#         key, key_init = random.split(key, 2)
-#         return jax.random.normal(key, shape=(p, 1))
-#
-#     def tree_flatten(self):
-#         pass
