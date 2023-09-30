@@ -1,14 +1,17 @@
-from typing import NamedTuple, Optional
+from typing import NamedTuple
 
 import numpy as np
+
+import jax.numpy as jnp
+from jax import Array
 
 from .families.distribution import ExponentialFamily, Gaussian
 
 
 class SimState(NamedTuple):
-    X: np.ndarray
-    y: np.ndarray
-    beta: np.ndarray
+    X: Array
+    y: Array
+    beta: Array
 
 
 class SimData:
@@ -17,35 +20,29 @@ class SimData:
         self.pfeatures = 4
         self.family = family
 
-    def gen_data(self, sim_alpha: Optional[float] = None):
+    def gen_data(self, seed: int = 1, scale: float = 1.0, alpha: float = 0.0):
         n = self.nobs
         p = self.pfeatures
         X_shape = (n, p)
         beta_shape = (p, 1)
 
+        np.random.seed(seed)
         X = np.zeros(X_shape)
         maf = 0.3
         # h2g = 0.1
         # M = 100
 
         X[:, 0] = np.ones((n,))  # intercept
-        X[:, 1] = np.random.normal(0, 1, (n,))  # center, standardize age
-        X[:, 2] = np.random.binomial(3, maf, (n,))  # genotype (0,1,2)
+        X[:, 1] = np.random.normal(40, 4, (n,))  # center, standardize age
+        X[:, 2] = np.random.binomial(2, maf, (n,))  # genotype (0,1,2)
         X[:, 3] = np.random.binomial(1, 0.5, (n,))  # sex (0, 1)
-        # X[:, 4:11] = np.random.normal(0, 1, (n, 7))
-        # X[:, 4] = np.random.normal(0, 1, (n,))  # pseudo PC1
-        # X[:, 5] = np.random.normal(0, 1, (n,))  # pseudo PC2
 
         beta = np.random.normal(0, 1, beta_shape)
         beta[1] = 0.01  # np.random.normal(0, h2g/M) # causal eQTL effect
 
         eta = X @ beta
         mu = self.family.glink.inverse(eta)
-        # sigma = 1
 
-        # TODO: need to call this function with diff parameters
-        # y = self.family.random_gen(mu, sigma)
-        y = self.family.random_gen(mu, sim_alpha)
-        # y = self.family.random_gen(mu, mu)
+        y = self.family.random_gen(mu, scale=scale, alpha=alpha)
 
-        return SimState(X, y, beta)
+        return SimState(jnp.array(X), jnp.array(y), jnp.array(beta))

@@ -31,6 +31,7 @@ class LinearSolve(eqx.Module, metaclass=ABCMeta):
         family: ExponentialFamily,
         stepsize: float = 1.0,
         offset_eta: ArrayLike = 0.0,
+        alpha: ArrayLike = 0.0,
     ) -> Array:
         pass
 
@@ -44,8 +45,9 @@ class QRSolve(LinearSolve):
         family: ExponentialFamily,
         stepsize: float = 1.0,
         offset_eta: ArrayLike = 0.0,
+        alpha: ArrayLike = 0.0,
     ) -> Array:
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta
@@ -66,8 +68,9 @@ class CholeskySolve(LinearSolve):
         family: ExponentialFamily,
         stepsize: float = 1.0,
         offset_eta: ArrayLike = 0.0,
+        alpha: ArrayLike = 0.0,
     ) -> Array:
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
 
         r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta
 
@@ -87,13 +90,14 @@ class CGSolve(LinearSolve):
         family: ExponentialFamily,
         stepsize: float = 1.0,
         offset_eta: ArrayLike = 0.0,
+        alpha: ArrayLike = 0.0,
     ) -> Array:
         """not converged for some cases in real data;
         Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol)
         !!! Don't use this. Need future fix
         """
 
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
 
         w_half = jnp.sqrt(weight)
         r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta

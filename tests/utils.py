@@ -10,9 +10,5 @@ def assert_betas_eq(state: GLMState, sm_state: GLMResults, rtol=1e-5):
     nptest.assert_allclose(state.beta, sm_state.params, rtol=rtol)
 
 
-def assert_beta_array_eq(state: GLMState, sm_state: GLMState, rtol=1e-5):
-    nptest.assert_allclose(state.beta, sm_state.beta, rtol=rtol)
-
-
 def assert_array_eq(estimate: ArrayLike, truth: ArrayLike, rtol=1e-2):
     nptest.assert_allclose(estimate, truth, rtol=rtol)

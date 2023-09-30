@@ -26,6 +26,7 @@ class GLMState(NamedTuple):
     converged: Array
     infor_inv: Array  # for score test
     resid: Array  # for score test, not the working resid!
+    alpha: Array  # dispersion parameter in NB model
 
 
 class GLM(eqx.Module, metaclass=ABCMeta):
@@ -85,14 +86,20 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         return pval
 
     def sumstats(
-        self, X: ArrayLike, y: ArrayLike, weight: ArrayLike, mu: ArrayLike
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        weight: ArrayLike,
+        eta: ArrayLike,
+        mu: ArrayLike,
+        alpha: ArrayLike = 0.0,
     ) -> Tuple[Array, Array, Array]:
         infor = (X * weight).T @ X
         infor_inv = jnpla.inv(infor)
         infor_se = jnp.sqrt(jnp.diag(infor_inv))
 
         # huber sandwich
-        huber_v = huber_var(self.family, X, y, mu, infor_inv)
+        huber_v = huber_var(self.family, X, y, eta, mu, alpha)
         huber_se = jnp.sqrt(huber_v)
 
         return infor_se, huber_se, infor_inv
@@ -104,10 +111,10 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
         init: ArrayLike = None,
+        alpha_init: ArrayLike = 0.0,
     ) -> GLMState:
-        # init = self.family.init_eta(y)
         """Report Wald test p value"""
-        beta, n_iter, converged = irls(
+        beta, n_iter, converged, alpha = irls(
             X,
             y,
             self.family,
@@ -117,14 +124,16 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             self.tol,
             self.step_size,
             offset_eta,
+            alpha_init,
         )
+
         eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
         resid = y - mu  # note: this is not the working resid
 
-        _, _, weight = self.family.calc_weight(X, y, eta)
+        _, _, weight = self.family.calc_weight(X, y, eta, alpha)
 
-        infor_se, huber_se, infor_inv = self.sumstats(X, y, weight, mu)
+        infor_se, huber_se, infor_inv = self.sumstats(X, y, weight, eta, mu, alpha)
 
         df = X.shape[0] - X.shape[1]
         beta_se = jnp.where(robust_se, huber_se, infor_se)
@@ -145,6 +154,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             converged,
             infor_inv,
             resid,
+            alpha,
         )
 
 
@@ -152,14 +162,27 @@ def huber_var(
     family: ExponentialFamily,
     X: ArrayLike,
     y: ArrayLike,
+    eta: ArrayLike,
     mu: ArrayLike,
-    infor_inv: ArrayLike,
-    phi: ArrayLike = 1,
+    alpha: ArrayLike = 0.0,
 ) -> Array:
     """
-    Huber white sandwich estimator
+    Huber white sandwich estimator use observed hessian
     """
-    score_no_x = (y - mu) / family.scale(X, y, mu) * phi
+    phi = 1.0
+    # calculate observed hessian
+    W = (
+        1
+        / phi
+        * (
+            family._hlink_score(eta, alpha) / family.glink.deriv(mu)
+            - family._hlink_hess(eta, alpha) * (y - mu)
+        )
+    )
+    hess_inv = jnpla.inv(-(X * W).T @ X)
+
+    score_no_x = (y - mu) / (family.variance(mu, alpha) * family.glink.deriv(mu)) * phi
     Bs = (X * (score_no_x ** 2)).T @ X
-    Vs = infor_inv @ Bs @ infor_inv
+    Vs = hess_inv @ Bs @ hess_inv
+
     return jnp.diag(Vs)
