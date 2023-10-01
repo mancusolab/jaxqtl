@@ -8,11 +8,14 @@ from typing_extensions import Self
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array  # , lax
+from jax import Array, lax
+from jax.config import config
 from jax.scipy.special import gammaln, xlog1py, xlogy
 from jax.typing import ArrayLike
 
 from .links import Identity, Link, Log, Logit, NBlink, Power
+
+config.update("jax_enable_x64", True)
 
 
 class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
@@ -63,7 +66,11 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         pass
 
     def calc_weight(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike = 0.0
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = jnp.zeros((1,)),
     ) -> Tuple[Array, Array, Array]:
         """
         weight for each observation in IRLS
@@ -81,23 +88,29 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         return self.glink((y + y.mean()) / 2)
 
     def calc_dispersion(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha, tol=1e-3, max_iter=1000
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike,
+        tol=1e-3,
+        max_iter=1000,
     ) -> Array:
-        return jnp.array([0.0])
+        return jnp.zeros((1,))
 
-    def _hlink(self, eta: ArrayLike, alpha=0.0):
+    def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
         If canonical link, then this is identify function
         """
         return eta
 
-    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = 0.0):
+    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
         If canonical link, then this is identify function
         """
         return jnp.ones_like(eta)
 
-    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = 0.0):
+    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         return jnp.zeros_like(eta)
 
 
@@ -125,14 +138,18 @@ class Gaussian(ExponentialFamily):
         return phi
 
     def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike = 0.0
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = jnp.zeros((1,)),
     ) -> Array:
         mu = self.glink.inverse(eta)
         phi = self.scale(X, y, mu)
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = 0.0) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return jnp.ones_like(mu)
 
 
@@ -159,7 +176,11 @@ class Binomial(ExponentialFamily):
         return jnp.asarray(1.0)
 
     def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike = 0.0
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = jnp.zeros((1,)),
     ) -> Array:
         """
         this works if we're using sigmoid link
@@ -168,7 +189,7 @@ class Binomial(ExponentialFamily):
         logprob = jnp.sum(jaxstats.bernoulli.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = 0.0) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return mu - mu ** 2
 
     def init_eta(self, y: ArrayLike) -> Array:
@@ -191,12 +212,16 @@ class Poisson(ExponentialFamily):
         return jnp.asarray(1.0)
 
     def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike = 0.0
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = jnp.zeros((1,)),
     ) -> Array:
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = 0.0) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return mu
 
 
@@ -237,16 +262,12 @@ class NegativeBinomial(ExponentialFamily):
         term2 = xlog1py(r, -p) + xlogy(y, p)
         return -jnp.sum(term1 + term2)
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = 0.0) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return mu + alpha * (mu ** 2)
 
     def alpha_score(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
     ) -> Array:
-        """
-        trigammma(x) = polygamma(1,x)
-        """
-
         def _ll(alpha):
             return self.negloglikelihood(X, y, eta, alpha)
 
@@ -256,37 +277,11 @@ class NegativeBinomial(ExponentialFamily):
     def alpha_hess(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
     ) -> Array:
-        """
-        trigammma(x) = polygamma(1,x)
-        """
-
         def _ll(alpha):
             return self.negloglikelihood(X, y, eta, alpha)
 
         _alpha_hess = jax.hessian(_ll)
         return _alpha_hess(alpha)
-
-    # def calc_dispersion(
-    #     self, y: ArrayLike, mu: ArrayLike, alpha: ArrayLike, tol=1e-3, max_iter=1000
-    # ) -> Array:
-    #     def body_fun(val: Tuple):
-    #         diff, num_iter, alpha_o = val
-    #         score = self.alpha_score(y, mu, alpha_o)
-    #         hess = self.alpha_hess(y, mu, alpha_o)
-    #         alpha_n = alpha_o - score / hess
-    #         diff = alpha_n - alpha_o
-    #
-    #         return diff, num_iter + 1, alpha_n
-    #
-    #     def cond_fun(val: Tuple):
-    #         diff, num_iter, alpha_o = val
-    #         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
-    #         return cond_l
-    #
-    #     init_tuple = (10000.0, 0, alpha)
-    #     diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
-    #
-    #     return alpha
 
     def calc_dispersion(
         self,
@@ -297,31 +292,60 @@ class NegativeBinomial(ExponentialFamily):
         tol=1e-3,
         max_iter=1000,
     ) -> Array:
-        diff = jnp.inf
-        num_iter = 0
-        alpha_o = alpha
-
-        while jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter):
+        def body_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
             score = self.alpha_score(X, y, eta, alpha_o)
             hess = self.alpha_hess(X, y, eta, alpha_o)
             alpha_n = alpha_o - score / hess
             diff = alpha_n - alpha_o
-            alpha_o = alpha_n
-            num_iter += 1
 
-        return alpha_o
+            return diff, num_iter + 1, alpha_n
+
+        def cond_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
+            cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+            return cond_l
+
+        init_tuple = (10000.0, 0, alpha)
+        diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
+
+        return alpha
+
+    # # for debug
+    # def calc_dispersion(
+    #     self,
+    #     X: ArrayLike,
+    #     y: ArrayLike,
+    #     eta: ArrayLike,
+    #     alpha: ArrayLike,
+    #     tol=1e-3,
+    #     max_iter=1000,
+    # ) -> Array:
+    #     diff = jnp.inf
+    #     num_iter = 0
+    #     alpha_o = alpha
+    #
+    #     while jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter):
+    #         score = self.alpha_score(X, y, eta, alpha_o)
+    #         hess = self.alpha_hess(X, y, eta, alpha_o)
+    #         alpha_n = alpha_o - score / hess
+    #         diff = alpha_n - alpha_o
+    #         alpha_o = alpha_n
+    #         num_iter += 1
+    #
+    #     return alpha_o
 
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n
 
-    def _hlink(self, eta: ArrayLike, alpha: ArrayLike = 1.0):
+    def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
         Using log link in g function
         """
         return jnp.log1p(-1.0 / (alpha * jnp.exp(eta)))
 
-    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = 1.0):
+    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         return 1.0 / (alpha * jnp.exp(eta) + 1.0)
 
-    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = 1.0):
+    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         return -alpha * jnp.exp(eta) / (alpha * jnp.exp(eta) + 1) ** 2

@@ -5,7 +5,7 @@ import equinox as eqx
 
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
-from jax.scipy.stats import norm  # , t (not supported rn), chi2
+from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily, Gaussian
@@ -14,7 +14,6 @@ from jaxqtl.infer.optimize import irls
 from jaxqtl.infer.solve import CholeskySolve, LinearSolve
 
 
-# change jnp.ndarray --> np.ndarray for mutable array
 class GLMState(NamedTuple):
     beta: Array
     se: Array
@@ -111,7 +110,9 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         offset_eta: ArrayLike = 0.0,
         robust_se: bool = False,
         init: ArrayLike = None,
-        alpha_init: ArrayLike = 0.0,
+        alpha_init: ArrayLike = jnp.float64(
+            jnp.zeros((1,))
+        ),  # start with float64 for non-NB family
     ) -> GLMState:
         """Report Wald test p value"""
         beta, n_iter, converged, alpha = irls(
@@ -164,10 +165,10 @@ def huber_var(
     y: ArrayLike,
     eta: ArrayLike,
     mu: ArrayLike,
-    alpha: ArrayLike = 0.0,
+    alpha: ArrayLike = jnp.float64(jnp.zeros((1,))),
 ) -> Array:
     """
-    Huber white sandwich estimator use observed hessian
+    Huber white sandwich estimator using observed hessian
     """
     phi = 1.0
     # calculate observed hessian

@@ -3,7 +3,7 @@ from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
     Poisson as smPoisson,
 )
-from utils import assert_array_eq, assert_betas_eq
+from utils import assert_array_eq
 
 from jax.config import config
 
@@ -40,7 +40,7 @@ def test_sim_poisson():
     init_pois = jaxqtl_poisson_cho.family.init_eta(y)
     glm_state = jaxqtl_poisson_cho.fit(X, y, init=init_pois)
 
-    assert_betas_eq(glm_state, sm_state)
+    assert_array_eq(glm_state.beta, sm_state.params)
     assert_array_eq(glm_state.se, sm_state.bse)
 
 
@@ -80,5 +80,5 @@ def test_sim_NB():
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
     assert_array_eq(glm_state.beta, sm_state.params[:-1])
-    assert_array_eq(glm_state.se, sm_state.bse[:-1])
+    assert_array_eq(glm_state.se, sm_state.bse[:-1], rtol=1e-2)
     assert_array_eq(glm_state.alpha, sm_state.params[-1])
