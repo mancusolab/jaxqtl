@@ -10,7 +10,7 @@ from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
-from jaxqtl.families.distribution import ExponentialFamily
+from jaxqtl.families.distribution import ExponentialFamily, Poisson
 from jaxqtl.infer.glm import GLM, GLMState
 from jaxqtl.io.readfile import ReadyDataState
 
@@ -30,6 +30,7 @@ class CisGLMScoreState(NamedTuple):
     Z: Array
     num_iters: Array
     converged: Array
+    alpha: Array
 
 
 def _cis_window_cutter(
@@ -149,8 +150,15 @@ def cis_scan_score(
 
     init_val = glm.family.init_eta(y)
 
+    jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
+    glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
+
     # fit covariate-only model (null)
-    glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=init_val)
+    alpha_init = family.calc_dispersion(X, y, glm_state_pois.eta)
+
+    glmstate_cov_only = glm.fit(
+        X, y, offset_eta=offset_eta, init=init_val, alpha_init=alpha_init
+    )
 
     Z, pval = score_test_snp(G, X, glmstate_cov_only)
 
@@ -159,6 +167,7 @@ def cis_scan_score(
         Z=Z,
         num_iters=glmstate_cov_only.num_iters,
         converged=glmstate_cov_only.converged,
+        alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
     )
 
 
@@ -214,5 +223,4 @@ def score_test_snp(
     Z = (g_resid.T @ y_resid) / jnp.sqrt(g_var)
 
     pval = norm.cdf(-abs(Z)) * 2
-
     return Z, pval

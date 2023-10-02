@@ -6,7 +6,7 @@ from utils import assert_array_eq
 import jax.numpy as jnp
 from jax.config import config
 
-from jaxqtl.families.distribution import Poisson  # , Gaussian
+from jaxqtl.families.distribution import NegativeBinomial, Poisson  # , Gaussian
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -25,12 +25,17 @@ pd.set_option("display.max_columns", 500)  # see cis output
 
 config.update("jax_enable_x64", True)
 
+geno_path = "../example/local/NK_new/chr22"
+covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
+pheno_path = "../example/local/NK_new/NK.bed.gz"
+genelist_path = "../example/local/NK_new/ENSG00000237438"
 
-geno_path = "../example/data/chr22.n94"
-covar_path = "../example/data/donor_features.n94.tsv"
-pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
+
+# geno_path = "../example/data/chr22.n94"
+# covar_path = "../example/data/donor_features.n94.tsv"
+# pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
 # genelist_path = "../example/data/genelist.tsv"
-genelist_path = "../example/data/genelist_chr22.tsv"
+# genelist_path = "../example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -59,14 +64,14 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-# dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
-dat.filter_gene(gene_list=gene_list[50:55])
+dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+# dat.filter_gene(gene_list=gene_list[50:55])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
 
 # run mapping #
 
 # read Rres for score test and wald test
-R_res = pd.read_csv("./example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
+R_res = pd.read_csv("../example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t")
 
 
 # score test
@@ -103,14 +108,28 @@ def test_cis_waldtest():
 # n=94, one gene cis mapping, 2592 variants
 # ~4s
 start = timeit.default_timer()
-mapcis_out_score = map_cis_score(
-    dat, family=Poisson(), offset_eta=offset_eta, n_perm=1000, compute_qvalue=False
+mapcis_out_score_nb = map_cis_score(
+    dat,
+    family=NegativeBinomial(),
+    offset_eta=offset_eta,
+    n_perm=1000,
+    compute_qvalue=False,
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-mapcis_out_score.to_csv(
-    "./example/result/n94_scoretest_pois_res.tsv", sep="\t", index=False
+# mapcis_out_score_nb.to_csv(
+#     "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
+# )
+
+mapcis_out_score_pois = map_cis_nominal_score(
+    dat,
+    family=NegativeBinomial(),
+    offset_eta=offset_eta,  # , n_perm=1000, compute_qvalue=False
 )
+mapcis_out_score_pois.to_csv(
+    "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
+)
+
 
 # ~250s
 start = timeit.default_timer()

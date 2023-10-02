@@ -8,12 +8,15 @@ import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
+from jax.config import config
 from jax.scipy.special import polygamma
 from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.utils import cis_scan, cis_scan_score
+
+config.update("jax_enable_x64", True)
 
 
 class Permutation(eqx.Module, metaclass=ABCMeta):
@@ -65,7 +68,6 @@ class DirectPerm(Permutation):
             glmstate = cis_scan(
                 X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se
             )
-            # jax.debug.print("min p: {}", glmstate.p.min())
             # allTS = jnp.abs(glmstate.beta / glmstate.se)
 
             # TODO: remove NA values before take min
@@ -230,7 +232,7 @@ def infer_beta(
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(
         float
     )
-    # jax.debug.print("num_iter = {num_iters}", num_iters=num_iters)
+
     return jnp.array([params[0], params[1], converged])
 
 

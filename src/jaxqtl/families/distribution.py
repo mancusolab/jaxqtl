@@ -92,7 +92,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike,
+        alpha: ArrayLike = 0.0,
         tol=1e-3,
         max_iter=1000,
     ) -> Array:
@@ -281,14 +281,14 @@ class NegativeBinomial(ExponentialFamily):
             return self.negloglikelihood(X, y, eta, alpha)
 
         _alpha_hess = jax.hessian(_ll)
-        return _alpha_hess(alpha)
+        return _alpha_hess(alpha).reshape((1,))
 
     def calc_dispersion(
         self,
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike,
+        alpha: ArrayLike = 0.01,
         tol=1e-3,
         max_iter=1000,
     ) -> Array:
@@ -299,7 +299,7 @@ class NegativeBinomial(ExponentialFamily):
             alpha_n = alpha_o - score / hess
             diff = alpha_n - alpha_o
 
-            return diff, num_iter + 1, alpha_n
+            return diff.squeeze(), num_iter + 1, alpha_n.squeeze()
 
         def cond_fun(val: Tuple):
             diff, num_iter, alpha_o = val
@@ -317,7 +317,7 @@ class NegativeBinomial(ExponentialFamily):
     #     X: ArrayLike,
     #     y: ArrayLike,
     #     eta: ArrayLike,
-    #     alpha: ArrayLike,
+    #     alpha: ArrayLike = 0.01,
     #     tol=1e-3,
     #     max_iter=1000,
     # ) -> Array:

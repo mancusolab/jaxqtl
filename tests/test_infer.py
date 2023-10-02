@@ -28,6 +28,41 @@ X_arr = jnp.array(spector_data.exog)
 maxiter = 100
 stepsize = 1.0
 
+# dat = pd.read_csv("../example/data/ENSG00000178607_rs74787440.gz", sep="\t")
+# M = jnp.array(dat.iloc[:, 0:12])
+# y = jnp.array(dat["y"])[:, jnp.newaxis]
+# library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+#
+# sm_mod = smNB(
+#     np.array(y),
+#     np.array(M),
+#     offset=np.array(library_size).reshape((len(library_size),)),
+# ).fit()
+# sm_alpha = sm_mod.params[-1]  # alpha estimate
+#
+# jaxqtl_pois = GLM(
+#     family=Poisson(),
+#     max_iter=maxiter,
+#     solver=CholeskySolve(),
+#     step_size=stepsize,
+# )
+# init_pois = jaxqtl_pois.family.init_eta(y)
+# glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
+#
+# nb_fam = NegativeBinomial()
+# alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
+#
+# jaxqtl_nb = GLM(
+#     family=NegativeBinomial(),
+#     max_iter=maxiter,
+#     solver=CholeskySolve(),
+#     step_size=stepsize,
+# )
+# init_nb = jaxqtl_nb.family.init_eta(y)
+# glm_state = jaxqtl_nb.fit(
+#     M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n
+# )
+
 
 def test_linear_regression_cho():
 
@@ -241,7 +276,7 @@ def test_NB():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta, 0.01)
+    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -251,7 +286,7 @@ def test_NB():
     )
     init_nb = jaxqtl_nb.family.init_eta(y)
     glm_state = jaxqtl_nb.fit(
-        M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n
+        M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n.squeeze()
     )
 
     assert_array_eq(glm_state.alpha, sm_alpha, rtol=1e-4)
@@ -289,7 +324,7 @@ def test_NB_robust():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta, 0.01)
+    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -300,7 +335,12 @@ def test_NB_robust():
     init_nb = jaxqtl_nb.family.init_eta(y)
 
     glm_state_robust = jaxqtl_nb.fit(
-        M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n, robust_se=True
+        M,
+        y,
+        init=init_nb,
+        offset_eta=library_size,
+        alpha_init=alpha_n.squeeze(),
+        robust_se=True,
     )
 
     assert_array_eq(glm_state_robust.se ** 2, jnp.diag(white_cov)[:-1], rtol=1e-3)

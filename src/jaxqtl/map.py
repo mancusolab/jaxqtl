@@ -91,6 +91,7 @@ class MapCisSingleScoreState:
             self.cisglm.p[vdx],
             self.cisglm.Z[vdx],
             self.pval_beta,
+            self.cisglm.alpha[vdx],
         ]
 
         result = [element.tolist() for element in result]
@@ -305,6 +306,7 @@ def map_cis_score(
         "pval_nominal",
         "Z",
         "pval_beta",
+        "alpha_cov",
     ]
 
     results = []
@@ -639,6 +641,7 @@ def map_cis_nominal_score(
     nominal_p = []
     converged = []
     num_var_cis = []
+    alpha_cov = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
@@ -698,6 +701,7 @@ def map_cis_nominal_score(
         Z.append(result.Z)
         converged.append(result.converged)
         num_var_cis.append(var_df.shape[0])
+        alpha_cov.append(result.alpha)
 
     # write result
     start_row = 0
@@ -712,6 +716,7 @@ def map_cis_nominal_score(
     outdf["pval_nominal"] = np.NaN
     outdf["Z"] = np.NaN
     outdf["converged"] = np.NaN
+    outdf["alpha_cov"] = np.NaN
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
@@ -720,6 +725,7 @@ def map_cis_nominal_score(
         outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx].T
         outdf.loc[np.arange(start_row, end_row), "Z"] = Z[idx].T
         outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
+        outdf.loc[np.arange(start_row, end_row), "alpha_cov"] = alpha_cov[idx]
         start_row = end_row
 
     return outdf

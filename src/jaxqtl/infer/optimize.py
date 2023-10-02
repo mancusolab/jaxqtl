@@ -28,7 +28,7 @@ def irls(
     tol: float = 1e-3,
     stepsize: float = 1.0,
     offset_eta: ArrayLike = 0.0,
-    alpha_init: ArrayLike = jnp.zeros((1,)),
+    alpha_init: ArrayLike = 0.0,
 ) -> IRLSState:
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o, alpha_o = val
