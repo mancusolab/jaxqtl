@@ -245,7 +245,7 @@ class NegativeBinomial(ExponentialFamily):
         self, mu: jnp.ndarray, scale: float = 1.0, alpha: float = 0.0
     ) -> np.ndarray:
         r = 1 / alpha
-        p = mu / (mu + alpha)
+        p = mu / (mu + r)
         y = np.random.negative_binomial(r, 1 - p)
         return y
 

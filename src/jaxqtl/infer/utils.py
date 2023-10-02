@@ -220,7 +220,8 @@ def score_test_snp(
     g_var = jnp.sum(w_g_resid ** 2, axis=0)
 
     # TODO: SPA test; now using normal approximation
-    Z = (g_resid.T @ y_resid) / jnp.sqrt(g_var)
+    # Z = (g_resid.T @ y_resid) / jnp.sqrt(g_var)
+    Z = ((g_resid * glm_null_res.glm_wt).T @ y_resid) / jnp.sqrt(g_var)
 
     pval = norm.cdf(-abs(Z)) * 2
     return Z, pval

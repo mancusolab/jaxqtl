@@ -130,7 +130,9 @@ class GLM(eqx.Module, metaclass=ABCMeta):
 
         eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
-        resid = y - mu  # note: this is not the working resid
+        resid = (y - mu) * self.family.glink.deriv(
+            mu
+        )  # note: this is not the working resid
 
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
 

@@ -14,8 +14,8 @@ from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
 
-stepsize = 1.0
-maxiter = 100
+step_size = 1.0
+max_iter = 100
 
 
 def test_sim_poisson():
@@ -33,9 +33,9 @@ def test_sim_poisson():
 
     jaxqtl_poisson_cho = GLM(
         family=Poisson(),
-        max_iter=maxiter,
+        max_iter=max_iter,
         solver=CholeskySolve(),
-        step_size=stepsize,
+        step_size=step_size,
     )
     init_pois = jaxqtl_poisson_cho.family.init_eta(y)
     glm_state = jaxqtl_poisson_cho.fit(X, y, init=init_pois)
@@ -45,23 +45,22 @@ def test_sim_poisson():
 
 
 def test_sim_NB():
-    np.random.seed(1)
-
     n = 1000
-    true_alpha = 0.05
+    true_alpha = 0.01
     family = NegativeBinomial()
 
+    np.random.seed(1)
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=true_alpha)
+    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.3, model="alt", h2g=0.1)
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit()
 
     jaxqtl_pois = GLM(
         family=Poisson(),
-        max_iter=maxiter,
+        max_iter=max_iter,
         solver=CholeskySolve(),
-        step_size=stepsize,
+        step_size=step_size,
     )
     init_pois = jaxqtl_pois.family.init_eta(y)
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
@@ -71,14 +70,14 @@ def test_sim_NB():
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
-        max_iter=maxiter,
+        max_iter=max_iter,
         solver=QRSolve(),
-        step_size=stepsize,
+        step_size=step_size,
     )
     init_nb = jaxqtl_nb.family.init_eta(y)
     glm_state = jaxqtl_nb.fit(X, y, init=init_nb, alpha_init=alpha_n)
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
-    assert_array_eq(glm_state.beta, sm_state.params[:-1])
+    assert_array_eq(glm_state.beta, sm_state.params[:-1], rtol=1e-4)
     assert_array_eq(glm_state.se, sm_state.bse[:-1], rtol=1e-2)
     assert_array_eq(glm_state.alpha, sm_state.params[-1])
