@@ -54,7 +54,7 @@ def test_sim_NB():
     X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.3, model="alt", h2g=0.1)
 
     mod = smNB(np.array(y), np.array(X))
-    sm_state = mod.fit()
+    sm_state = mod.fit(maxiter=100)
 
     jaxqtl_pois = GLM(
         family=Poisson(),

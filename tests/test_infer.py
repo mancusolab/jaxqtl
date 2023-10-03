@@ -28,41 +28,6 @@ X_arr = jnp.array(spector_data.exog)
 maxiter = 100
 stepsize = 1.0
 
-# dat = pd.read_csv("../example/data/ENSG00000178607_rs74787440.gz", sep="\t")
-# M = jnp.array(dat.iloc[:, 0:12])
-# y = jnp.array(dat["y"])[:, jnp.newaxis]
-# library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
-#
-# sm_mod = smNB(
-#     np.array(y),
-#     np.array(M),
-#     offset=np.array(library_size).reshape((len(library_size),)),
-# ).fit()
-# sm_alpha = sm_mod.params[-1]  # alpha estimate
-#
-# jaxqtl_pois = GLM(
-#     family=Poisson(),
-#     max_iter=maxiter,
-#     solver=CholeskySolve(),
-#     step_size=stepsize,
-# )
-# init_pois = jaxqtl_pois.family.init_eta(y)
-# glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
-#
-# nb_fam = NegativeBinomial()
-# alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
-#
-# jaxqtl_nb = GLM(
-#     family=NegativeBinomial(),
-#     max_iter=maxiter,
-#     solver=CholeskySolve(),
-#     step_size=stepsize,
-# )
-# init_nb = jaxqtl_nb.family.init_eta(y)
-# glm_state = jaxqtl_nb.fit(
-#     M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n
-# )
-
 
 def test_linear_regression_cho():
 
@@ -263,7 +228,7 @@ def test_NB():
         np.array(y),
         np.array(M),
         offset=np.array(library_size).reshape((len(library_size),)),
-    ).fit()
+    ).fit(maxiter=100)
     sm_alpha = sm_mod.params[-1]  # alpha estimate
 
     jaxqtl_pois = GLM(
@@ -309,7 +274,7 @@ def test_NB_robust():
         np.array(y),
         np.array(M),
         offset=np.array(library_size).reshape((len(library_size),)),
-    ).fit()
+    ).fit(maxiter=100)
     white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(
         sm_mod, use_correction=False
     )
@@ -448,3 +413,43 @@ def test_bin_scoretest():
     Z_vec = jnp.array([Z_GPA[0], Z_TUCE[0], Z_PSI[0]])  # fix shape
     assert_array_eq(pval_vec, jnp.array(R_res["pval"]), rtol=1e-3)
     assert_array_eq(Z_vec, jnp.array(R_res["Z"]), rtol=1e-3)
+
+
+def test_nb_scoretest():
+    Rres = pd.read_csv(
+        "./example/data/ENSG00000178607_rs74787440.nb.scoretest.tsv", sep="\t"
+    )
+    dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
+    M = jnp.array(dat.iloc[:, 0:12])
+    y = jnp.array(dat["y"])[:, jnp.newaxis]
+    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+
+    # print(sm_res.summary())
+    M_cov = M[:, 0:-1]
+
+    jaxqtl_pois = GLM(
+        family=Poisson(),
+        max_iter=maxiter,
+        solver=CholeskySolve(),
+        step_size=stepsize,
+    )
+    init_pois = jaxqtl_pois.family.init_eta(y)
+    glm_state_pois = jaxqtl_pois.fit(M_cov, y, init=init_pois, offset_eta=library_size)
+
+    nb_fam = NegativeBinomial()
+    alpha_n = nb_fam.calc_dispersion(M_cov, y, glm_state_pois.eta)
+
+    jaxqtl_nb = GLM(
+        family=NegativeBinomial(),
+        max_iter=maxiter,
+        solver=CholeskySolve(),
+        step_size=stepsize,
+    )
+    init_nb = jaxqtl_nb.family.init_eta(y)
+    glm_state = jaxqtl_nb.fit(
+        M_cov, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n
+    )
+
+    Z, pval = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
+
+    assert_array_eq(Z, Rres["Z"])
