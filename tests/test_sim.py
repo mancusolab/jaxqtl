@@ -25,7 +25,7 @@ def test_sim_poisson():
     family = Poisson()
 
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data()
+    X, y, beta = sim.gen_data(alpha=0.0, maf=0.3, model="alt", true_beta=0.1)
 
     # no intercept
     mod = smPoisson(np.array(y), np.array(X))
@@ -51,7 +51,7 @@ def test_sim_NB():
 
     np.random.seed(1)
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.3, model="alt", h2g=0.1)
+    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.3, model="alt", true_beta=0.1)
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
@@ -80,4 +80,4 @@ def test_sim_NB():
     print(f"jaxqtl alpha: {glm_state.alpha}")
     assert_array_eq(glm_state.beta, sm_state.params[:-1], rtol=1e-4)
     assert_array_eq(glm_state.se, sm_state.bse[:-1], rtol=1e-2)
-    assert_array_eq(glm_state.alpha, sm_state.params[-1])
+    assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-2)

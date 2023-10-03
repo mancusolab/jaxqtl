@@ -45,9 +45,8 @@ class SimData:
         scale: float = 1.0,
         alpha: float = 0.0,
         maf: float = 0.3,
-        h2g: float = 0.1,
         model: str = "alt",
-        num_causal: float = 100,
+        true_beta: float = 0.0,
     ) -> SimState:
         n = self.nobs
         p = self.pfeatures
@@ -71,10 +70,7 @@ class SimData:
         if model == "null":
             beta[-1] = 0.0
         else:
-            beta[-1] = np.random.normal(
-                0, h2g / num_causal, (1,)
-            )  # np.random.normal(0, h2g/M) # causal eQTL effect
-            # beta[-1] = 0.2
+            beta[-1] = true_beta
 
         eta = X @ beta
         mu = self.family.glink.inverse(eta)
@@ -89,11 +85,10 @@ def run_sim(
     scale: float = 1.0,
     alpha: float = 0.01,
     maf: float = 0.3,
-    h2g: float = 0.1,
-    num_causal: float = 100,
     n: int = 1000,
     model: str = "alt",
     num_sim: int = 1000,
+    true_beta: float = 0.0,
     sim_family: ExponentialFamily = NegativeBinomial(),
 ) -> SimResState:
 
@@ -113,12 +108,7 @@ def run_sim(
 
     for i in range(num_sim):
         X, y, beta = sim.gen_data(
-            alpha=alpha,
-            maf=maf,
-            model=model,
-            h2g=h2g,
-            num_causal=num_causal,
-            scale=scale,
+            alpha=alpha, maf=maf, model=model, scale=scale, true_beta=true_beta
         )
 
         # fit poisson or negative binomial
