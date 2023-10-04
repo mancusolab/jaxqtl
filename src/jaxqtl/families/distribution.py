@@ -297,6 +297,7 @@ class NegativeBinomial(ExponentialFamily):
             score = self.alpha_score(X, y, eta, alpha_o)
             hess = self.alpha_hess(X, y, eta, alpha_o)
             alpha_n = alpha_o - score / hess
+            jax.debug.print("new alpha: {x}", x=alpha_n)
             diff = alpha_n - alpha_o
 
             return diff.squeeze(), num_iter + 1, alpha_n.squeeze()

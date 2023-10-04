@@ -1,27 +1,36 @@
 #!/usr/bin/env python3
 import argparse as ap
 import logging
-import os
 import sys
-from importlib import metadata
 
 import numpy as np
+import pandas as pd
+import statsmodels.api as sm
+from jaxtyping import ArrayLike
 
+import jax.numpy as jnp
 from jax.config import config
 
-from jaxqtl.families.distribution import Poisson
+from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
+from jaxqtl.infer.utils import _setup_G_y
+from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
-from jaxqtl.io.readfile import create_readydata
+from jaxqtl.io.pheno import PheBedReader
+from jaxqtl.io.readfile import ReadyDataState, create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis, map_cis_nominal
-from jaxqtl.post import rfunc
-
-sys.path.insert(1, os.path.dirname(__file__))
+from jaxqtl.map import (
+    _get_geno_info,
+    map_cis,
+    map_cis_nominal,
+    map_cis_nominal_score,
+    map_cis_score,
+    map_fit_intercept_only,
+    write_parqet,
+)
 
 
 def get_logger(name, path=None):
-    """get logger for jaxqtl progress"""
+    """get logger for factorgo progress"""
     logger = logging.getLogger(name)
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
@@ -29,6 +38,7 @@ def get_logger(name, path=None):
         console = logging.StreamHandler()
         logger.addHandler(console)
 
+        # if need millisecond use : %(asctime)s.%(msecs)03d
         log_format = "[%(asctime)s - %(levelname)s] %(message)s"
         date_format = "%Y-%m-%d %H:%M:%S"
         formatter = logging.Formatter(fmt=log_format, datefmt=date_format)
@@ -43,229 +53,350 @@ def get_logger(name, path=None):
     return logger
 
 
-def run_map(args, log):
-    """Wrapper for run QTL mapping"""
-
-    # read data
-    dat = create_readydata(
-        args.geno,
-        args.pheno,
-        args.covar,
-        geno_reader=PlinkReader(),
-        pheno_reader=PheBedReader(),
+def cis_scan_score_sm(
+    X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0
+):
+    """
+    run GLM across variants in a flanking window of given gene
+    cis-widow: plus and minus W base pairs, total length 2*cis_window
+    """
+    # statsmodel result
+    sm_glm = sm.GLM(
+        np.array(y),
+        np.array(X),
+        family=sm.families.Poisson(),
+        offset=np.array(offset_eta).squeeze(),
     )
+    sm_res = sm_glm.fit()
 
-    # TODO: filter for certain chromosomes
+    chi2_vec = []
+    p_vec = []
 
-    log.info("Begin mapping")
-
-    if args.mode == "cis":
-        mapcis_df = map_cis(dat, family=Poisson())
-        qval, pi0 = rfunc.qvalue(
-            mapcis_df["pval_beta"], lambda_qvalue=args.qvalue_lambda
+    # print(sm_res.summary())
+    for snp in G.T:
+        chi2, sm_p, _ = sm_res.score_test(
+            params_constrained=sm_res.params, exog_extra=snp
         )
-        mapcis_df["qval"] = qval
-        mapcis_df.to_csv(
-            os.path.join(args.output_prefix, ".bed.gz"),
-            index=False,
-            sep="\t",
-        )
-    elif args.mode == "cis_nominal":
-        map_cis_nominal(dat, family=Poisson(), out_path=args.output_prefix)
+        chi2_vec.append(chi2)
+        p_vec.append(sm_p)
 
-    log.info("Finished mapping")
-
-    return 0
+    return chi2_vec, p_vec
 
 
-def run_format(args, log):
-    log.info("Read in raw count data")
-    pheno_reader = H5AD()
-    count_mat = pheno_reader(args.pheno)
+def map_cis_nominal_score_sm(
+    dat: ReadyDataState,
+    log=None,
+    append_intercept: bool = True,
+    standardize: bool = True,
+    window: int = 500000,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+):
+    """eQTL Mapping for all cis-SNP gene pairs
 
-    log.info("Filtering and creating pseudo bulk count data")
-    count_df = pheno_reader.process(count_mat, SingleCellFilter)
+    append_intercept: add a column of ones in front for intercepts in design matrix
+    standardize: on covariates
 
-    log.info("Splitting and writing in bed")
-    pheno_reader.write_bed(
-        count_df,
-        gtf_bed_path=args.gtf,
-        out_dir=args.output_prefix,
-        celltype_path=args.celltype,
+    Returns:
+        score test statistics and p value (no effect estimates)
+        write out parquet file by chrom for efficient data storage and retrieval
+    """
+
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar
+    n, k = X.shape
+
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    if standardize:
+        X = X / jnp.std(X, axis=0)
+
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    af = []
+    ma_count = []
+    Z = []
+    nominal_p = []
+    num_var_cis = []
+    gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
+    var_df_all = pd.DataFrame(
+        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
     )
 
-    log.info("Finished.")
-    return 0
+    for gene in gene_info:
+        gene_name, chrom, start_min, end_max = gene
+        lstart = max(0, start_min - window)
+        rend = end_max + window
+
+        # pull cis G and y for this gene
+        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+
+        # skip if no cis SNPs found
+        if G.shape[1] == 0:
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
+            continue
+
+        if verbose:
+            log.info(
+                "Performing cis-qtl scan (statsmodel) for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+
+        chi2, sm_p = cis_scan_score_sm(X, G, y, offset_eta)
+        g_info = _get_geno_info(G)
+
+        if verbose:
+            log.info(
+                "Finished cis-qtl scan (statsmodel) for %s over region %s:%s-%s",
+                gene_name,
+                str(chrom),
+                str(lstart),
+                str(rend),
+            )
+
+        var_df["phenotype_id"] = gene_name
+        var_df["tss"] = start_min
+        var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
+        gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
+
+        # combine results
+        af.append(g_info.af)
+        ma_count.append(g_info.ma_count)
+
+        nominal_p.append(sm_p)
+        Z.append(chi2)
+        num_var_cis.append(var_df.shape[0])
+
+    # write result
+    start_row = 0
+    end_row = 0
+    outdf = var_df_all
+    outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
+    outdf = outdf.drop(["cm"], axis=1)
+
+    # add additional columns
+    outdf["af"] = np.NaN
+    outdf["ma_count"] = np.NaN
+    outdf["pval_nominal"] = np.NaN
+    outdf["Z"] = np.NaN
+
+    for idx, _ in gene_mapped_list.iterrows():
+        end_row += num_var_cis[idx]
+        outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
+        outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
+        outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx]
+        outdf.loc[np.arange(start_row, end_row), "Z"] = Z[idx]
+        start_row = end_row
+
+    return outdf
 
 
-def create_format_parser(subparser):
-    subparser.add_argument("--pheno", type=str, help="Phenotypes in H5AD format")
-    subparser.add_argument("--gtf", type=str, help="gtf file for annotating gene TSS")
-    subparser.add_argument("--celltype", type=str, help="cell type list")
-    subparser.add_argument("--out", type=str, help="output directory")
-
-    return subparser
-
-
-def create_map_parser(subparser):
-    subparser.add_argument("geno", help="Genotypes file in PLINK format")
-    subparser.add_argument("pheno", help="Phenotype file in BED format")
-    subparser.add_argument(
-        "--mode",
-        default="cis",
-        choices=["cis", "cis_nominal", "cis_independent", "cis_susie", "trans"],
-        help="Mapping mode. Default: cis",
+def main(args):
+    argp = ap.ArgumentParser(description="")  # create an instance
+    argp.add_argument("-geno", type=str, help="Genotype prefix, eg. chr17")
+    argp.add_argument("-covar", type=str, help="Covariate path")
+    argp.add_argument("-pheno", type=str, help="Pheno path")
+    argp.add_argument(
+        "-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model"
     )
-    subparser.add_argument(
-        "--covar",
-        default=None,
-        help="Covariates file, tab-delimited, covariates x samples",
-    )
-    subparser.add_argument(
-        "--permutations",
-        type=int,
-        default=10000,
-        help="Number of permutations. Default: 10000",
-    )
-    subparser.add_argument(
-        "--chr",
-        default=None,
-        nargs="+",
+    argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
+    argp.add_argument(
+        "-mode",
         type=str,
-        help="Only mapping for some chromosomes",
+        choices=["nominal", "cis", "fitnull"],
+        help="Cis or nominal mapping",
     )
-    subparser.add_argument(
-        "--interaction", default=None, type=str, help="Interaction term(s)"
+    argp.add_argument(
+        "-test-method", type=str, choices=["wald", "score"], help="Wald or score test"
     )
-    subparser.add_argument(
-        "--cis_output",
-        default=None,
-        type=str,
-        help="Output from 'cis' mode with q-values. Required for independent cis-QTL mapping.",
-    )
-    subparser.add_argument(
-        "--phenotype_groups",
-        default=None,
-        type=str,
-        help="Phenotype groups. Header-less TSV with two columns: phenotype_id, group_id",
-    )
-    subparser.add_argument(
-        "--window",
-        default=500000,
-        type=np.int32,
-        help="Cis-window size (one side), in bases. Default: 500000.",
-    )
-    subparser.add_argument(
-        "--pval_threshold",
-        default=None,
-        type=np.float64,
-        help="Output only significant phenotype-variant pairs with a p-value below threshold. "
-        "Default: 1e-5 for trans-QTL",
-    )
-    subparser.add_argument(
-        "--maf_threshold",
-        default=0,
-        type=np.float64,
-        help="Include only genotypes with minor allele frequency >= maf_threshold. Default: 0",
-    )
-    subparser.add_argument(
-        "--maf_threshold_interaction",
-        default=0.05,
-        type=np.float64,
-        help="MAF threshold for interactions, applied to lower and upper half of samples",
-    )
-    subparser.add_argument(
-        "--dosages",
+    argp.add_argument("-window", type=int, default=500000)
+    argp.add_argument("-nperm", type=int, default=1000)
+    argp.add_argument("--perm-seed", type=int, default=1)
+    argp.add_argument(
+        "--robust",
         action="store_true",
-        help="Load dosages instead of genotypes (only applies to PLINK2 bgen input).",
+        default=False,
+        help="Robust SE",
     )
-    subparser.add_argument(
-        "--load_split",
+    argp.add_argument(
+        "--perm-count",
         action="store_true",
-        help="Load genotypes into memory separately for each chromosome.",
+        default=False,
+        help="Permute count for type I error calibration",
     )
-    subparser.add_argument(
-        "--disable_beta_approx",
+    argp.add_argument(
+        "--qvalue",
         action="store_true",
-        help="Disable Beta-distribution approximation of empirical p-values (not recommended).",
+        default=False,
+        help="Add q value",
     )
-    subparser.add_argument(
-        "--warn_monomorphic",
+    argp.add_argument(
+        "--statsmodel",
         action="store_true",
-        help="Warn if monomorphic variants are found.",
+        default=False,
+        help="Run statsmodel",
     )
-    subparser.add_argument(
-        "--fdr", default=0.05, type=np.float64, help="FDR for cis-QTLs"
-    )
-    subparser.add_argument(
-        "--qvalue_lambda",
-        default=None,
-        type=np.float64,
-        help="lambda parameter for pi0est in qvalue.",
-    )
-    subparser.add_argument(
-        "--seed", default=None, type=int, help="Seed for permutations."
-    )
-    subparser.add_argument(
-        "-o", "--output_prefix", default=".", help="Output directory"
-    )
-
-    return subparser
-
-
-def _main(argsv):
-    # top level parser
-    global_parser = ap.ArgumentParser(formatter_class=ap.ArgumentDefaultsHelpFormatter)
-    global_parser.add_argument(
-        "-v",
+    argp.add_argument(
         "--verbose",
         action="store_true",
         default=False,
-        help="If this is true, set logger to be debug mode if debug=True. Default=False",
+        help="Verbose for logger",
     )
+    argp.add_argument("-out", type=str, help="out file prefix")
 
-    subparsers = global_parser.add_subparsers(required=True)
+    args = argp.parse_args(args)  # a list a strings
 
-    # use different sub parsers for: 1) format input; 2) run_mapping; [3) finemap]
-    format_parser = subparsers.add_parser(
-        "format",
-        description="create bed files from data matrix format such as H5AD",
-        help="Subcommands: format input or run QTL mapping",
-    )
-    format_parser = create_format_parser(format_parser)
-    format_parser.set_defaults(func=run_format)
+    platform = "cpu"
+    config.update("jax_enable_x64", True)
+    config.update("jax_platform_name", platform)
 
-    map_parser = subparsers.add_parser(
-        "map",
-        description="run mapping (cis or trans)",
-        help="Subcommands: format input or run QTL mapping",
-    )
-    map_parser = create_map_parser(map_parser)
-    map_parser.set_defaults(func=run_map)
-
-    version = metadata.version("jaxQTL")
-
-    masthead = "===================================" + os.linesep
-    masthead += f"             jaxQTL v{version}             " + os.linesep
-    masthead += "===================================" + os.linesep
-
-    # parse arguments
-    args = global_parser.parse_args(argsv)
-
-    log = get_log()
+    log = get_logger(__name__, args.out)
     if args.verbose:
         log.setLevel(logging.DEBUG)
     else:
         log.setLevel(logging.INFO)
 
-    config.update("jax_enable_x64", True)
+    if args.model == "poisson":
+        family = Poisson()
+    elif args.model == "NB":
+        family = NegativeBinomial()
+    elif args.model == "gaussian":
+        family = Gaussian()
+    else:
+        log.info("Please choose either poisson or gaussian.")
 
-    args.func(args, log)
+    # raw genotype data and impute for genotype data
+    geno_reader = PlinkReader()
+    geno, bim, sample_info = geno_reader(args.geno)
+
+    pheno_reader = PheBedReader()
+    pheno = pheno_reader(args.pheno)
+
+    covar = covar_reader(args.covar)
+
+    genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
+
+    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
+
+    # before filter gene list, calculate library size and set offset
+    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+    offset_eta = jnp.log(total_libsize)
+
+    # filter genes with no expressions at all
+    dat.filter_gene(geneexpr_percent_cutoff=0.0)
+
+    # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
+    dat.add_covar_pheno_PC(k=2)
+
+    if isinstance(family, Gaussian):
+        dat.transform_y(mode="log1p")  # log1p
+        offset_eta = jnp.zeros(offset_eta.shape)
+
+    # filter gene list
+    dat.filter_gene(gene_list=genelist)
+
+    # permute gene expression for type I error calibration
+    if args.perm_count:
+        np.random.seed(args.perm_seed)
+        # assume one gene
+        perm_idx = np.random.permutation(np.arange(0, len(dat.pheno.count)))
+        dat.pheno.count.iloc[:, 0] = dat.pheno.count.iloc[:, 0][perm_idx]
+        offset_eta = offset_eta[perm_idx]
+
+    if dat.pheno_meta.gene_map.shape[0] < 1:
+        log.info("No gene exist.")
+        sys.exit()
+
+    if args.mode == "cis":
+        if args.test_method == "score":
+            outdf_cis_score = map_cis_score(
+                dat,
+                family=family,
+                standardize=True,
+                window=args.window,
+                offset_eta=offset_eta,
+                compute_qvalue=args.qvalue,
+                n_perm=args.nperm,
+                log=log,
+            )
+            outdf_cis_score.to_csv(
+                args.out + ".cis_score.tsv.gz", sep="\t", index=False
+            )
+        elif args.test_method == "wald":
+            outdf_cis_wald = map_cis(
+                dat,
+                family=family,
+                standardize=True,
+                window=args.window,
+                offset_eta=offset_eta,
+                compute_qvalue=args.qvalue,
+                robust_se=args.robust,
+                n_perm=args.nperm,
+                log=log,
+            )
+            outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
+
+    elif args.mode == "nominal":
+        if args.test_method == "score":
+            out_df = map_cis_nominal_score(
+                dat,
+                family=family,
+                standardize=True,
+                log=log,
+                window=args.window,
+                offset_eta=offset_eta,
+            )
+            write_parqet(outdf=out_df, method="score", out_path=args.out)
+        elif args.test_method == "wald":
+            out_df = map_cis_nominal(
+                dat,
+                family=family,
+                standardize=True,
+                log=log,
+                window=args.window,
+                offset_eta=offset_eta,
+                robust_se=args.robust,
+            )
+            write_parqet(outdf=out_df, method="wald", out_path=args.out)
+
+    elif args.mode == "fitnull":
+        mapcis_intercept_only_mu = map_fit_intercept_only(
+            dat, family=family, offset_eta=offset_eta
+        )
+        mapcis_intercept_only_mu.to_csv(
+            args.out + ".fit.resid.tsv.gz", sep="\t", index=False
+        )
+    else:
+        log.info("please select available methods.")
+        sys.exit()
+
+    if args.statsmodel:
+        out_df = map_cis_nominal_score_sm(
+            dat, standardize=True, log=log, window=args.window, offset_eta=offset_eta
+        )
+        write_parqet(outdf=out_df, method="sm_score", out_path=args.out)
+
+    return 0
 
 
 def run_cli():
-    return _main(sys.argv[1:])
+    return main(sys.argv[1:])
 
 
 if __name__ == "__main__":
-    sys.exit(_main(sys.argv[1:]))
+    sys.exit(main(sys.argv[1:]))
