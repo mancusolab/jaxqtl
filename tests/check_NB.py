@@ -16,7 +16,7 @@ pd.set_option("display.max_columns", 500)  # see cis output
 config.update("jax_enable_x64", True)
 
 chr = "3"
-indir = "../example/local/NK/"
+indir = "../example/data/NK/"
 geno_path = indir + "chr3"
 covar_path = indir + "donor_features.all.6PC.tsv"
 pheno_path = indir + "NK.bed.gz"

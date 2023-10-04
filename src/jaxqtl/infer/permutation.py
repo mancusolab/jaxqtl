@@ -63,19 +63,15 @@ class DirectPerm(Permutation):
     ) -> Array:
         def _func(key, x):
             key, p_key = rdm.split(key)
-            # y_p = rdm.permutation(p_key, y, axis=0)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = cis_scan(
                 X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se
             )
-            # allTS = jnp.abs(glmstate.beta / glmstate.se)
 
             # TODO: remove NA values before take min
             return key, glmstate.p.min()  # glmstate.p.min()
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        # key, TS = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
-        # pvals = pval_from_Zstat(TS, 1.0)
 
         return pvals  # , TS
 
