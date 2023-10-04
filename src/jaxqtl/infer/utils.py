@@ -140,7 +140,7 @@ def cis_scan_score(
     y: ArrayLike,
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
-    max_iter: int = 100,
+    max_iter: int = 500,
 ) -> CisGLMScoreState:
     """
     run GLM across variants in a flanking window of given gene

@@ -121,14 +121,12 @@ print("Time: ", stop - start)
 #     "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
 # )
 
-mapcis_out_score_pois = map_cis_nominal_score(
+out = map_cis_nominal_score(
     dat,
     family=NegativeBinomial(),
     offset_eta=offset_eta,  # , n_perm=1000, compute_qvalue=False
 )
-mapcis_out_score_pois.to_csv(
-    "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
-)
+out.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 
 # ~250s
