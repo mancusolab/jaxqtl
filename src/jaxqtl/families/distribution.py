@@ -285,7 +285,7 @@ class NegativeBinomial(ExponentialFamily):
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
         score, hess = self.alpha_score_and_hessian(X, y, eta, alpha)
-        alpha_n = jnp.maximum(alpha - step_size * (score / hess), 1e-6)
+        alpha_n = jnp.maximum(jnp.nan_to_num(alpha - step_size * (score / hess)), 1e-6)
 
         return alpha_n
 

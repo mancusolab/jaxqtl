@@ -38,12 +38,12 @@ class MapCisSingleState:
         if random_tiebreak:
             key, split_key = rdm.split(key)
             ties_ind = jnp.argwhere(
-                self.cisglm.p == self.cisglm.p.min()
+                self.cisglm.p == jnp.nanmin(self.cisglm.p)
             )  # return (k, 1)
             vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
         else:
             # take first occurrence
-            vdx = int(jnp.argmin(self.cisglm.p))
+            vdx = int(jnp.nanargmin(self.cisglm.p))
 
         beta_1, beta_2, beta_converged = self.beta_param
         result = [
@@ -76,12 +76,12 @@ class MapCisSingleScoreState:
         if random_tiebreak:
             key, split_key = rdm.split(key)
             ties_ind = jnp.argwhere(
-                self.cisglm.p == self.cisglm.p.min()
+                self.cisglm.p == jnp.nanmin(self.cisglm.p)
             )  # return (k, 1)
             vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
         else:
             # take first occurrence
-            vdx = int(jnp.argmin(self.cisglm.p))
+            vdx = int(jnp.nanargmin(self.cisglm.p))
 
         beta_1, beta_2, beta_converged = self.beta_param
         result = [
@@ -418,7 +418,7 @@ def map_cis_single(
         X,
         y,
         G,
-        jnp.min(cisglmstate.p),
+        jnp.nanmin(cisglmstate.p),
         family,
         beta_key,
         sig_level,
@@ -459,7 +459,7 @@ def map_cis_single_score(
     # call function directly...
     perm = BetaPermScore(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
-        X, y, G, jnp.min(cisglmstate.p), family, beta_key, sig_level, offset_eta, log
+        X, y, G, jnp.nanmin(cisglmstate.p), family, beta_key, sig_level, offset_eta, log
     )
 
     return MapCisSingleScoreState(

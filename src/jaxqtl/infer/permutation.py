@@ -68,8 +68,7 @@ class DirectPerm(Permutation):
                 X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se
             )
 
-            # TODO: remove NA values before take min
-            return key, glmstate.p.min()  # glmstate.p.min()
+            return key, jnp.nanmin(glmstate.p)
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
@@ -121,11 +120,7 @@ class DirectPermScore(PermutationScore):
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = cis_scan_score(X, G, y[perm_idx], family, offset_eta[perm_idx])
 
-            # TODO: remove NA values before take min
-            return (
-                key,
-                glmstate.p.min(),
-            )  # jnp.where(jnp.isnan(allp), jnp.inf, allp).min()
+            return (key, jnp.nanmin(glmstate.p))
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
@@ -211,7 +206,7 @@ def infer_beta(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param - stepsize * direction - 0.5 * stepsize ** 2 * adjustment
+        new_param = old_param - stepsize * direction - 0.5 * stepsize**2 * adjustment
 
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
@@ -240,7 +235,7 @@ def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
     k, n = params
 
     # TODO: sometimes give wrong values
-    p_adj = jaxstats.beta.cdf(jnp.min(p_obs), k, n)
+    p_adj = jaxstats.beta.cdf(jnp.nanmin(p_obs), k, n)
 
     return p_adj
 
