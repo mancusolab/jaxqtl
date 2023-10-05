@@ -217,7 +217,7 @@ def score_test_snp(
 
     g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
     w_g_resid = g_resid * sqrt_wgt
-    g_var = jnp.sum(w_g_resid ** 2, axis=0)
+    g_var = jnp.sum(w_g_resid**2, axis=0)
 
     Z = ((g_resid * glm_null_res.glm_wt).T @ y_resid) / jnp.sqrt(g_var)
 

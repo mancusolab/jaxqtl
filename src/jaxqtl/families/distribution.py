@@ -272,7 +272,7 @@ class NegativeBinomial(ExponentialFamily):
         _alpha_score = jax.grad(_ll)
         _alpha_hess = jax.grad(_alpha_score)
 
-        return _alpha_score(alpha), _alpha_hess(alpha)
+        return _alpha_score(alpha), _alpha_hess(alpha)  # .reshape((1,))
 
     def calc_dispersion(
         self,

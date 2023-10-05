@@ -57,7 +57,7 @@ outdf_cis_score = map_cis_score(
     standardize=True,
     offset_eta=offset_eta,
     compute_qvalue=False,
-    n_perm=0,
+    n_perm=1000,
     log=log,
 )
 
