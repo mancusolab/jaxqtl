@@ -87,8 +87,8 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
 def calculate_qval(
     p: np.ndarray,
     log,
-    pi0: float = None,
-    lam: np.ndarray = None,
+    pi0: Optional[float] = None,
+    lam: Optional[np.ndarray] = None,
     fdr_level: float = 0.05,
     lowmem=False,
 ) -> Tuple[np.ndarray, np.ndarray]:

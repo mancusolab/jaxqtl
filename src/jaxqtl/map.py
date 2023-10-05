@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import List, NamedTuple, Tuple
+from typing import List, NamedTuple, Optional, Tuple
 
 import numpy as np
 import pandas as pd
@@ -141,7 +141,7 @@ def map_cis(
     sig_level: float = 0.05,
     verbose: bool = True,
     fdr_level: float = 0.05,
-    pi0: float = None,
+    pi0: Optional[float] = None,
     qvalue_lambda: np.ndarray = None,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
@@ -264,8 +264,8 @@ def map_cis_score(
     sig_level: float = 0.05,
     verbose: bool = True,
     fdr_level: float = 0.05,
-    pi0: float = None,
-    qvalue_lambda: np.ndarray = None,
+    pi0: Optional[float] = None,
+    qvalue_lambda: Optional[np.ndarray] = None,
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
     compute_qvalue: bool = True,

@@ -26,16 +26,16 @@ def irls(
     eta: ArrayLike,
     max_iter: int = 1000,
     tol: float = 1e-3,
-    stepsize: float = 1.0,
+    step_size: float = 1.0,
     offset_eta: ArrayLike = 0.0,
     alpha_init: ArrayLike = 0.0,
 ) -> IRLSState:
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o, alpha_o = val
         # TODO: estimate alpha
-        beta = solver(X, y, eta_o, family, stepsize, offset_eta, alpha_o)
+        beta = solver(X, y, eta_o, family, step_size, offset_eta, alpha_o)
         eta_n = X @ beta + offset_eta
-        alpha_n = family.calc_dispersion(X, y, eta_n, alpha_init)
+        alpha_n = family.calc_dispersion(X, y, eta_n, alpha_init, step_size)
 
         likelihood_o = family.negloglikelihood(X, y, eta_o, alpha_o)
         likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)

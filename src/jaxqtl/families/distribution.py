@@ -1,14 +1,13 @@
 from abc import ABCMeta, abstractmethod
-from typing import List, Tuple
+from typing import List, Tuple, Type
 
 import equinox as eqx
 import numpy as np
-from typing_extensions import Self
 
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array, lax
+from jax import Array
 from jax.config import config
 from jax.scipy.special import gammaln, xlog1py, xlogy
 from jax.typing import ArrayLike
@@ -32,7 +31,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
     """
 
     glink: Link
-    _links: List[Self]  # type: ignore
+    _links: List[Type[Link]]
 
     def __init__(self, glink: Link):
         if not any([isinstance(glink, link) for link in self._links]):
@@ -81,7 +80,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.scale(X, y, mu_k)
         # weight_k = self._hlink_score(eta, alpha) / (g_deriv_k * phi)
-        weight_k = 1 / (phi * self.variance(mu_k, alpha) * g_deriv_k ** 2)
+        weight_k = 1 / (phi * self.variance(mu_k, alpha) * g_deriv_k**2)
         return mu_k, g_deriv_k, weight_k
 
     def init_eta(self, y: ArrayLike) -> Array:
@@ -92,9 +91,8 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.0,
-        tol=1e-3,
-        max_iter=1000,
+        alpha: ArrayLike = 0.01,
+        step_size: ArrayLike = 1.0,
     ) -> Array:
         return jnp.zeros((1,))
 
@@ -190,7 +188,7 @@ class Binomial(ExponentialFamily):
         return -logprob
 
     def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
-        return mu - mu ** 2
+        return mu - mu**2
 
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + 0.5) / 2)
@@ -263,25 +261,18 @@ class NegativeBinomial(ExponentialFamily):
         return -jnp.sum(term1 + term2)
 
     def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
-        return mu + alpha * (mu ** 2)
+        return mu + alpha * (mu**2)
 
-    def alpha_score(
+    def alpha_score_and_hessian(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
-    ) -> Array:
+    ) -> Tuple[Array, Array]:
         def _ll(alpha):
             return self.negloglikelihood(X, y, eta, alpha)
 
         _alpha_score = jax.grad(_ll)
-        return _alpha_score(alpha)
+        _alpha_hess = jax.grad(_alpha_score)
 
-    def alpha_hess(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
-    ) -> Array:
-        def _ll(alpha):
-            return self.negloglikelihood(X, y, eta, alpha)
-
-        _alpha_hess = jax.hessian(_ll)
-        return _alpha_hess(alpha).reshape((1,))
+        return _alpha_score(alpha), _alpha_hess(alpha)
 
     def calc_dispersion(
         self,
@@ -289,52 +280,14 @@ class NegativeBinomial(ExponentialFamily):
         y: ArrayLike,
         eta: ArrayLike,
         alpha: ArrayLike = 0.01,
-        tol=1e-3,
-        max_iter=1000,
+        step_size: ArrayLike = 1.0,
     ) -> Array:
-        def body_fun(val: Tuple):
-            diff, num_iter, alpha_o = val
-            score = self.alpha_score(X, y, eta, alpha_o)
-            hess = self.alpha_hess(X, y, eta, alpha_o)
-            alpha_n = alpha_o - score / hess
-            jax.debug.print("new alpha: {x}", x=alpha_n)
-            diff = alpha_n - alpha_o
+        # TODO: update alpha such that it is lower bounded by 1e-6
+        #   should have either parameter or smarter update on Manifold
+        score, hess = self.alpha_score_and_hessian(X, y, eta, alpha)
+        alpha_n = jnp.maximum(alpha - step_size * (score / hess), 1e-6)
 
-            return diff.squeeze(), num_iter + 1, alpha_n.squeeze()
-
-        def cond_fun(val: Tuple):
-            diff, num_iter, alpha_o = val
-            cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
-            return cond_l
-
-        init_tuple = (10000.0, 0, alpha)
-        diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
-
-        return alpha
-
-    # # for debug
-    # def calc_dispersion(
-    #     self,
-    #     X: ArrayLike,
-    #     y: ArrayLike,
-    #     eta: ArrayLike,
-    #     alpha: ArrayLike = 0.01,
-    #     tol=1e-3,
-    #     max_iter=1000,
-    # ) -> Array:
-    #     diff = jnp.inf
-    #     num_iter = 0
-    #     alpha_o = alpha
-    #
-    #     while jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter):
-    #         score = self.alpha_score(X, y, eta, alpha_o)
-    #         hess = self.alpha_hess(X, y, eta, alpha_o)
-    #         alpha_n = alpha_o - score / hess
-    #         diff = alpha_n - alpha_o
-    #         alpha_o = alpha_n
-    #         num_iter += 1
-    #
-    #     return alpha_o
+        return alpha_n
 
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n
