@@ -280,7 +280,7 @@ class NegativeBinomial(ExponentialFamily):
         y: ArrayLike,
         eta: ArrayLike,
         alpha: ArrayLike = 0.01,
-        step_size: ArrayLike = 1.0,
+        step_size: ArrayLike = 0.1,
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
