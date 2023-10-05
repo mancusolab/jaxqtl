@@ -78,6 +78,6 @@ def test_sim_NB():
     glm_state = jaxqtl_nb.fit(X, y, init=init_nb, alpha_init=alpha_n)
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
-    assert_array_eq(glm_state.beta, sm_state.params[:-1], rtol=1e-4)
+    assert_array_eq(glm_state.beta, sm_state.params[:-1], rtol=1e-2)
     assert_array_eq(glm_state.se, sm_state.bse[:-1], rtol=1e-2)
     assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-2)

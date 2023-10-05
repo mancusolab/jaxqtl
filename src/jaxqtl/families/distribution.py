@@ -263,16 +263,16 @@ class NegativeBinomial(ExponentialFamily):
     def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return mu + alpha * (mu**2)
 
-    def alpha_score_and_hessian(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
+    def log_alpha_score_and_hessian(
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ArrayLike
     ) -> Tuple[Array, Array]:
-        def _ll(alpha):
-            return self.negloglikelihood(X, y, eta, alpha)
+        def _ll(log_alpha_):
+            alpha_ = jnp.exp(log_alpha_)
+            return self.negloglikelihood(X, y, eta, alpha_)
 
         _alpha_score = jax.grad(_ll)
         _alpha_hess = jax.grad(_alpha_score)
-
-        return _alpha_score(alpha), _alpha_hess(alpha)  # .reshape((1,))
+        return _alpha_score(log_alpha), _alpha_hess(log_alpha)  # .reshape((1,))
 
     def calc_dispersion(
         self,
@@ -284,10 +284,14 @@ class NegativeBinomial(ExponentialFamily):
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
-        score, hess = self.alpha_score_and_hessian(X, y, eta, alpha)
-        alpha_n = jnp.maximum(jnp.nan_to_num(alpha - step_size * (score / hess)), 1e-6)
+        log_alpha = jnp.log(alpha)
+        score, hess = self.log_alpha_score_and_hessian(X, y, eta, log_alpha)
+        log_alpha_n = jnp.minimum(
+            jnp.maximum(log_alpha - step_size * (score / hess), jnp.log(1e-8)),
+            jnp.log(1e10),
+        )
 
-        return alpha_n
+        return jnp.exp(log_alpha_n)
 
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n

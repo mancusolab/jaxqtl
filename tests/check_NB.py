@@ -21,8 +21,8 @@ indir = "../example/local/NK/"
 geno_path = indir + "chr3"
 covar_path = indir + "donor_features.all.6PC.tsv"
 pheno_path = indir + "NK.bed.gz"
-genelist_path = indir + "chr3_ENSG00000268279_lowcount"
-out = indir + "chr3_ENSG00000268279_lowcount"
+genelist_path = indir + "chr3_ENSG00000177463"
+out = indir + "chr3_ENSG00000177463"
 
 log = get_log()
 
