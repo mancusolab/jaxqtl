@@ -66,7 +66,7 @@ def test_sim_NB():
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
 
     nb_fam = family
-    alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta)
+    alpha_n = nb_fam.update_dispersion(X, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),

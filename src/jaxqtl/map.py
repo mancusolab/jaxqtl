@@ -8,7 +8,7 @@ import jax.random as rdm
 from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
-from jaxqtl.families.distribution import ExponentialFamily
+from jaxqtl.families.distribution import ExponentialFamily, NegativeBinomial
 
 # from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.permutation import BetaPerm, BetaPermScore
@@ -18,6 +18,7 @@ from jaxqtl.infer.utils import (
     _setup_G_y,
     cis_scan,
     cis_scan_intercept_only,
+    cis_scan_NB,
     cis_scan_score,
 )
 from jaxqtl.io.readfile import ReadyDataState
@@ -511,6 +512,7 @@ def map_cis_nominal(
     nominal_p = []
     converged = []
     num_var_cis = []
+    alpha = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(
         columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
@@ -545,7 +547,10 @@ def map_cis_nominal(
                 str(rend),
             )
 
-        result = cis_scan(X, G, y, family, offset_eta, robust_se)
+        if isinstance(family, NegativeBinomial):
+            result = cis_scan_NB(X, G, y, family, offset_eta, robust_se)
+        else:
+            result = cis_scan(X, G, y, family, offset_eta, robust_se)
         g_info = _get_geno_info(G)
         if verbose:
             log.info(
@@ -570,6 +575,7 @@ def map_cis_nominal(
         nominal_p.append(result.p)
         converged.append(result.converged)
         num_var_cis.append(var_df.shape[0])
+        alpha.append(result.alpha)
 
     # write result
     start_row = 0
@@ -585,6 +591,7 @@ def map_cis_nominal(
     outdf["slope"] = np.NaN
     outdf["slope_se"] = np.NaN
     outdf["converged"] = np.NaN
+    outdf["alpha"] = np.NaN
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
@@ -594,6 +601,7 @@ def map_cis_nominal(
         outdf.loc[np.arange(start_row, end_row), "slope"] = slope[idx]
         outdf.loc[np.arange(start_row, end_row), "slope_se"] = slope_se[idx]
         outdf.loc[np.arange(start_row, end_row), "converged"] = converged[idx]
+        outdf.loc[np.arange(start_row, end_row), "alpha"] = alpha[idx]
         start_row = end_row
 
     return outdf

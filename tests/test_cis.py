@@ -121,11 +121,7 @@ print("Time: ", stop - start)
 #     "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
 # )
 
-out = map_cis_nominal_score(
-    dat,
-    family=NegativeBinomial(),
-    offset_eta=offset_eta,  # , n_perm=1000, compute_qvalue=False
-)
+out = map_cis_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta)
 out.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 

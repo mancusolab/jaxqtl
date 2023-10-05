@@ -91,7 +91,6 @@ def run_sim(
     true_beta: float = 0.0,
     sim_family: ExponentialFamily = NegativeBinomial(),
 ) -> SimResState:
-
     np.random.seed(seed)
     sim = SimData(n, sim_family)
 
@@ -117,7 +116,7 @@ def run_sim(
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=False)
 
         nb_fam = NegativeBinomial()
-        alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta)
+        alpha_n = nb_fam.update_dispersion(X, y, glm_state_pois.eta)
 
         jaxqtl_nb = GLM(family=nb_fam)
         init_nb = nb_fam.init_eta(y)
@@ -155,7 +154,7 @@ def run_sim(
 
         pval_pois_score = np.append(pval_pois_score, pval)
 
-        alpha_n = nb_fam.calc_dispersion(X_cov, y, glm_null_pois.eta)
+        alpha_n = nb_fam.update_dispersion(X_cov, y, glm_null_pois.eta)
         glm_state_nb = jaxqtl_nb.fit(X_cov, y, init=init_nb, alpha_init=alpha_n)
         _, pval = score_test_snp(
             G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb

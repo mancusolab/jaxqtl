@@ -30,7 +30,6 @@ stepsize = 1.0
 
 
 def test_linear_regression_cho():
-
     # test linear regression function
     mod = sm.OLS(spector_data.endog, spector_data.exog)
     sm_state = mod.fit()
@@ -211,7 +210,7 @@ def test_robust_SE():
         M, y, init=init_pois, offset_eta=library_size, robust_se=True
     )
 
-    assert_array_eq(glmstate.se ** 2, jnp.diag(white_cov))
+    assert_array_eq(glmstate.se**2, jnp.diag(white_cov))
 
 
 def test_NB():
@@ -241,7 +240,7 @@ def test_NB():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
+    alpha_n = nb_fam.update_dispersion(M, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -289,7 +288,7 @@ def test_NB_robust():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta)
+    alpha_n = nb_fam.update_dispersion(M, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -308,7 +307,7 @@ def test_NB_robust():
         robust_se=True,
     )
 
-    assert_array_eq(glm_state_robust.se ** 2, jnp.diag(white_cov)[:-1], rtol=1e-3)
+    assert_array_eq(glm_state_robust.se**2, jnp.diag(white_cov)[:-1], rtol=1e-3)
 
 
 def test_poisson_scoretest():
@@ -437,7 +436,7 @@ def test_nb_scoretest():
     glm_state_pois = jaxqtl_pois.fit(M_cov, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.calc_dispersion(M_cov, y, glm_state_pois.eta)
+    alpha_n = nb_fam.update_dispersion(M_cov, y, glm_state_pois.eta)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),

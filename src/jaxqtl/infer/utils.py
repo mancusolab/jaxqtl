@@ -23,6 +23,7 @@ class CisGLMState(NamedTuple):
     p: Array
     num_iters: Array
     converged: Array
+    alpha: Array
 
 
 class CisGLMScoreState(NamedTuple):
@@ -91,13 +92,13 @@ def cis_scan(
     family: ExponentialFamily,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
-    maxiter: int = 100,
+    max_iter: int = 100,
 ) -> CisGLMState:
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     """
-    glm = GLM(family=family, max_iter=maxiter)
+    glm = GLM(family=family, max_iter=max_iter)
 
     # initiate SNP scan with model with covariate
     glmstate_cov_only = glm.fit(
@@ -126,6 +127,62 @@ def cis_scan(
             p=glmstate.p[-1],
             num_iters=glmstate.num_iters,
             converged=glmstate.converged,
+            alpha=jnp.zeros((1,)),
+        )
+
+    _, state = lax.scan(_func, 0.0, G.T)
+
+    return state
+
+
+@eqx.filter_jit
+def cis_scan_NB(
+    X: ArrayLike,
+    G: ArrayLike,
+    y: ArrayLike,
+    family: ExponentialFamily,
+    offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
+    max_iter: int = 100,
+) -> CisGLMState:
+    """
+    run GLM across variants in a flanking window of given gene
+    cis-widow: plus and minus W base pairs, total length 2*cis_window
+    """
+    glm = GLM(family=family, max_iter=max_iter)
+
+    def _func(carry, snp):
+        M = jnp.hstack((X, snp[:, jnp.newaxis]))
+
+        init_val = family.init_eta(y)
+
+        jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
+        glm_state_pois = jaxqtl_pois.fit(M, y, init=init_val, offset_eta=offset_eta)
+
+        alpha_init = family.update_dispersion(M, y, glm_state_pois.eta)
+
+        glmstate = glm.fit(
+            M,
+            y,
+            offset_eta=offset_eta,
+            robust_se=robust_se,
+            init=init_val,
+            alpha_init=alpha_init,
+        )
+
+        af = jnp.mean(snp) / 2.0
+        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
+        ma_count = jnp.sum(snp)  # Number of minor alleles
+
+        return carry, CisGLMState(
+            af=af,
+            ma_count=ma_count,
+            beta=glmstate.beta[-1],
+            se=glmstate.se[-1],
+            p=glmstate.p[-1],
+            num_iters=glmstate.num_iters,
+            converged=glmstate.converged,
+            alpha=glmstate.alpha,
         )
 
     _, state = lax.scan(_func, 0.0, G.T)
@@ -148,13 +205,13 @@ def cis_scan_score(
     """
     glm = GLM(family=family, max_iter=max_iter)
 
-    init_val = glm.family.init_eta(y)
+    init_val = family.init_eta(y)
 
     jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
 
     # fit covariate-only model (null)
-    alpha_init = family.calc_dispersion(X, y, glm_state_pois.eta)
+    alpha_init = family.update_dispersion(X, y, glm_state_pois.eta)
 
     glmstate_cov_only = glm.fit(
         X, y, offset_eta=offset_eta, init=init_val, alpha_init=alpha_init

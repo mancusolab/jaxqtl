@@ -86,7 +86,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + y.mean()) / 2)
 
-    def calc_dispersion(
+    def update_dispersion(
         self,
         X: ArrayLike,
         y: ArrayLike,
@@ -266,6 +266,10 @@ class NegativeBinomial(ExponentialFamily):
     def log_alpha_score_and_hessian(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ArrayLike
     ) -> Tuple[Array, Array]:
+        """
+        internally take exponential such as to take derivative wrt 1/alpha
+        """
+
         def _ll(log_alpha_):
             alpha_ = jnp.exp(log_alpha_)
             return self.negloglikelihood(X, y, eta, alpha_)
@@ -274,7 +278,7 @@ class NegativeBinomial(ExponentialFamily):
         _alpha_hess = jax.grad(_alpha_score)
         return _alpha_score(log_alpha), _alpha_hess(log_alpha)  # .reshape((1,))
 
-    def calc_dispersion(
+    def update_dispersion(
         self,
         X: ArrayLike,
         y: ArrayLike,
