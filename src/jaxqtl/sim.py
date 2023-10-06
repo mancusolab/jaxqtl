@@ -110,7 +110,7 @@ def run_sim(
 
     for i in range(num_sim):
         X, y, beta = sim.gen_data(
-            alpha=alpha, maf=maf, model=model, scale=scale, true_beta=true_beta
+            alpha=alpha, maf=maf, model=model, scale=scale, true_beta=true_beta, seed=i
         )
 
         # fit poisson or negative binomial
@@ -119,7 +119,10 @@ def run_sim(
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=False)
 
         nb_fam = NegativeBinomial()
-        alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta)
+        alpha_init = len(y) / jnp.sum(
+            (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
+        )
+        alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
         jaxqtl_nb = GLM(family=nb_fam)
         init_nb = nb_fam.init_eta(y)
@@ -157,7 +160,11 @@ def run_sim(
 
         pval_pois_score = np.append(pval_pois_score, pval)
 
-        alpha_n = nb_fam.update_dispersion(X_cov, y, glm_null_pois.eta)
+        alpha_init = len(y) / jnp.sum(
+            (y / nb_fam.glink.inverse(glm_null_pois.eta) - 1) ** 2
+        )
+        alpha_n = nb_fam.calc_dispersion(X_cov, y, glm_null_pois.eta, alpha=alpha_init)
+
         glm_state_nb = jaxqtl_nb.fit(X_cov, y, init=init_nb, alpha_init=alpha_n)
         _, pval = score_test_snp(
             G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb
