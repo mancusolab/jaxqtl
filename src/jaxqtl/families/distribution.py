@@ -7,7 +7,7 @@ import numpy as np
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array
+from jax import Array, lax
 from jax.config import config
 from jax.scipy.special import gammaln, xlog1py, xlogy
 from jax.typing import ArrayLike
@@ -93,6 +93,18 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         eta: ArrayLike,
         alpha: ArrayLike = 0.01,
         step_size: ArrayLike = 1.0,
+    ) -> Array:
+        return jnp.zeros((1,))
+
+    def calc_dispersion(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = 0.01,
+        step_size=1.0,
+        tol=1e-3,
+        max_iter=1000,
     ) -> Array:
         return jnp.zeros((1,))
 
@@ -263,6 +275,20 @@ class NegativeBinomial(ExponentialFamily):
     def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
         return mu + alpha * (mu**2)
 
+    def alpha_score_and_hessian(
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
+    ) -> Tuple[Array, Array]:
+        """
+        internally take exponential such as to take derivative wrt 1/alpha
+        """
+
+        def _ll(alpha):
+            return self.negloglikelihood(X, y, eta, alpha)
+
+        _alpha_score = jax.grad(_ll)
+        _alpha_hess = jax.hessian(_ll)
+        return _alpha_score(alpha), _alpha_hess(alpha)  # .reshape((1,))
+
     def log_alpha_score_and_hessian(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ArrayLike
     ) -> Tuple[Array, Array]:
@@ -275,7 +301,8 @@ class NegativeBinomial(ExponentialFamily):
             return self.negloglikelihood(X, y, eta, alpha_)
 
         _alpha_score = jax.grad(_ll)
-        _alpha_hess = jax.grad(_alpha_score)
+        _alpha_hess = jax.hessian(_ll)
+
         return _alpha_score(log_alpha), _alpha_hess(log_alpha)  # .reshape((1,))
 
     def update_dispersion(
@@ -283,7 +310,7 @@ class NegativeBinomial(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.01,
+        alpha: ArrayLike = 0.1,
         step_size: ArrayLike = 0.1,
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
@@ -296,6 +323,53 @@ class NegativeBinomial(ExponentialFamily):
         )
 
         return jnp.exp(log_alpha_n)
+
+        # score, hess = self.alpha_score_and_hessian(X, y, eta, alpha)
+        # alpha_n = jnp.minimum(
+        #     jnp.maximum(alpha - step_size * (score / hess), 1e-8),
+        #     1e10,
+        # )
+        #
+        # return alpha_n
+
+    def calc_dispersion(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        eta: ArrayLike,
+        alpha: ArrayLike = 0.1,
+        step_size=1.0,
+        tol=1e-3,
+        max_iter=1000,
+    ) -> Array:
+        def body_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
+            log_alpha_o = jnp.log(alpha_o)
+            score, hess = self.log_alpha_score_and_hessian(X, y, eta, log_alpha_o)
+            log_alpha_n = jnp.minimum(
+                jnp.maximum(log_alpha_o - step_size * (score / hess), jnp.log(1e-8)),
+                jnp.log(1e10),
+            )
+            diff = jnp.exp(log_alpha_n) - jnp.exp(log_alpha_o)
+
+            # old
+            # score, hess = self.alpha_score_and_hessian(X, y, eta, alpha_o)
+            # alpha_n = alpha_o - step_size * score / hess
+            # # alpha_n = jnp.minimum(alpha_o - step_size * score / hess, 1e-8)
+            # # jax.debug.print("new alpha: {x}", x=alpha_n)
+            # diff = alpha_n - alpha_o
+
+            return diff.squeeze(), num_iter + 1, jnp.exp(log_alpha_n).squeeze()
+
+        def cond_fun(val: Tuple):
+            diff, num_iter, alpha_o = val
+            cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+            return cond_l
+
+        init_tuple = (10000.0, 0, alpha)
+        diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
+
+        return alpha
 
     def _set_alpha(self, alpha_n):
         self.alpha = alpha_n

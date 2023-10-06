@@ -47,6 +47,7 @@ class SimData:
         maf: float = 0.3,
         model: str = "alt",
         true_beta: float = 0.0,
+        seed: int = 1,
     ) -> SimState:
         n = self.nobs
         p = self.pfeatures
@@ -54,6 +55,8 @@ class SimData:
         beta_shape = (p, 1)
 
         X = np.zeros(X_shape)
+
+        np.random.seed(seed)
 
         X[:, 0] = np.ones((n,))  # intercept
         age = np.random.normal(40, 4, (n,))
@@ -116,7 +119,7 @@ def run_sim(
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=False)
 
         nb_fam = NegativeBinomial()
-        alpha_n = nb_fam.update_dispersion(X, y, glm_state_pois.eta)
+        alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta)
 
         jaxqtl_nb = GLM(family=nb_fam)
         init_nb = nb_fam.init_eta(y)

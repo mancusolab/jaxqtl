@@ -32,10 +32,10 @@ def irls(
 ) -> IRLSState:
     def body_fun(val: Tuple):
         diff, num_iter, beta_o, eta_o, alpha_o = val
-        # TODO: estimate alpha
+
         beta = solver(X, y, eta_o, family, step_size, offset_eta, alpha_o)
         eta_n = X @ beta + offset_eta
-        alpha_n = family.update_dispersion(X, y, eta_n, alpha_o, step_size)
+        alpha_n = family.calc_dispersion(X, y, eta_n, alpha_o, step_size)
 
         likelihood_o = family.negloglikelihood(X, y, eta_o, alpha_o)
         likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)

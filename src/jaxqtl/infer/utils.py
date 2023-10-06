@@ -211,10 +211,13 @@ def cis_scan_score(
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
 
     # fit covariate-only model (null)
-    alpha_init = family.update_dispersion(X, y, glm_state_pois.eta)
+    alpha_init = len(y) / jnp.sum(
+        (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
+    )
+    alpha_n = family.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
     glmstate_cov_only = glm.fit(
-        X, y, offset_eta=offset_eta, init=init_val, alpha_init=alpha_init
+        X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n
     )
 
     Z, pval = score_test_snp(G, X, glmstate_cov_only)

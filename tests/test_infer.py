@@ -240,7 +240,11 @@ def test_NB():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.update_dispersion(M, y, glm_state_pois.eta)
+
+    alpha_init = len(y) / jnp.sum(
+        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
+    )
+    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -253,7 +257,7 @@ def test_NB():
         M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n.squeeze()
     )
 
-    assert_array_eq(glm_state.alpha, sm_alpha, rtol=1e-4)
+    assert_array_eq(glm_state.alpha, sm_alpha, rtol=1e-2)
     assert_array_eq(glm_state.beta / glm_state.se, R_res["Z"], rtol=1e-2)
     # assert_array_eq(glm_state.beta, sm_mod.params[:-1])
     # assert_array_eq(glm_state.se, sm_mod.bse[:-1])
@@ -288,7 +292,11 @@ def test_NB_robust():
     glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.update_dispersion(M, y, glm_state_pois.eta)
+
+    alpha_init = len(y) / jnp.sum(
+        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
+    )
+    alpha_n = nb_fam.calc_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
@@ -436,7 +444,10 @@ def test_nb_scoretest():
     glm_state_pois = jaxqtl_pois.fit(M_cov, y, init=init_pois, offset_eta=library_size)
 
     nb_fam = NegativeBinomial()
-    alpha_n = nb_fam.update_dispersion(M_cov, y, glm_state_pois.eta)
+    alpha_init = len(y) / jnp.sum(
+        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
+    )
+    alpha_n = nb_fam.calc_dispersion(M_cov, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),

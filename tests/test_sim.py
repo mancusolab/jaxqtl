@@ -5,11 +5,12 @@ from statsmodels.discrete.discrete_model import (
 )
 from utils import assert_array_eq
 
+import jax.numpy as jnp
 from jax.config import config
 
 from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import CholeskySolve, QRSolve
+from jaxqtl.infer.solve import CholeskySolve
 from jaxqtl.sim import SimData
 
 config.update("jax_enable_x64", True)
@@ -19,13 +20,12 @@ max_iter = 100
 
 
 def test_sim_poisson():
-    np.random.seed(1)
-
+    seed = 1
     n = 1000
     family = Poisson()
 
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=0.0, maf=0.3, model="alt", true_beta=0.1)
+    X, y, beta = sim.gen_data(alpha=0.0, maf=0.3, model="alt", true_beta=0.1, seed=seed)
 
     # no intercept
     mod = smPoisson(np.array(y), np.array(X))
@@ -45,13 +45,15 @@ def test_sim_poisson():
 
 
 def test_sim_NB():
+    seed = 1
     n = 1000
-    true_alpha = 0.01
+    true_alpha = 0.1
     family = NegativeBinomial()
 
-    np.random.seed(1)
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.3, model="alt", true_beta=0.1)
+    X, y, beta = sim.gen_data(
+        alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed
+    )
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
@@ -66,18 +68,24 @@ def test_sim_NB():
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
 
     nb_fam = family
-    alpha_n = nb_fam.update_dispersion(X, y, glm_state_pois.eta)
+    alpha_init = len(y) / jnp.sum(
+        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
+    )
+    alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
         max_iter=max_iter,
-        solver=QRSolve(),
+        solver=CholeskySolve(),
         step_size=step_size,
     )
     init_nb = jaxqtl_nb.family.init_eta(y)
     glm_state = jaxqtl_nb.fit(X, y, init=init_nb, alpha_init=alpha_n)
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
+    print(f"jaxqtl beta: {glm_state.beta}")
+    print(f"statsmodel params: {sm_state.params}")
+    assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
+    assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-3)
     assert_array_eq(glm_state.beta, sm_state.params[:-1], rtol=1e-2)
     assert_array_eq(glm_state.se, sm_state.bse[:-1], rtol=1e-2)
-    assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-2)
