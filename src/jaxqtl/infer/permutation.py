@@ -272,26 +272,6 @@ class BetaPerm(DirectPerm):
         )
         p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
-        ####
-        # TODO: calculate true df and adjust every p_perm accordingly
-        # https://github.com/google/jaxopt/blob/main/jaxopt/_src/scipy_wrappers.py  #  Nelder-Mead
-        # res = scipy.optimize.minimize(lambda x: np.abs(df_cost(TS, x)), dof_init, method='Nelder-Mead', tol=tol)
-        # dof_init = 1.0
-        # opt = jaxopt.ScipyMinimize(
-        #     fun=lambda x: jnp.abs(df_cost(TS, x)),
-        #     method="Newton-CG",
-        #     tol=1e-3,
-        #     maxiter=100,
-        # )
-        # opt_res = opt.run(init_params=dof_init)
-        #
-        # if opt_res.state.success:
-        #     true_dof = opt_res.params
-        #     p_perm = pval_from_Zstat(TS, true_dof)
-        # else:
-        #     true_dof = dof_init
-        #####
-
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)

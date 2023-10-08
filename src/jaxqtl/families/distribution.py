@@ -311,7 +311,7 @@ class NegativeBinomial(ExponentialFamily):
         y: ArrayLike,
         eta: ArrayLike,
         alpha: ArrayLike = 0.1,
-        step_size: ArrayLike = 0.1,
+        step_size: ArrayLike = 1.0,
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
@@ -323,14 +323,6 @@ class NegativeBinomial(ExponentialFamily):
         )
 
         return jnp.exp(log_alpha_n)
-
-        # score, hess = self.alpha_score_and_hessian(X, y, eta, alpha)
-        # alpha_n = jnp.minimum(
-        #     jnp.maximum(alpha - step_size * (score / hess), 1e-8),
-        #     1e10,
-        # )
-        #
-        # return alpha_n
 
     def calc_dispersion(
         self,
@@ -351,13 +343,6 @@ class NegativeBinomial(ExponentialFamily):
                 jnp.log(1e10),
             )
             diff = jnp.exp(log_alpha_n) - jnp.exp(log_alpha_o)
-
-            # old
-            # score, hess = self.alpha_score_and_hessian(X, y, eta, alpha_o)
-            # alpha_n = alpha_o - step_size * score / hess
-            # # alpha_n = jnp.minimum(alpha_o - step_size * score / hess, 1e-8)
-            # # jax.debug.print("new alpha: {x}", x=alpha_n)
-            # diff = alpha_n - alpha_o
 
             return diff.squeeze(), num_iter + 1, jnp.exp(log_alpha_n).squeeze()
 

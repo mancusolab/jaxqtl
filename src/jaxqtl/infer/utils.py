@@ -159,7 +159,10 @@ def cis_scan_NB(
         jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
         glm_state_pois = jaxqtl_pois.fit(M, y, init=init_val, offset_eta=offset_eta)
 
-        alpha_init = family.update_dispersion(M, y, glm_state_pois.eta)
+        alpha_init = len(y) / jnp.sum(
+            (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
+        )
+        alpha_n = family.calc_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
 
         glmstate = glm.fit(
             M,
@@ -167,7 +170,7 @@ def cis_scan_NB(
             offset_eta=offset_eta,
             robust_se=robust_se,
             init=init_val,
-            alpha_init=alpha_init,
+            alpha_init=alpha_n,
         )
 
         af = jnp.mean(snp) / 2.0

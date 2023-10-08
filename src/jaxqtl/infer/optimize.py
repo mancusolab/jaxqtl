@@ -36,6 +36,8 @@ def irls(
         beta = solver(X, y, eta_o, family, step_size, offset_eta, alpha_o)
         eta_n = X @ beta + offset_eta
         alpha_n = family.calc_dispersion(X, y, eta_n, alpha_o, step_size)
+        # TODO: check if update once change anything
+        # alpha_n = family.update_dispersion(X, y, eta_n, alpha_o, step_size)
 
         likelihood_o = family.negloglikelihood(X, y, eta_o, alpha_o)
         likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)
@@ -55,47 +57,3 @@ def irls(
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged, alpha)
-
-
-# # irls for debug
-# def irls(
-#     X: ArrayLike,
-#     y: ArrayLike,
-#     family: ExponentialFamily,
-#     solver: LinearSolve,
-#     eta: ArrayLike,
-#     max_iter: int = 1000,
-#     tol: float = 1e-3,
-#     stepsize: float = 1.0,
-#     offset_eta: ArrayLike = 0.0,
-#     alpha_init: ArrayLike = 0.1,
-# ) -> IRLSState:
-#     """
-#     For NB: initial value for alpha is found by fitting a poisson model
-#     """
-#     diff = 10000.0
-#     num_iters = 0
-#     beta = jnp.zeros((X.shape[1], 1))
-#     eta_o = eta + offset_eta
-#     alpha_o = alpha_init
-#
-#     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
-#
-#     while ~converged:
-#         beta = solver(X, y, eta_o, family, stepsize, offset_eta, alpha_o)
-#         eta_n = X @ beta + offset_eta
-#
-#         # return zero if not NB family
-#         alpha_n = family.calc_dispersion(X, y, eta_n, alpha_init)
-#
-#         likelihood_o = family.negloglikelihood(X, y, eta_o, alpha_o)
-#         likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)
-#
-#         diff = likelihood_n - likelihood_o
-#         converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
-#
-#         num_iters += 1
-#         eta_o = eta_n
-#         alpha_o = alpha_n
-#
-#     return IRLSState(beta, num_iters, converged, alpha_o)

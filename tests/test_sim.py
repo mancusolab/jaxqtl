@@ -47,7 +47,7 @@ def test_sim_poisson():
 def test_sim_NB():
     seed = 1
     n = 1000
-    true_alpha = 0.1
+    true_alpha = 1
     family = NegativeBinomial()
 
     sim = SimData(n, family)

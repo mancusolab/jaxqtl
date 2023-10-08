@@ -132,7 +132,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         mu = self.family.glink.inverse(eta)
         resid = (y - mu) * self.family.glink.deriv(
             mu
-        )  # note: this is not the working resid
+        )  # note: this is the working resid
 
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
 
@@ -185,7 +185,7 @@ def huber_var(
     hess_inv = jnpla.inv(-(X * W).T @ X)
 
     score_no_x = (y - mu) / (family.variance(mu, alpha) * family.glink.deriv(mu)) * phi
-    Bs = (X * (score_no_x ** 2)).T @ X
+    Bs = (X * (score_no_x**2)).T @ X
     Vs = hess_inv @ Bs @ hess_inv
 
     return jnp.diag(Vs)
