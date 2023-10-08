@@ -274,8 +274,8 @@ class BetaPerm(DirectPerm):
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
-        k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
-        n_init = k_init * (1 / p_mean - 1)
+        k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
+        n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
         init = jnp.array([k_init, n_init])
 
         # infer beta based on adjusted p_perm
@@ -320,8 +320,8 @@ class BetaPermScore(DirectPermScore):
 
         # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
-        k_init = p_mean * (p_mean * (1 - p_mean) / p_var - 1)
-        n_init = k_init * (1 / p_mean - 1)
+        k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
+        n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
         init = jnp.array([k_init, n_init])
 
         # infer beta based on p_perm

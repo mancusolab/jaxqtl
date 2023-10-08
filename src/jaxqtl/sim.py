@@ -123,11 +123,12 @@ def run_sim(
             (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
         )
         alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
+        # convert alpha_n to 0.1 if bad initialization
+        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
         jaxqtl_nb = GLM(family=nb_fam)
-        init_nb = nb_fam.init_eta(y)
         glm_state_nb = jaxqtl_nb.fit(
-            X, y, init=init_nb, alpha_init=alpha_n, robust_se=False
+            X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=False
         )
 
         pval_nb_wald = np.append(pval_nb_wald, glm_state_nb.p[-1])
@@ -136,7 +137,7 @@ def run_sim(
         # robust poisson and NB
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=True)
         glm_state_nb = jaxqtl_nb.fit(
-            X, y, init=init_nb, alpha_init=alpha_n, robust_se=True
+            X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=True
         )
 
         pval_nb_wald_robust = np.append(pval_nb_wald_robust, glm_state_nb.p[-1])
@@ -164,8 +165,12 @@ def run_sim(
             (y / nb_fam.glink.inverse(glm_null_pois.eta) - 1) ** 2
         )
         alpha_n = nb_fam.calc_dispersion(X_cov, y, glm_null_pois.eta, alpha=alpha_init)
+        # convert alpha_n to 0.1 if bad initialization
+        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
-        glm_state_nb = jaxqtl_nb.fit(X_cov, y, init=init_nb, alpha_init=alpha_n)
+        glm_state_nb = jaxqtl_nb.fit(
+            X_cov, y, init=glm_null_pois.eta, alpha_init=alpha_n
+        )
         _, pval = score_test_snp(
             G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb
         )

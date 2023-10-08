@@ -164,12 +164,15 @@ def cis_scan_NB(
         )
         alpha_n = family.calc_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
 
+        # convert alpha_n to 0.1 if bad initialization
+        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
+
         glmstate = glm.fit(
             M,
             y,
             offset_eta=offset_eta,
             robust_se=robust_se,
-            init=init_val,
+            init=glm_state_pois.eta,
             alpha_init=alpha_n,
         )
 
@@ -218,6 +221,9 @@ def cis_scan_score(
         (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
     )
     alpha_n = family.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
+
+    # convert alpha_n to 0.1 if bad initialization
+    alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
     glmstate_cov_only = glm.fit(
         X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n

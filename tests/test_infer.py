@@ -252,9 +252,12 @@ def test_NB():
         solver=CholeskySolve(),
         step_size=stepsize,
     )
-    init_nb = jaxqtl_nb.family.init_eta(y)
     glm_state = jaxqtl_nb.fit(
-        M, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n.squeeze()
+        M,
+        y,
+        init=glm_state_pois.eta,
+        offset_eta=library_size,
+        alpha_init=alpha_n.squeeze(),
     )
 
     assert_array_eq(glm_state.alpha, sm_alpha, rtol=1e-2)
@@ -304,12 +307,11 @@ def test_NB_robust():
         solver=CholeskySolve(),
         step_size=stepsize,
     )
-    init_nb = jaxqtl_nb.family.init_eta(y)
 
     glm_state_robust = jaxqtl_nb.fit(
         M,
         y,
-        init=init_nb,
+        init=glm_state_pois.eta,
         offset_eta=library_size,
         alpha_init=alpha_n.squeeze(),
         robust_se=True,
@@ -455,9 +457,8 @@ def test_nb_scoretest():
         solver=CholeskySolve(),
         step_size=stepsize,
     )
-    init_nb = jaxqtl_nb.family.init_eta(y)
     glm_state = jaxqtl_nb.fit(
-        M_cov, y, init=init_nb, offset_eta=library_size, alpha_init=alpha_n
+        M_cov, y, init=glm_state_pois.eta, offset_eta=library_size, alpha_init=alpha_n
     )
 
     Z, pval = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
