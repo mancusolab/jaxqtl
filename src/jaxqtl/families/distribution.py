@@ -311,7 +311,7 @@ class NegativeBinomial(ExponentialFamily):
         y: ArrayLike,
         eta: ArrayLike,
         alpha: ArrayLike = 0.1,
-        step_size: ArrayLike = 1.0,
+        step_size: ArrayLike = 0.1,
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
@@ -330,7 +330,7 @@ class NegativeBinomial(ExponentialFamily):
         y: ArrayLike,
         eta: ArrayLike,
         alpha: ArrayLike = 0.1,
-        step_size=1.0,
+        step_size=0.1,
         tol=1e-3,
         max_iter=1000,
     ) -> Array:

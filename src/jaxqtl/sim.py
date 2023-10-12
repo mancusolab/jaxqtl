@@ -37,7 +37,7 @@ class SimResState(NamedTuple):
 class SimData:
     def __init__(self, nobs: int, family: ExponentialFamily = Gaussian()) -> None:
         self.nobs = nobs
-        self.pfeatures = 4  # intercept, sex, age, genotype of one SNP
+        self.pfeatures = 2  # intercept, sex, age, genotype of one SNP
         self.family = family
 
     def gen_data(
@@ -46,6 +46,7 @@ class SimData:
         alpha: float = 0.0,
         maf: float = 0.3,
         model: str = "alt",
+        beta0: float = 1.0,
         true_beta: float = 0.0,
         seed: int = 1,
     ) -> SimState:
@@ -59,16 +60,20 @@ class SimData:
         np.random.seed(seed)
 
         X[:, 0] = np.ones((n,))  # intercept
-        age = np.random.normal(40, 4, (n,))
-        X[:, 1] = (age - age.mean()) / age.std()  # center, standardize age
-        sex = np.random.binomial(1, 0.5, (n,))
-        X[:, 2] = (sex - sex.mean()) / sex.std()  # sex (0, 1)
-
-        # simulate genotype for one SNP
-        X[:, 3] = np.random.binomial(2, maf, (n,))  # genotype (0,1,2)
+        # age = np.random.normal(40, 4, (n,))
+        # X[:, 1] = (age - age.mean()) / age.std()  # center, standardize age
+        # sex = np.random.binomial(1, 0.5, (n,))
+        # X[:, 2] = (sex - sex.mean()) / sex.std()  # sex (0, 1)
+        #
+        # # simulate genotype for one SNP
+        X[:, 1] = np.random.binomial(2, maf, (n,))  # genotype (0,1,2)
 
         # generate true betas
-        beta = np.random.normal(0, 1, beta_shape)
+        # TODO: Drop covariate effect; only use intercept (different value) for null model
+        # see if power and type I error differ
+        # beta = np.random.normal(0, 1, beta_shape)
+        beta = np.ones(beta_shape)
+        beta[0] = beta0
 
         if model == "null":
             beta[-1] = 0.0
@@ -91,6 +96,7 @@ def run_sim(
     n: int = 1000,
     model: str = "alt",
     num_sim: int = 1000,
+    beta0: float = 1.0,
     true_beta: float = 0.0,
     sim_family: ExponentialFamily = NegativeBinomial(),
 ) -> SimResState:
@@ -110,7 +116,13 @@ def run_sim(
 
     for i in range(num_sim):
         X, y, beta = sim.gen_data(
-            alpha=alpha, maf=maf, model=model, scale=scale, true_beta=true_beta, seed=i
+            alpha=alpha,
+            maf=maf,
+            model=model,
+            scale=scale,
+            true_beta=true_beta,
+            seed=i,
+            beta0=beta0,
         )
 
         # fit poisson or negative binomial

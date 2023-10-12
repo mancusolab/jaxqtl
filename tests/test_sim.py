@@ -47,12 +47,13 @@ def test_sim_poisson():
 def test_sim_NB():
     seed = 1
     n = 1000
-    true_alpha = 0.8
+    true_alpha = 1
+    beta0 = 1
     family = NegativeBinomial()
 
     sim = SimData(n, family)
     X, y, beta = sim.gen_data(
-        alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed
+        alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed, beta0=beta0
     )
 
     mod = smNB(np.array(y), np.array(X))
@@ -84,6 +85,7 @@ def test_sim_NB():
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
     print(f"jaxqtl beta: {glm_state.beta}")
+    print(f"jaxqtl pval: {glm_state.p}")
     print(f"statsmodel params: {sm_state.params}")
     assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-3)
     assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
