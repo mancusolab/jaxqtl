@@ -256,6 +256,7 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
     if method == "log1p":
         count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
     elif method == "tmm":
+        # Note: don't filter before TMM
         # use edger TMM method to calculate size factor and convert to counts per million
         tmm_counts_df = qtl.norm.edger_cpm(
             count_df.iloc[:, 4:], normalized_lib_sizes=True

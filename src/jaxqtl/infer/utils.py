@@ -97,6 +97,7 @@ def cis_scan(
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
+    Wald test from fitting full alt model
     """
     glm = GLM(family=family, max_iter=max_iter)
 

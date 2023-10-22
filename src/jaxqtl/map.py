@@ -9,8 +9,6 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily, NegativeBinomial
-
-# from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.permutation import BetaPerm, BetaPermScore
 from jaxqtl.infer.utils import (
     CisGLMScoreState,
@@ -57,6 +55,7 @@ class MapCisSingleState:
             self.cisglm.beta[vdx],
             self.cisglm.se[vdx],
             self.pval_beta,
+            self.cisglm.converged[vdx],  # full model converged or not
         ]
 
         result = [element.tolist() for element in result]
@@ -93,6 +92,7 @@ class MapCisSingleScoreState:
             self.cisglm.Z[vdx],
             self.pval_beta,
             self.cisglm.alpha[vdx],
+            self.cisglm.converged,  # cov-only model converged or not
         ]
 
         result = [element.tolist() for element in result]
@@ -186,6 +186,7 @@ def map_cis(
         "slope",
         "slope_se",
         "pval_beta",
+        "full_model_converged",
     ]
 
     results = []
@@ -274,6 +275,7 @@ def map_cis_score(
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
     use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
+    score test: fit null once and compute TS
     """
     if log is None:
         log = get_log()
@@ -308,6 +310,7 @@ def map_cis_score(
         "Z",
         "pval_beta",
         "alpha_cov",
+        "cov_model_converged",
     ]
 
     results = []
@@ -573,7 +576,7 @@ def map_cis_nominal(
         slope.append(result.beta)
         slope_se.append(result.se)
         nominal_p.append(result.p)
-        converged.append(result.converged)
+        converged.append(result.converged)  # whether full model converged
         num_var_cis.append(var_df.shape[0])
         alpha.append(result.alpha)
 
@@ -707,7 +710,7 @@ def map_cis_nominal_score(
 
         nominal_p.append(result.p)
         Z.append(result.Z)
-        converged.append(result.converged)
+        converged.append(result.converged)  # whether cov-only model converged
         num_var_cis.append(var_df.shape[0])
         alpha_cov.append(result.alpha)
 

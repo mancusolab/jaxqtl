@@ -72,7 +72,7 @@ class DirectPerm(Permutation):
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
-        return pvals  # , TS
+        return pvals
 
 
 class PermutationScore(eqx.Module, metaclass=ABCMeta):
@@ -139,9 +139,9 @@ def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
 def infer_beta(
     p_perm: ArrayLike,
     init: ArrayLike,
-    stepsize=1.0,
+    stepsize=0.1,
     tol=1e-3,
-    max_iter=100,
+    max_iter=500,
 ) -> Array:
     """
     given p values from R permutations (strongest signals),
@@ -230,12 +230,12 @@ def infer_beta(
 @jit
 def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
     """
-    p_obs is a vector of nominal p value in cis window
+    p_obs is the min p observed
     """
     k, n = params
 
-    # TODO: sometimes give wrong values
-    p_adj = jaxstats.beta.cdf(jnp.nanmin(p_obs), k, n)
+    # TODO: sometimes give out-of-bound values
+    p_adj = jaxstats.beta.cdf(p_obs, k, n)
 
     return p_adj
 
