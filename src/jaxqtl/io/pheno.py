@@ -250,7 +250,7 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
     count_df: rows are genes, columns are individual ID
     """
     count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})
-    # filter genes with zero expression
+    # filter genes with zero expression (first step of edger_cpm)
     count_df = count_df[count_df.iloc[:, 4:].sum(axis=1) > 0]
 
     if method == "log1p":

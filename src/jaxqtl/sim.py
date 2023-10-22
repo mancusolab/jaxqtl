@@ -32,6 +32,7 @@ class SimResState(NamedTuple):
     pval_lm: ndarray
     pval_nb_score: ndarray
     pval_pois_score: ndarray
+    pval_lm_gtex: ndarray
 
 
 class SimData:
@@ -98,6 +99,7 @@ def run_sim(
     num_sim: int = 1000,
     beta0: float = 1.0,
     true_beta: float = 0.0,
+    gtex_threshold: float = 0.2,
     sim_family: ExponentialFamily = NegativeBinomial(),
 ) -> SimResState:
     np.random.seed(seed)
@@ -110,6 +112,7 @@ def run_sim(
     pval_pois_wald_robust = np.array([])
 
     pval_lm = np.array([])
+    pval_lm_gtex = np.array([])
 
     pval_nb_score = np.array([])
     pval_pois_score = np.array([])
@@ -164,6 +167,12 @@ def run_sim(
         glm_state = jaxqtl_lm.fit(X, y_norm, init=init_lm)
         pval_lm = np.append(pval_lm, glm_state.p[-1])
 
+        # GTEx pipeline will not analyze this gene
+        if (y >= 6).mean(axis=0) < gtex_threshold:
+            pval_lm_gtex = np.append(pval_lm_gtex, np.nan)
+        else:
+            pval_lm_gtex = np.append(pval_lm_gtex, glm_state.p[-1])
+
         # score test for poisson and NB
         X_cov = X[:, 0:-1]
         glm_null_pois = jaxqtl_pois.fit(X_cov, y, init=init_pois)
@@ -197,4 +206,5 @@ def run_sim(
         pval_nb_score=pval_nb_score,
         pval_pois_score=pval_pois_score,
         pval_lm=pval_lm,
+        pval_lm_gtex=pval_lm_gtex,
     )
