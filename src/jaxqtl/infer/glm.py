@@ -61,7 +61,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         self,
         family: ExponentialFamily = Gaussian(),
         solver: LinearSolve = CholeskySolve(),
-        max_iter: int = 100,
+        max_iter: int = 1000,
         tol: float = 1e-3,
         step_size: float = 1.0,
     ) -> None:
