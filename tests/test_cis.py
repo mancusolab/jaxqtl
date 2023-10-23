@@ -28,7 +28,7 @@ config.update("jax_enable_x64", True)
 geno_path = "../example/local/NK_new/chr22"
 covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
 pheno_path = "../example/local/NK_new/NK.bed.gz"
-genelist_path = "../example/local/NK_new/ENSG00000237438"
+genelist_path = "../example/local/NK_new/ENSG00000198125"
 
 
 # geno_path = "../example/data/chr22.n94"
@@ -105,7 +105,6 @@ def test_cis_waldtest():
     assert_array_eq(outdf.se, jnp.array(R_res["se"]))
 
 
-# n=94, one gene cis mapping, 2592 variants
 # ~4s
 start = timeit.default_timer()
 mapcis_out_score_nb = map_cis_score(

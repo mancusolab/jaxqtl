@@ -33,6 +33,7 @@ class SimResState(NamedTuple):
     pval_nb_score: ndarray
     pval_pois_score: ndarray
     pval_lm_gtex: ndarray
+    pval_nb_score_thr: ndarray
 
 
 class SimData:
@@ -100,6 +101,7 @@ def run_sim(
     beta0: float = 1.0,
     true_beta: float = 0.0,
     gtex_threshold: float = 0.2,
+    jaxqtl_threshold: float = 0.0,
     sim_family: ExponentialFamily = NegativeBinomial(),
 ) -> SimResState:
     np.random.seed(seed)
@@ -116,6 +118,8 @@ def run_sim(
 
     pval_nb_score = np.array([])
     pval_pois_score = np.array([])
+
+    pval_nb_score_thr = np.array([])
 
     for i in range(num_sim):
         X, y, beta = sim.gen_data(
@@ -198,6 +202,11 @@ def run_sim(
 
         pval_nb_score = np.append(pval_nb_score, pval)
 
+        if (y > 0).mean(axis=0) < jaxqtl_threshold:
+            pval_nb_score_thr = np.append(pval_nb_score_thr, np.nan)
+        else:
+            pval_nb_score_thr = np.append(pval_nb_score_thr, pval)
+
     return SimResState(
         pval_nb_wald=pval_nb_wald,
         pval_pois_wald=pval_pois_wald,
@@ -207,4 +216,5 @@ def run_sim(
         pval_pois_score=pval_pois_score,
         pval_lm=pval_lm,
         pval_lm_gtex=pval_lm_gtex,
+        pval_nb_score_thr=pval_nb_score_thr,
     )
