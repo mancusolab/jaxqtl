@@ -250,13 +250,13 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
     count_df: rows are genes, columns are individual ID
     """
     count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})
-    # filter genes with zero expression (first step of edger_cpm)
+    # filter genes with zero expression (first step of edger_cpm);
+    # Note: do this firstly here to avoid incorrect row numbers
     count_df = count_df[count_df.iloc[:, 4:].sum(axis=1) > 0]
 
     if method == "log1p":
         count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
     elif method == "tmm":
-        # Note: don't filter before TMM
         # use edger TMM method to calculate size factor and convert to counts per million
         tmm_counts_df = qtl.norm.edger_cpm(
             count_df.iloc[:, 4:], normalized_lib_sizes=True
@@ -264,11 +264,10 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
         # # mask is filter by gene
         # inverse normal transformation on each gene (row)
         norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
-        count_df.iloc[:, 4:] = norm_df
-    elif method == "qn":
-        pass
-        # qn_df = qtl.norm.normalize_quantiles(tpm_df.loc[mask])
-        # norm_df = qtl.norm.inverse_normal_transform(qn_df)
+        if count_df.shape[0] == norm_df.shape[0]:
+            count_df.iloc[:, 4:] = norm_df
+        else:
+            raise ValueError("row number doesn't match")
     else:
         raise ValueError(f"Unsupported mode {method}")
 
