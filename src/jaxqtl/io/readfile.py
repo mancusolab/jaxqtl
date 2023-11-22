@@ -153,6 +153,7 @@ def create_readydata(
     # filter genotype and covariates by sample id of pheno data
     geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
     covar = covar.loc[covar.index.isin(sample_id)].sort_index(level=sample_id)
+    pheno = pheno.loc[pheno.index.isin(sample_id)].sort_index(level=sample_id)
 
     # ensure sample order in genotype and covar are same as count
     assert (
