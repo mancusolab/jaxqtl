@@ -226,6 +226,7 @@ def cis_scan_score(
     # convert alpha_n to 0.1 if bad initialization
     alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
+    # Note: linear model might start with bad init
     glmstate_cov_only = glm.fit(
         X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n
     )

@@ -114,6 +114,7 @@ def create_readydata(
     covar: pd.DataFrame,
     log=None,
     autosomal_only: bool = True,
+    ind_list: Optional[List] = None,
 ) -> ReadyDataState:
     """Read genotype, phenotype and covariates, including interaction terms
     Genotype data: plink triplet, vcf
@@ -144,7 +145,10 @@ def create_readydata(
     # transpose to sample x genes
     pheno = pheno.T
     pheno.columns.name = None  # remove column name due to tranpose
-    sample_id = pheno.index.to_list()
+    if ind_list is not None:
+        sample_id = ind_list
+    else:
+        sample_id = pheno.index.to_list()
 
     # filter genotype and covariates by sample id of pheno data
     geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
