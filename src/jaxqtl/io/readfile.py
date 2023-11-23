@@ -57,10 +57,6 @@ class ReadyDataState:
             # inverse normal transformation on each gene (row)
             norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
             self.pheno.count.iloc[:, 4:] = norm_df
-        elif mode == "qn":
-            pass
-            # qn_df = qtl.norm.normalize_quantiles(tpm_df.loc[mask])
-            # norm_df = qtl.norm.inverse_normal_transform(qn_df)
         else:
             raise ValueError(f"Unsupported mode {mode}")
 
@@ -87,6 +83,7 @@ class ReadyDataState:
             self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
                 self.pheno_meta.gene_map.phenotype_id.isin(gene_list_insample)
             ]
+            # subset by column name
             self.pheno.count = self.pheno.count[gene_list_insample]
 
             assert set(self.pheno_meta.gene_map.phenotype_id) == set(
@@ -128,7 +125,7 @@ def create_readydata(
 
     recode sex as: female = 1, male = 0
 
-    All these files must contain the same set of individuals (better ordered, but not required)
+    All these files must contain the same set of individuals, otherwise only complete data is retained.
     Internally we check ordering and guarantee they are in the same order as phenotype data
     """
     if log is None:
@@ -146,14 +143,23 @@ def create_readydata(
     pheno = pheno.T
     pheno.columns.name = None  # remove column name due to tranpose
     if ind_list is not None:
-        sample_id = ind_list
+        sample_id_subset = ind_list
     else:
-        sample_id = pheno.index.to_list()
+        sample_id_subset = pheno.index.to_list()
 
-    # filter genotype and covariates by sample id of pheno data
-    geno = geno.loc[geno.index.isin(sample_id)].sort_index(level=sample_id)
-    covar = covar.loc[covar.index.isin(sample_id)].sort_index(level=sample_id)
-    pheno = pheno.loc[pheno.index.isin(sample_id)].sort_index(level=sample_id)
+    # find complete data of individuals
+    sample_id = set.intersection(
+        set(pheno.index.to_list()),
+        set(geno.index.to_list()),
+        set(covar.index.to_list()),
+        set(sample_id_subset),
+    )
+    sample_id = list(sample_id)
+
+    # subset and order genotype, covariates and pheno
+    pheno = pheno.loc[pheno.index.isin(sample_id)].sort_index()
+    geno = geno.loc[geno.index.isin(sample_id)].sort_index()
+    covar = covar.loc[covar.index.isin(sample_id)].sort_index()
 
     # ensure sample order in genotype and covar are same as count
     assert (

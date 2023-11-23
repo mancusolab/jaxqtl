@@ -1,0 +1,5 @@
+# pull main branch from remote to local
+git pull origin main
+
+# in any other branch use
+git pull
