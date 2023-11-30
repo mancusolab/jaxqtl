@@ -180,7 +180,7 @@ def run_sim(
         # score test for poisson and NB
         X_cov = X[:, 0:-1]
         glm_null_pois = jaxqtl_pois.fit(X_cov, y, init=init_pois)
-        _, pval = score_test_snp(
+        _, pval, _, _ = score_test_snp(
             G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_null_pois
         )
 
@@ -196,7 +196,7 @@ def run_sim(
         glm_state_nb = jaxqtl_nb.fit(
             X_cov, y, init=glm_null_pois.eta, alpha_init=alpha_n
         )
-        _, pval = score_test_snp(
+        _, pval, _, _ = score_test_snp(
             G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb
         )
 

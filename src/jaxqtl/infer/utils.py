@@ -1,3 +1,4 @@
+from abc import ABCMeta, abstractmethod
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
@@ -16,8 +17,8 @@ from jaxqtl.io.readfile import ReadyDataState
 
 
 class CisGLMState(NamedTuple):
-    af: Array
-    ma_count: Array
+    # af: Array
+    # ma_count: Array
     beta: Array
     se: Array
     p: Array
@@ -116,13 +117,13 @@ def cis_scan(
             init=glmstate_cov_only.eta,
         )
 
-        af = jnp.mean(snp) / 2.0
-        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
-        ma_count = jnp.sum(snp)  # Number of minor alleles
+        # af = jnp.mean(snp) / 2.0
+        # snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
+        # ma_count = jnp.sum(snp)  # Number of minor alleles
 
         return carry, CisGLMState(
-            af=af,
-            ma_count=ma_count,
+            # af=af,
+            # ma_count=ma_count,
             beta=glmstate.beta[-1],
             se=glmstate.se[-1],
             p=glmstate.p[-1],
@@ -147,8 +148,7 @@ def cis_scan_NB(
     max_iter: int = 100,
 ) -> CisGLMState:
     """
-    run GLM across variants in a flanking window of given gene
-    cis-widow: plus and minus W base pairs, total length 2*cis_window
+    fit full model for wald test in NB model
     """
     glm = GLM(family=family, max_iter=max_iter)
 
@@ -177,13 +177,7 @@ def cis_scan_NB(
             alpha_init=alpha_n,
         )
 
-        af = jnp.mean(snp) / 2.0
-        snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
-        ma_count = jnp.sum(snp)  # Number of minor alleles
-
         return carry, CisGLMState(
-            af=af,
-            ma_count=ma_count,
             beta=glmstate.beta[-1],
             se=glmstate.se[-1],
             p=glmstate.p[-1],
@@ -195,51 +189,6 @@ def cis_scan_NB(
     _, state = lax.scan(_func, 0.0, G.T)
 
     return state
-
-
-@eqx.filter_jit
-def cis_scan_score(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    family: ExponentialFamily,
-    offset_eta: ArrayLike = 0.0,
-    max_iter: int = 500,
-) -> CisGLMScoreState:
-    """
-    run GLM across variants in a flanking window of given gene
-    cis-widow: plus and minus W base pairs, total length 2*cis_window
-    """
-    glm = GLM(family=family, max_iter=max_iter)
-
-    init_val = family.init_eta(y)
-
-    jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
-    glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
-
-    # fit covariate-only model (null)
-    alpha_init = len(y) / jnp.sum(
-        (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
-    )
-    alpha_n = family.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
-
-    # convert alpha_n to 0.1 if bad initialization
-    alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
-
-    # Note: linear model might start with bad init
-    glmstate_cov_only = glm.fit(
-        X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n
-    )
-
-    Z, pval = score_test_snp(G, X, glmstate_cov_only)
-
-    return CisGLMScoreState(
-        p=pval,
-        Z=Z,
-        num_iters=glmstate_cov_only.num_iters,
-        converged=glmstate_cov_only.converged,
-        alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
-    )
 
 
 @eqx.filter_jit
@@ -276,7 +225,7 @@ def cis_scan_intercept_only(
 
 def score_test_snp(
     G: ArrayLike, X: ArrayLike, glm_null_res: GLMState
-) -> Tuple[Array, Array]:
+) -> Tuple[Array, Array, Array, Array]:
     """test for additional covariate g
     only require fit null model using fitted covariate only model + new vector g
     X is the full design matrix containing covariates and g
@@ -290,8 +239,61 @@ def score_test_snp(
     w_g_resid = g_resid * sqrt_wgt
     g_var = jnp.sum(w_g_resid**2, axis=0)
 
-    Z = ((g_resid * glm_null_res.glm_wt).T @ y_resid) / jnp.sqrt(g_var)
+    g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
+    Z = g_score / jnp.sqrt(g_var)
 
     pval = norm.cdf(-abs(Z)) * 2
 
-    return Z, pval
+    return Z, pval, g_score, g_var
+
+
+class HypothesisTest(eqx.Module, metaclass=ABCMeta):
+    def __call__(self, X, G, y, family, offset_eta, robust_se, max_iter):
+        return self.test(X, G, y, family, offset_eta, robust_se, max_iter)
+
+    @abstractmethod
+    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+        pass
+
+
+class WaldTest(HypothesisTest):
+    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+        pass
+        # wald test in here...
+
+
+class ScoreTest(HypothesisTest):
+    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+        glm = GLM(family=family, max_iter=max_iter)
+
+        init_val = family.init_eta(y)
+
+        jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
+        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
+
+        # fit covariate-only model (null)
+        alpha_init = len(y) / jnp.sum(
+            (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
+        )
+        alpha_n = family.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
+
+        # convert alpha_n to 0.1 if bad initialization
+        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
+
+        # Note: linear model might start with bad init
+        glmstate_cov_only = glm.fit(
+            X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n
+        )
+
+        Z, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
+        beta = score / score_var
+        se = 1.0 / jnp.sqrt(score_var)
+
+        return CisGLMState(
+            beta=beta,
+            se=se,
+            p=pval,
+            num_iters=glmstate_cov_only.num_iters,
+            converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
+            alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
+        )

@@ -16,7 +16,6 @@ from jaxqtl.map import (
     map_cis,
     map_cis_nominal,
     map_cis_nominal_score,
-    map_cis_score,
     map_fit_intercept_only,
     write_parqet,
 )
@@ -107,7 +106,7 @@ def test_cis_waldtest():
 
 # ~4s
 start = timeit.default_timer()
-mapcis_out_score_nb = map_cis_score(
+mapcis_out_score_nb = map_cis(
     dat,
     family=NegativeBinomial(),
     offset_eta=offset_eta,

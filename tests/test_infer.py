@@ -346,7 +346,7 @@ def test_poisson_scoretest():
     mod_null = jaxqtl_pois.fit(
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
-    Z_GPA, pval_GPA = score_test_snp(
+    Z_GPA, pval_GPA, _, _ = score_test_snp(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
@@ -359,7 +359,7 @@ def test_poisson_scoretest():
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
 
-    Z_TUCE, pval_TUCE = score_test_snp(
+    Z_TUCE, pval_TUCE, _, _ = score_test_snp(
         jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
@@ -369,7 +369,7 @@ def test_poisson_scoretest():
         X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
     )
 
-    Z_PSI, pval_PSI = score_test_snp(
+    Z_PSI, pval_PSI, _, _ = score_test_snp(
         jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
@@ -396,7 +396,7 @@ def test_bin_scoretest():
     )
 
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_GPA, pval_GPA = score_test_snp(
+    Z_GPA, pval_GPA, _, _ = score_test_snp(
         jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
@@ -406,14 +406,14 @@ def test_bin_scoretest():
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_TUCE, pval_TUCE = score_test_snp(
+    Z_TUCE, pval_TUCE, _, _ = score_test_snp(
         jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_PSI, pval_PSI = score_test_snp(
+    Z_PSI, pval_PSI, _, _ = score_test_snp(
         jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
     )
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
@@ -461,6 +461,6 @@ def test_nb_scoretest():
         M_cov, y, init=glm_state_pois.eta, offset_eta=library_size, alpha_init=alpha_n
     )
 
-    Z, pval = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
+    Z, pval, _, _ = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
 
     assert_array_eq(Z, Rres["Z"])

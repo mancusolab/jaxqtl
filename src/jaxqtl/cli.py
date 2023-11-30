@@ -23,7 +23,6 @@ from jaxqtl.map import (
     map_cis,
     map_cis_nominal,
     map_cis_nominal_score,
-    map_cis_score,
     map_fit_intercept_only,
     write_parqet,
 )
@@ -324,7 +323,7 @@ def main(args):
 
     if args.mode == "cis":
         if args.test_method == "score":
-            outdf_cis_score = map_cis_score(
+            outdf_cis_score = map_cis(
                 dat,
                 family=family,
                 standardize=True,

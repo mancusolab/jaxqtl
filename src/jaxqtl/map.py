@@ -9,15 +9,15 @@ from jax import Array, numpy as jnp
 from jax.typing import ArrayLike
 
 from jaxqtl.families.distribution import ExponentialFamily, NegativeBinomial
-from jaxqtl.infer.permutation import BetaPerm, BetaPermScore
+from jaxqtl.infer.permutation import BetaPerm
 from jaxqtl.infer.utils import (
-    CisGLMScoreState,
     CisGLMState,
+    HypothesisTest,
+    ScoreTest,
     _setup_G_y,
     cis_scan,
     cis_scan_intercept_only,
     cis_scan_NB,
-    cis_scan_score,
 )
 from jaxqtl.io.readfile import ReadyDataState
 from jaxqtl.log import get_log
@@ -49,50 +49,14 @@ class MapCisSingleState:
             beta_1,
             beta_2,
             beta_converged,
-            self.cisglm.ma_count[vdx],
-            self.cisglm.af[vdx],
             self.cisglm.p[vdx],
             self.cisglm.beta[vdx],
             self.cisglm.se[vdx],
             self.pval_beta,
-            self.cisglm.converged[vdx],  # full model converged or not
-        ]
-
-        result = [element.tolist() for element in result]
-
-        return result, vdx
-
-
-@dataclass
-class MapCisSingleScoreState:
-    cisglm: CisGLMScoreState
-    pval_beta: Array
-    beta_param: Array
-
-    def get_lead(
-        self, key: rdm.PRNGKey, random_tiebreak: bool = False
-    ) -> Tuple[List, int]:
-        # break tie to call lead eQTL
-        if random_tiebreak:
-            key, split_key = rdm.split(key)
-            ties_ind = jnp.argwhere(
-                self.cisglm.p == jnp.nanmin(self.cisglm.p)
-            )  # return (k, 1)
-            vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
-        else:
-            # take first occurrence
-            vdx = int(jnp.nanargmin(self.cisglm.p))
-
-        beta_1, beta_2, beta_converged = self.beta_param
-        result = [
-            beta_1,
-            beta_2,
-            beta_converged,
-            self.cisglm.p[vdx],
-            self.cisglm.Z[vdx],
-            self.pval_beta,
             self.cisglm.alpha[vdx],
-            self.cisglm.converged,  # cov-only model converged or not
+            self.cisglm.converged[
+                vdx
+            ],  # if wald test, this full model converged or not; if score, then cov-model
         ]
 
         result = [element.tolist() for element in result]
@@ -113,151 +77,15 @@ class MapCisOutState(NamedTuple):
     gene_mapped_list: pd.DataFrame
 
 
-class MapCisScoreOutState(NamedTuple):
-    Z: List
-    nominal_p: List
-    pval_beta: List
-    beta_param: List
-    pval_perm: List
-    converged: List
-    num_var_cis: List
-    var_leading_df: pd.DataFrame
-    gene_mapped_list: pd.DataFrame
-
-
 class _GenoInfo(NamedTuple):
     af: Array
     ma_count: Array
 
 
-# write this assuming this is bulk data
 def map_cis(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    append_intercept: bool = True,
-    standardize: bool = True,
-    seed: int = 123,
-    window: int = 500000,
-    random_tiebreak: bool = False,
-    sig_level: float = 0.05,
-    verbose: bool = True,
-    fdr_level: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: np.ndarray = None,
-    offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
-    n_perm: int = 1000,
-    compute_qvalue: bool = True,
-    log=None,
-) -> pd.DataFrame:
-    """Cis mapping for each gene, report lead variant
-    use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
-    """
-    if log is None:
-        log = get_log()
-
-    # TODO: we need to do some validation here...
-    X = dat.covar
-    n, k = X.shape
-
-    gene_info = dat.pheno_meta
-
-    # append genotype as the last column
-    if standardize:
-        X = X / jnp.std(X, axis=0)
-
-    if append_intercept:
-        X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    key = rdm.PRNGKey(seed)
-
-    out_columns = [
-        "phenotype_id",
-        "chrom",
-        "num_var",
-        "variant_id",
-        "tss_distance",
-        "beta_shape1",
-        "beta_shape2",
-        "beta_converged",
-        "ma_count",
-        "af",
-        "pval_nominal",
-        "slope",
-        "slope_se",
-        "pval_beta",
-        "full_model_converged",
-    ]
-
-    results = []
-
-    for gene in gene_info:
-        gene_name, chrom, start_min, end_max = gene
-        lstart = max(0, start_min - window)
-        rend = end_max + window
-
-        # pull cis G and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
-
-        # skip if no cis SNPs found
-        if G.shape[1] == 0:
-            if verbose:
-                log.info(
-                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
-                    gene_name,
-                    str(chrom),
-                    str(lstart),
-                    str(rend),
-                )
-            continue
-
-        key, g_key = rdm.split(key, 2)
-        if verbose:
-            log.info(
-                "Performing cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
-
-        result = map_cis_single(
-            X, G, y, family, g_key, sig_level, offset_eta, robust_se, n_perm
-        )
-
-        if verbose:
-            log.info(
-                "Finished cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
-        # get info at lead hit, and lead hit index
-        row, vdx = result.get_lead(key, random_tiebreak)
-
-        # pull SNP info at lead hit index
-        snp_id = var_df.iloc[vdx].snp
-        snp_pos = var_df.iloc[vdx].pos
-        tss_distance = snp_pos - start_min
-
-        # combine lead hit info and gene meta data
-        num_var_cis = G.shape[1]
-        result_out = [gene_name, chrom, num_var_cis, snp_id, tss_distance] + row
-        results.append(result_out)
-
-    # filter results based on user speicification (e.g., report all, report top, etc)
-    result_df = pd.DataFrame.from_records(results, columns=out_columns)
-
-    if compute_qvalue:
-        result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
-
-    return result_df
-
-
-def map_cis_score(
-    dat: ReadyDataState,
-    family: ExponentialFamily,
+    test: HypothesisTest = ScoreTest(),
     append_intercept: bool = True,
     standardize: bool = True,
     seed: int = 123,
@@ -270,6 +98,7 @@ def map_cis_score(
     qvalue_lambda: Optional[np.ndarray] = None,
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
+    robust_se: bool = False,
     compute_qvalue: bool = True,
     log=None,
 ) -> pd.DataFrame:
@@ -307,10 +136,11 @@ def map_cis_score(
         "beta_shape2",
         "beta_converged",
         "pval_nominal",
-        "Z",
+        "slope",
+        "slope_se",
         "pval_beta",
         "alpha_cov",
-        "cov_model_converged",
+        "model_converged",
     ]
 
     results = []
@@ -347,8 +177,8 @@ def map_cis_score(
                 str(rend),
             )
 
-        result = map_cis_single_score(
-            X, G, y, family, g_key, sig_level, offset_eta, n_perm, log
+        result = map_cis_single(
+            X, G, y, family, g_key, sig_level, offset_eta, robust_se, n_perm, test
         )
         if verbose:
             log.info(
@@ -400,8 +230,10 @@ def map_cis_single(
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
+    robust_se: bool = False,
     n_perm: int = 1000,
+    test: HypothesisTest = ScoreTest(),
+    max_iter: int = 500,
 ) -> MapCisSingleState:
     """Generate result of GLM for variants in cis
     For given gene, find all variants in + and - window size TSS region
@@ -410,12 +242,12 @@ def map_cis_single(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
-
-    cisglmstate = cis_scan(X, G, y, family, offset_eta, robust_se)
+    # TODO: result = test(all, the, params)
+    cisglmstate = test(X, G, y, family, offset_eta, robust_se, max_iter)
 
     beta_key, direct_key = rdm.split(key_init)
 
-    # if we -alwaays- use BetaPerm now, we may as well drop the class aspect and
+    # if we -always- use BetaPerm now, we may as well drop the class aspect and
     # call function directly...
     perm = BetaPerm(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
@@ -427,46 +259,12 @@ def map_cis_single(
         beta_key,
         sig_level,
         offset_eta,
+        test,
         robust_se,
+        max_iter,
     )
 
     return MapCisSingleState(
-        cisglm=cisglmstate,
-        pval_beta=pval_beta,
-        beta_param=beta_param,
-    )
-
-
-def map_cis_single_score(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    family: ExponentialFamily,
-    key_init: rdm.PRNGKey,
-    sig_level: float = 0.05,
-    offset_eta: ArrayLike = 0.0,
-    n_perm: int = 1000,
-    log=None,
-) -> MapCisSingleScoreState:
-    """Generate result of GLM for variants in cis
-    For given gene, find all variants in + and - window size TSS region
-
-    window: width of flanking on either side of TSS
-    sig_level: desired significance level (not used)
-    perm: Permutation method
-    """
-    cisglmstate = cis_scan_score(X, G, y, family, offset_eta)
-
-    beta_key, direct_key = rdm.split(key_init)
-
-    # if we -always- use BetaPerm now, we may as well drop the class aspect and
-    # call function directly...
-    perm = BetaPermScore(max_perm_direct=n_perm)
-    pval_beta, beta_param = perm(
-        X, y, G, jnp.nanmin(cisglmstate.p), family, beta_key, sig_level, offset_eta, log
-    )
-
-    return MapCisSingleScoreState(
         cisglm=cisglmstate,
         pval_beta=pval_beta,
         beta_param=beta_param,
@@ -613,12 +411,15 @@ def map_cis_nominal(
 def map_cis_nominal_score(
     dat: ReadyDataState,
     family: ExponentialFamily,
+    test: HypothesisTest = ScoreTest(),
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
     window: int = 500000,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
+    robust_se: bool = False,
+    max_iter: int = 500,
 ):
     """eQTL Mapping for all cis-SNP gene pairs
 
@@ -687,7 +488,7 @@ def map_cis_nominal_score(
                 str(rend),
             )
 
-        result = cis_scan_score(X, G, y, family, offset_eta)
+        result = test(X, G, y, family, offset_eta, robust_se, max_iter)
         g_info = _get_geno_info(G)
 
         if verbose:
