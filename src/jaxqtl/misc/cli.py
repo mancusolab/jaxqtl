@@ -14,7 +14,7 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis, map_cis_nominal
+from jaxqtl.map import map_cis, map_nominal
 from jaxqtl.post import rfunc
 
 sys.path.insert(1, os.path.dirname(__file__))
@@ -71,7 +71,7 @@ def run_map(args, log):
             sep="\t",
         )
     elif args.mode == "cis_nominal":
-        map_cis_nominal(dat, family=Poisson(), out_path=args.output_prefix)
+        map_nominal(dat, family=Poisson(), out_path=args.output_prefix)
 
     log.info("Finished mapping")
 

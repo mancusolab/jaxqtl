@@ -105,6 +105,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         step_size=1.0,
         tol=1e-3,
         max_iter=1000,
+        offset_eta=0.0,
     ) -> Array:
         return jnp.zeros((1,))
 
@@ -333,7 +334,10 @@ class NegativeBinomial(ExponentialFamily):
         step_size=0.1,
         tol=1e-3,
         max_iter=1000,
+        offset_eta=0.0,
     ) -> Array:
+        # alpha, eta = init_alpha_by_pois(Poisson(), X, max_iter, offset_eta, y)
+
         def body_fun(val: Tuple):
             diff, num_iter, alpha_o = val
             log_alpha_o = jnp.log(alpha_o)

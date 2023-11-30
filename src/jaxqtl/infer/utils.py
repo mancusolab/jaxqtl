@@ -99,6 +99,7 @@ def cis_scan(
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
     Wald test from fitting full alt model
+    cis_scan is used for nominal mapping
     """
     glm = GLM(family=family, max_iter=max_iter)
 
@@ -117,13 +118,7 @@ def cis_scan(
             init=glmstate_cov_only.eta,
         )
 
-        # af = jnp.mean(snp) / 2.0
-        # snp = jnp.round(jnp.where(af <= 0.5, snp, 2 - snp))
-        # ma_count = jnp.sum(snp)  # Number of minor alleles
-
         return carry, CisGLMState(
-            # af=af,
-            # ma_count=ma_count,
             beta=glmstate.beta[-1],
             se=glmstate.se[-1],
             p=glmstate.p[-1],
@@ -155,15 +150,17 @@ def cis_scan_NB(
     def _func(carry, snp):
         M = jnp.hstack((X, snp[:, jnp.newaxis]))
 
-        init_val = family.init_eta(y)
-
-        jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
-        glm_state_pois = jaxqtl_pois.fit(M, y, init=init_val, offset_eta=offset_eta)
-
-        alpha_init = len(y) / jnp.sum(
-            (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
-        )
-        alpha_n = family.calc_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
+        # init_val = family.init_eta(y)
+        #
+        # jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
+        # glm_state_pois = jaxqtl_pois.fit(M, y, init=init_val, offset_eta=offset_eta)
+        #
+        # alpha_init = len(y) / jnp.sum(
+        #     (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
+        # )
+        alpha_n = family.calc_dispersion(
+            M, y
+        )  # , glm_state_pois.eta, alpha=alpha_init)
 
         # convert alpha_n to 0.1 if bad initialization
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
@@ -173,7 +170,8 @@ def cis_scan_NB(
             y,
             offset_eta=offset_eta,
             robust_se=robust_se,
-            init=glm_state_pois.eta,
+            # init=glm_state_pois.eta,
+            init=family.init_eta(y),
             alpha_init=alpha_n,
         )
 
@@ -258,8 +256,39 @@ class HypothesisTest(eqx.Module, metaclass=ABCMeta):
 
 class WaldTest(HypothesisTest):
     def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
-        pass
-        # wald test in here...
+        glm = GLM(family=family, max_iter=max_iter)
+
+        def _func(carry, snp):
+            M = jnp.hstack((X, snp[:, jnp.newaxis]))
+
+            # move the following to calc_dispersion() will cause circular import
+            alpha_init, eta = init_alpha_by_pois(Poisson(), X, max_iter, offset_eta, y)
+            alpha_n = family.calc_dispersion(M, y, eta, alpha=alpha_init)
+
+            # convert alpha_n to 0.1 if bad initialization
+            alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
+
+            glmstate = glm.fit(
+                M,
+                y,
+                offset_eta=offset_eta,
+                robust_se=robust_se,
+                init=eta,
+                alpha_init=alpha_n,
+            )
+
+            return carry, CisGLMState(
+                beta=glmstate.beta[-1],
+                se=glmstate.se[-1],
+                p=glmstate.p[-1],
+                num_iters=glmstate.num_iters,
+                converged=glmstate.converged,
+                alpha=glmstate.alpha,
+            )
+
+        _, state = lax.scan(_func, 0.0, G.T)
+
+        return state
 
 
 class ScoreTest(HypothesisTest):
@@ -297,3 +326,15 @@ class ScoreTest(HypothesisTest):
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
         )
+
+
+def init_alpha_by_pois(family, X, max_iter, offset_eta, y) -> Tuple[Array, Array]:
+    """
+    fit poisson to find a good initialization for alpha and eta
+    then fit NB
+    """
+    init_val = family.init_eta(y)
+    jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
+    glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
+    alpha = len(y) / jnp.sum((y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
+    return alpha, glm_state_pois.eta

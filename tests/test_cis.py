@@ -6,19 +6,14 @@ from utils import assert_array_eq
 import jax.numpy as jnp
 from jax.config import config
 
-from jaxqtl.families.distribution import NegativeBinomial, Poisson  # , Gaussian
+from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
+from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import (
-    map_cis,
-    map_cis_nominal,
-    map_cis_nominal_score,
-    map_fit_intercept_only,
-    write_parqet,
-)
+from jaxqtl.map import map_cis, map_fit_intercept_only, map_nominal, write_parqet
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
@@ -34,7 +29,7 @@ genelist_path = "../example/local/NK_new/ENSG00000198125"
 # covar_path = "../example/data/donor_features.n94.tsv"
 # pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
 # genelist_path = "../example/data/genelist.tsv"
-# genelist_path = "../example/data/genelist_chr22.tsv"
+# # genelist_path = "../example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -75,39 +70,49 @@ R_res = pd.read_csv("../example/data/n94_wald_scoretest_pois_Rres.tsv", sep="\t"
 
 # score test
 def test_cis_scoretest():
+    """
+    use data of N=94
+    """
     start = timeit.default_timer()
 
-    outdf = map_cis_nominal_score(dat, family=Poisson(), offset_eta=offset_eta)
+    outdf = map_nominal(dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest())
     stop = timeit.default_timer()
     print("Time: ", stop - start)
     write_parqet(
-        outdf=outdf, method="scoretest", out_path="./example/result/dat_n94_test"
+        outdf=outdf, method="scoretest", out_path="../example/result/dat_n94_test"
     )
 
-    assert_array_eq(outdf.Z, jnp.array(R_res["Z_scoretest"]))
+    # Z lose accuracy due to divisions from recalculations
+    assert_array_eq(
+        outdf.slope / outdf.slope_se, jnp.array(R_res["Z_scoretest"]), rtol=5e-4
+    )
     assert_array_eq(outdf.pval_nominal, jnp.array(R_res["pval_scoretest"]))
 
 
 # Wald test and slope, se estimates
 def test_cis_waldtest():
+    """
+    use data of N=94
+    """
     # n=94, one gene nominal mapping, 2592 variants, 916 ms
     # 0.86s vs. 0.90
     start = timeit.default_timer()
-    outdf = map_cis_nominal(
-        dat, family=Poisson(), offset_eta=offset_eta, robust_se=False
+    outdf = map_nominal(
+        dat, family=Poisson(), offset_eta=offset_eta, robust_se=False, test=WaldTest()
     )
     stop = timeit.default_timer()
     print("Time: ", stop - start)
-    write_parqet(outdf=outdf, method="wald", out_path="./example/result/dat_n94_test")
+    write_parqet(outdf=outdf, method="wald", out_path="../example/result/dat_n94_test")
 
     assert_array_eq(outdf.slope, jnp.array(R_res["slope"]))
-    assert_array_eq(outdf.se, jnp.array(R_res["se"]))
+    assert_array_eq(outdf.slope_se, jnp.array(R_res["se"]))
 
 
 # ~4s
 start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
+    test=ScoreTest(),
     family=NegativeBinomial(),
     offset_eta=offset_eta,
     n_perm=1000,
@@ -115,13 +120,16 @@ mapcis_out_score_nb = map_cis(
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-# mapcis_out_score_nb.to_csv(
-#     "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
-# )
+mapcis_out_score_nb.to_csv(
+    "../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False
+)
 
-out = map_cis_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta)
-out.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+out_nb = map_nominal(
+    dat, family=NegativeBinomial(), offset_eta=offset_eta, test=WaldTest()
+)
+# out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
+out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=WaldTest())
 
 # ~250s
 start = timeit.default_timer()

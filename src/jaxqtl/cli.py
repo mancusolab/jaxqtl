@@ -12,7 +12,7 @@ import jax.numpy as jnp
 from jax.config import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.utils import _setup_G_y
+from jaxqtl.infer.utils import ScoreTest, WaldTest, _setup_G_y
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -21,9 +21,8 @@ from jaxqtl.log import get_log
 from jaxqtl.map import (
     _get_geno_info,
     map_cis,
-    map_cis_nominal,
-    map_cis_nominal_score,
     map_fit_intercept_only,
+    map_nominal,
     write_parqet,
 )
 
@@ -326,6 +325,7 @@ def main(args):
             outdf_cis_score = map_cis(
                 dat,
                 family=family,
+                test=ScoreTest(),
                 standardize=True,
                 window=args.window,
                 offset_eta=offset_eta,
@@ -340,6 +340,7 @@ def main(args):
             outdf_cis_wald = map_cis(
                 dat,
                 family=family,
+                test=WaldTest(),
                 standardize=True,
                 window=args.window,
                 offset_eta=offset_eta,
@@ -352,8 +353,9 @@ def main(args):
 
     elif args.mode == "nominal":
         if args.test_method == "score":
-            out_df = map_cis_nominal_score(
+            out_df = map_cis(
                 dat,
+                test=ScoreTest(),
                 family=family,
                 standardize=True,
                 log=log,
@@ -362,8 +364,9 @@ def main(args):
             )
             write_parqet(outdf=out_df, method="score", out_path=args.out)
         elif args.test_method == "wald":
-            out_df = map_cis_nominal(
+            out_df = map_nominal(
                 dat,
+                test=WaldTest(),
                 family=family,
                 standardize=True,
                 log=log,
