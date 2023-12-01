@@ -173,6 +173,7 @@ def main(args):
         "-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model"
     )
     argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
+    argp.add_argument("-offset", type=str, help="Path to log offset (no header)")
     argp.add_argument(
         "-indlist", type=str, help="Path to individual list (no header); default is all"
     )
@@ -263,8 +264,12 @@ def main(args):
     )
 
     # before filter gene list, calculate library size and set offset
-    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-    offset_eta = jnp.log(total_libsize)
+    if args.offset is None:
+        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+        offset_eta = jnp.log(total_libsize)
+    else:
+        offset_eta = pd.read_csv(args.offset, header=None, sep="\t").iloc[:, 0]
+        offset_eta = jnp.array(offset_eta).reshape((len(offset_eta), 1))
 
     # filter genes with no expressions at all
     dat.filter_gene(geneexpr_percent_cutoff=0.0)
