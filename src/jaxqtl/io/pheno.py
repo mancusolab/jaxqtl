@@ -5,7 +5,6 @@ from dataclasses import dataclass
 from typing import Any, Optional
 
 import decoupler as dc
-import equinox as eqx
 import numpy as np
 import pandas as pd
 import qtl.io
@@ -13,6 +12,8 @@ import qtl.norm
 import scanpy as sc
 from anndata import AnnData
 from scipy.sparse import diags
+
+import equinox as eqx
 
 
 # TODO: need find out commonly used parameters

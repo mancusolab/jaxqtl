@@ -3,11 +3,12 @@ from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from typing import NamedTuple
 
-import equinox as eqx
 import numpy as np
 import pandas as pd
 from cyvcf2 import VCF
 from pandas_plink import read_plink
+
+import equinox as eqx
 
 
 class PlinkState(NamedTuple):

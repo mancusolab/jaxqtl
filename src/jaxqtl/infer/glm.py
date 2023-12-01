@@ -2,7 +2,6 @@ from abc import ABCMeta
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
-
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm

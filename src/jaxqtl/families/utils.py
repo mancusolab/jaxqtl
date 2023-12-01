@@ -1,8 +1,7 @@
-from jaxtyping import ArrayLike
-
 import jax
 import jax.numpy as jnp
 from jax.scipy.special import betainc, expit
+from jaxtyping import ArrayLike
 
 
 def _clipped_expit(x):

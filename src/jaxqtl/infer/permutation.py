@@ -2,7 +2,6 @@ from abc import ABCMeta, abstractmethod
 from typing import Tuple
 
 import equinox as eqx
-
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm

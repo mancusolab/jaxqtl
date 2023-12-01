@@ -6,10 +6,10 @@ import sys
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
-from jaxtyping import ArrayLike
 
 import jax.numpy as jnp
 from jax.config import config
+from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.utils import ScoreTest, WaldTest, _setup_G_y

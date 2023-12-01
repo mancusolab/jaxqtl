@@ -1,9 +1,9 @@
 from abc import ABCMeta, abstractmethod
 from typing import NamedTuple, Tuple
 
-import equinox as eqx
 import pandas as pd
 
+import equinox as eqx
 import jax.lax as lax
 import jax.numpy as jnp
 from jax import Array

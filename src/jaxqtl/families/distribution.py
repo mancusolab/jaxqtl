@@ -1,9 +1,9 @@
 from abc import ABCMeta, abstractmethod
 from typing import List, Tuple, Type
 
-import equinox as eqx
 import numpy as np
 
+import equinox as eqx
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats

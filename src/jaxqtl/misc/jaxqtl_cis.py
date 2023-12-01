@@ -4,14 +4,14 @@ import sys
 
 import numpy as np
 import pandas as pd
-
-# import statsmodels.api as sm
-from jaxtyping import ArrayLike
 from statsmodels.discrete.discrete_model import NegativeBinomial as smNB
 
 import jax.numpy as jnp
 from jax import random as rdm
 from jax.config import config
+
+# import statsmodels.api as sm
+from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.utils import ScoreTest, WaldTest, _setup_G_y

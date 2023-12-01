@@ -1,10 +1,9 @@
 from abc import ABCMeta, abstractmethod
 
-import equinox as eqx
-
 # from jaxopt._src.linear_solve import solve_normal_cg
 from jaxopt import linear_solve as ls
 
+import equinox as eqx
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla

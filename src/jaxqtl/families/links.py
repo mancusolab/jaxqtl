@@ -1,15 +1,14 @@
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 
 import equinox as eqx
-
 import jax.numpy as jnp
-from jax import Array
-from jax.typing import ArrayLike
+import jax.scipy.special as jspec
+from jaxtyping import Array, ArrayLike, Scalar
 
 from .utils import _clipped_expit, _grad_per_sample
 
 
-class Link(eqx.Module, metaclass=ABCMeta):
+class Link(eqx.Module):
     """
     Parent class for different link function g(mu) = eta
     """
@@ -44,11 +43,7 @@ class Link(eqx.Module, metaclass=ABCMeta):
 
 
 class Power(Link):
-    power: float
-
-    def __init__(self, power=1.0):
-        self.power = power
-        super(Power, self).__init__()
+    power: Scalar = eqx.field(converter=jnp.asarray, default=1.)
 
     def __call__(self, mu: ArrayLike) -> Array:
         return jnp.power(mu, self.power)
@@ -70,8 +65,6 @@ class Power(Link):
 
 
 class Identity(Link):
-    def __init__(self):
-        super(Identity, self).__init__()
 
     def __call__(self, mu: ArrayLike) -> Array:
         return mu
@@ -87,13 +80,14 @@ class Identity(Link):
 
 
 class Logit(Link):
+
     def __call__(self, mu: ArrayLike) -> Array:
         """
         Power transform link function
         g(mu) = log(mu / (1-mu))
         need clip for mu: 0 < mu < 1
         """
-        return jnp.log(mu / (1 - mu))
+        return jspec.logit(mu)
 
     def inverse(self, eta: ArrayLike) -> Array:
         """
@@ -117,6 +111,7 @@ class Logit(Link):
 
 
 class Log(Link):
+
     def __call__(self, mu: ArrayLike) -> Array:
         return jnp.log(mu)
 
@@ -137,19 +132,20 @@ class Log(Link):
 
 
 class NBlink(Link):
-    alpha: float
-
-    def __init__(self, alpha: float = 1.0):
-        self.alpha = alpha
-        super(NBlink, self).__init__()
+    alpha: Scalar = eqx.field(converter=jnp.asarray, default=1.)
 
     def __call__(self, mu: ArrayLike) -> Array:
-        # z = mu * self.alpha
-        return jnp.log(mu * self.alpha / (mu * self.alpha + 1))
+        mu_alpha = mu * self.alpha
+        return jnp.log(mu_alpha / (mu_alpha + 1.))
 
     def inverse(self, eta: ArrayLike) -> Array:
-        # z = jnp.exp(eta)
-        return jnp.exp(eta) / (self.alpha * (1 - jnp.exp(eta)))
+        """
+        exp(eta) / (alpha * (1 - exp(eta)) = exp(eta) / (alpha - alpha * exp(eta))
+         = - exp(eta) / (alpha * exp(eta) - alpha) = -1 / (alpha - alpha / exp(eta))
+         = -1 / (alpha * (1 - 1 / exp(eta))) = -1 / (alpha * (1 - exp(-eta))
+         = -1 / (alpha * -expm1(-eta)) = 1 / (alpha * expm1(-eta)
+        """
+        return 1. / (self.alpha * jnp.expm1(-eta))
 
     def deriv(self, mu: ArrayLike) -> Array:
         """
