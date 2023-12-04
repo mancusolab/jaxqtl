@@ -43,7 +43,7 @@ class Link(eqx.Module):
 
 
 class Power(Link):
-    power: Scalar = eqx.field(converter=jnp.asarray, default=1.)
+    power: Scalar = eqx.field(converter=jnp.asarray, default=1.0)
 
     def __call__(self, mu: ArrayLike) -> Array:
         return jnp.power(mu, self.power)
@@ -65,7 +65,6 @@ class Power(Link):
 
 
 class Identity(Link):
-
     def __call__(self, mu: ArrayLike) -> Array:
         return mu
 
@@ -80,7 +79,6 @@ class Identity(Link):
 
 
 class Logit(Link):
-
     def __call__(self, mu: ArrayLike) -> Array:
         """
         Power transform link function
@@ -111,7 +109,6 @@ class Logit(Link):
 
 
 class Log(Link):
-
     def __call__(self, mu: ArrayLike) -> Array:
         return jnp.log(mu)
 
@@ -132,11 +129,12 @@ class Log(Link):
 
 
 class NBlink(Link):
-    alpha: Scalar = eqx.field(converter=jnp.asarray, default=1.)
+    alpha: Scalar = eqx.field(converter=jnp.asarray, default=1.0)
 
     def __call__(self, mu: ArrayLike) -> Array:
+        # pre-commit trigger
         mu_alpha = mu * self.alpha
-        return jnp.log(mu_alpha / (mu_alpha + 1.))
+        return jnp.log(mu_alpha / (mu_alpha + 1.0))
 
     def inverse(self, eta: ArrayLike) -> Array:
         """
@@ -145,7 +143,7 @@ class NBlink(Link):
          = -1 / (alpha * (1 - 1 / exp(eta))) = -1 / (alpha * (1 - exp(-eta))
          = -1 / (alpha * -expm1(-eta)) = 1 / (alpha * expm1(-eta)
         """
-        return 1. / (self.alpha * jnp.expm1(-eta))
+        return 1.0 / (self.alpha * jnp.expm1(-eta))
 
     def deriv(self, mu: ArrayLike) -> Array:
         """

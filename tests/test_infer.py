@@ -9,7 +9,7 @@ from statsmodels.discrete.discrete_model import (
 from utils import assert_array_eq
 
 import jax.numpy as jnp
-from jax.config import config
+from jax import config
 
 from jaxqtl.families.distribution import Binomial, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM

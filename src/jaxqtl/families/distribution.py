@@ -1,5 +1,5 @@
-from abc import ABCMeta, abstractmethod
-from typing import List, Tuple, Type
+from abc import abstractmethod
+from typing import ClassVar, List, Tuple, Type
 
 import numpy as np
 
@@ -7,17 +7,16 @@ import equinox as eqx
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import Array, lax
-from jax.config import config
+from jax import config, lax
 from jax.scipy.special import gammaln, xlog1py, xlogy
-from jax.typing import ArrayLike
+from jaxtyping import Array, ArrayLike, ScalarLike
 
 from .links import Identity, Link, Log, Logit, NBlink, Power
 
 config.update("jax_enable_x64", True)
 
 
-class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
+class ExponentialFamily(eqx.Module):
     """
     Define parent class for exponential family distribution (One parameter EF for now).
     Provide all required link function relevant to generalized linear model (GLM).
@@ -31,12 +30,11 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
     """
 
     glink: Link
-    _links: List[Type[Link]]
+    _links: ClassVar[List[Type[Link]]]
 
-    def __init__(self, glink: Link):
-        if not any([isinstance(glink, link) for link in self._links]):
-            raise ValueError(f"Link {glink} is invalid for Family {self}")
-        self.glink = glink
+    def __check_init__(self):
+        if not any([isinstance(self.glink, link) for link in self._links]):
+            raise ValueError(f"Link {self.glink} is invalid for Family {self}")
 
     @abstractmethod
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -45,12 +43,12 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
 
     @abstractmethod
     def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
     ) -> Array:
         pass
 
     @abstractmethod
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = 0.0) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         pass
 
     def score(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -60,7 +58,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         return -X.T @ (y - mu) / self.scale(X, y, mu)
 
     def random_gen(
-        self, mu: ArrayLike, scale: float = 1.0, alpha: float = 0.0
+        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
     ) -> Array:
         pass
 
@@ -69,7 +67,7 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = jnp.zeros((1,)),
+        alpha: ScalarLike = 0.0,
     ) -> Tuple[Array, Array, Array]:
         """
         weight for each observation in IRLS
@@ -79,8 +77,8 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         mu_k = self.glink.inverse(eta)
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.scale(X, y, mu_k)
-        # weight_k = self._hlink_score(eta, alpha) / (g_deriv_k * phi)
-        weight_k = 1 / (phi * self.variance(mu_k, alpha) * g_deriv_k**2)
+        weight_k = 1.0 / (phi * self.variance(mu_k, alpha) * g_deriv_k**2)
+
         return mu_k, g_deriv_k, weight_k
 
     def init_eta(self, y: ArrayLike) -> Array:
@@ -91,8 +89,8 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.01,
-        step_size: ArrayLike = 1.0,
+        alpha: ScalarLike = 0.01,
+        step_size: ScalarLike = 1.0,
     ) -> Array:
         return jnp.zeros((1,))
 
@@ -101,23 +99,23 @@ class ExponentialFamily(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.01,
-        step_size=1.0,
-        tol=1e-3,
-        max_iter=1000,
-        offset_eta=0.0,
+        alpha: ScalarLike = 0.01,
+        step_size: ScalarLike = 1.0,
+        tol: ScalarLike = 1e-3,
+        max_iter: int = 1000,
+        offset_eta: ScalarLike = 0.0,
     ) -> Array:
         return jnp.zeros((1,))
 
     def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
-        If canonical link, then this is identify function
+        If canonical link, then this is identity function
         """
         return eta
 
     def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
-        If canonical link, then this is identify function
+        If canonical link, then this is identity function
         """
         return jnp.ones_like(eta)
 
@@ -131,13 +129,11 @@ class Gaussian(ExponentialFamily):
     we can treat normal distribution as one-parameter EF
     """
 
-    _links = [Identity, Log, Power]
-
-    def __init__(self, glink: Link = Identity()):
-        super(Gaussian, self).__init__(glink)
+    glink: Link = Identity()
+    _links: ClassVar[List[Type[Link]]] = [Identity, Log, Power]
 
     def random_gen(
-        self, mu: ArrayLike, scale: float = 1.0, alpha: float = 0.0
+        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
     ) -> Array:
         y = np.random.normal(mu, scale)
         return y
@@ -153,14 +149,14 @@ class Gaussian(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = jnp.zeros((1,)),
+        alpha: ScalarLike = 0.0,
     ) -> Array:
         mu = self.glink.inverse(eta)
         phi = self.scale(X, y, mu)
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return jnp.ones_like(mu)
 
 
@@ -172,13 +168,15 @@ class Binomial(ExponentialFamily):
     glink_der = 1/(p*(1-p)) # use log trick to calculate this
     """
 
-    _links = [Logit, Log, Identity]  # Probit, Cauchy, LogC, CLogLog, LogLog
-
-    def __init__(self, glink: Link = Logit()):
-        super(Binomial, self).__init__(glink)
+    glink: Link = Logit()
+    _links: ClassVar[List[Type[Link]]] = [
+        Logit,
+        Log,
+        Identity,
+    ]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
     def random_gen(
-        self, mu: ArrayLike, scale: float = 1.0, alpha: float = 0.0
+        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
     ) -> Array:
         y = np.random.binomial(1, mu)
         return y
@@ -191,7 +189,7 @@ class Binomial(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = jnp.zeros((1,)),
+        alpha: ScalarLike = 0.0,
     ) -> Array:
         """
         this works if we're using sigmoid link
@@ -200,21 +198,19 @@ class Binomial(ExponentialFamily):
         logprob = jnp.sum(jaxstats.bernoulli.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
-        return mu - mu**2
+    def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
+        return mu * (1 - mu)
 
     def init_eta(self, y: ArrayLike) -> Array:
-        return self.glink((y + 0.5) / 2)
+        return self.glink((y + 0.5) / 2.0)
 
 
 class Poisson(ExponentialFamily):
-    _links = [Identity, Log]  # Sqrt
-
-    def __init__(self, glink: Link = Log()):
-        super(Poisson, self).__init__(glink)
+    glink: Link = Log()
+    _links: ClassVar[List[Type[Link]]] = [Identity, Log]  # Sqrt
 
     def random_gen(
-        self, mu: ArrayLike, scale: float = 1.0, alpha: float = 0.0
+        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
     ) -> Array:
         y = np.random.poisson(mu)
         return y
@@ -227,12 +223,12 @@ class Poisson(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = jnp.zeros((1,)),
+        alpha: ScalarLike = 0.0,
     ) -> Array:
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return mu
 
 
@@ -243,17 +239,11 @@ class NegativeBinomial(ExponentialFamily):
     Now only use Log link (not the canonical link of NB)
     """
 
-    # alpha: float
-    _links = [Identity, Log, NBlink, Power]  # CLogLog
-
-    def __init__(
-        self,
-        glink: Link = Log(),
-    ):
-        super(NegativeBinomial, self).__init__(glink)
+    glink: Link = Log()
+    _links: ClassVar[List[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
 
     def random_gen(
-        self, mu: jnp.ndarray, scale: float = 1.0, alpha: float = 0.0
+        self, mu: jnp.ndarray, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
     ) -> np.ndarray:
         r = 1 / alpha
         p = mu / (mu + r)
@@ -264,7 +254,7 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.array([1.0])
 
     def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
     ) -> Array:
         r = 1.0 / alpha
         mu = self.glink.inverse(eta)
@@ -273,11 +263,11 @@ class NegativeBinomial(ExponentialFamily):
         term2 = xlog1py(r, -p) + xlogy(y, p)
         return -jnp.sum(term1 + term2)
 
-    def variance(self, mu: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))) -> Array:
+    def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return mu + alpha * (mu**2)
 
     def alpha_score_and_hessian(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ArrayLike
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
     ) -> Tuple[Array, Array]:
         """
         internally take exponential such as to take derivative wrt 1/alpha
@@ -291,7 +281,7 @@ class NegativeBinomial(ExponentialFamily):
         return _alpha_score(alpha), _alpha_hess(alpha)  # .reshape((1,))
 
     def log_alpha_score_and_hessian(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ArrayLike
+        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ScalarLike
     ) -> Tuple[Array, Array]:
         """
         internally take exponential such as to take derivative wrt 1/alpha
@@ -311,8 +301,8 @@ class NegativeBinomial(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.1,
-        step_size: ArrayLike = 0.1,
+        alpha: ScalarLike = 0.1,
+        step_size: ScalarLike = 0.1,
     ) -> Array:
         # TODO: update alpha such that it is lower bounded by 1e-6
         #   should have either parameter or smarter update on Manifold
@@ -330,7 +320,7 @@ class NegativeBinomial(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        alpha: ArrayLike = 0.1,
+        alpha: ScalarLike = 0.1,
         step_size=0.1,
         tol=1e-3,
         max_iter=1000,
@@ -359,9 +349,6 @@ class NegativeBinomial(ExponentialFamily):
         diff, num_iters, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
 
         return alpha
-
-    def _set_alpha(self, alpha_n):
-        self.alpha = alpha_n
 
     def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
