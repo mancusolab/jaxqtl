@@ -34,7 +34,11 @@ def irls(
     def body_fun(val: Tuple):
         likelihood_o, diff, num_iter, beta_o, eta_o, alpha_o = val
 
-        beta = solver(X, y, eta_o, family, step_size, offset_eta, alpha_o)
+        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta_o, alpha_o)
+        r = eta_o + g_deriv_k * (y - mu_k) * step_size - offset_eta
+
+        beta = solver(X, r, weight)
+
         eta_n = X @ beta + offset_eta
 
         alpha_n = family.update_dispersion(X, y, eta_n, alpha_o, step_size)

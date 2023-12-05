@@ -1,21 +1,14 @@
-from abc import ABCMeta, abstractmethod
-
-# from jaxopt._src.linear_solve import solve_normal_cg
-from jaxopt import linear_solve as ls
+from abc import abstractmethod
 
 import equinox as eqx
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
-from jax import Array
-from jax.typing import ArrayLike
-
-from ..families.distribution import ExponentialFamily
-
-# import jax.debug
+from jaxopt import linear_solve as ls
+from jaxtyping import Array, ArrayLike
 
 
-class LinearSolve(eqx.Module, metaclass=ABCMeta):
+class LinearSolve(eqx.Module):
     """
     Define parent class for all solvers
     eta = X @ beta, the linear component
@@ -25,12 +18,8 @@ class LinearSolve(eqx.Module, metaclass=ABCMeta):
     def __call__(
         self,
         X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        family: ExponentialFamily,
-        stepsize: float = 1.0,
-        offset_eta: ArrayLike = 0.0,
-        alpha: ArrayLike = 0.0,
+        r: ArrayLike,
+        weights: ArrayLike,
     ) -> Array:
         pass
 
@@ -39,17 +28,10 @@ class QRSolve(LinearSolve):
     def __call__(
         self,
         X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        family: ExponentialFamily,
-        stepsize: float = 1.0,
-        offset_eta: ArrayLike = 0.0,
-        alpha: ArrayLike = 0.0,
+        r: ArrayLike,
+        weights: ArrayLike,
     ) -> Array:
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
-
-        w_half = jnp.sqrt(weight)
-        r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta
+        w_half = jnp.sqrt(weights)
         w_half_r = w_half * r
         w_half_X = w_half * X
 
@@ -62,19 +44,12 @@ class CholeskySolve(LinearSolve):
     def __call__(
         self,
         X: ArrayLike,
-        y: jnp.ndarray,
-        eta: jnp.ndarray,
-        family: ExponentialFamily,
-        stepsize: float = 1.0,
-        offset_eta: ArrayLike = 0.0,
-        alpha: ArrayLike = 0.0,
+        r: ArrayLike,
+        weights: ArrayLike,
     ) -> Array:
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
-
-        r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta
-
-        XtWX = (X * weight).T @ X
-        XtWy = (X * weight).T @ r
+        Xw = X * weights
+        XtWX = Xw.T @ X
+        XtWy = Xw.T @ r
         factor = jspla.cho_factor(XtWX, lower=True)
 
         return jspla.cho_solve(factor, XtWy)
@@ -84,22 +59,14 @@ class CGSolve(LinearSolve):
     def __call__(
         self,
         X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        family: ExponentialFamily,
-        stepsize: float = 1.0,
-        offset_eta: ArrayLike = 0.0,
-        alpha: ArrayLike = 0.0,
+        r: ArrayLike,
+        weights: ArrayLike,
     ) -> Array:
         """not converged for some cases in real data;
         Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol)
         !!! Don't use this. Need future fix
         """
-
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta, alpha)
-
-        w_half = jnp.sqrt(weight)
-        r = eta + g_deriv_k * (y - mu_k) * stepsize - offset_eta
+        w_half = jnp.sqrt(weights)
         w_half_X = X * w_half
 
         def _matvec(beta):
