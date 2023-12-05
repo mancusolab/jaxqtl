@@ -1,16 +1,20 @@
-from abc import ABCMeta
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm
-from jax.typing import ArrayLike
+from jaxtyping import ArrayLike, ScalarLike
 
-from jaxqtl.families.distribution import ExponentialFamily, Gaussian
-from jaxqtl.families.utils import t_cdf
-from jaxqtl.infer.optimize import irls
-from jaxqtl.infer.solve import CholeskySolve, LinearSolve
+from ..families.distribution import (
+    ExponentialFamily,
+    Gaussian,
+    NegativeBinomial,
+    Poisson,
+)
+from ..families.utils import t_cdf
+from .optimize import irls
+from .solve import CholeskySolve, LinearSolve
 
 
 class GLMState(NamedTuple):
@@ -27,7 +31,7 @@ class GLMState(NamedTuple):
     alpha: Array  # dispersion parameter in NB model
 
 
-class GLM(eqx.Module, metaclass=ABCMeta):
+class GLM(eqx.Module):
     """
     example:
     model = jaxqtl.GLM(X, y, family="Gaussian", solver="qr", append=True)
@@ -50,25 +54,11 @@ class GLM(eqx.Module, metaclass=ABCMeta):
      ============= ===== === ===== ====== ======= === ==== ====== ====== ====
     """
 
-    family: ExponentialFamily
-    solver: LinearSolve
-    max_iter: int
-    tol: float
-    step_size: float
-
-    def __init__(
-        self,
-        family: ExponentialFamily = Gaussian(),
-        solver: LinearSolve = CholeskySolve(),
-        max_iter: int = 1000,
-        tol: float = 1e-3,
-        step_size: float = 1.0,
-    ) -> None:
-        self.max_iter = max_iter
-        self.tol = tol
-        self.family = family
-        self.solver = solver
-        self.step_size = step_size
+    family: ExponentialFamily = Gaussian()
+    solver: LinearSolve = CholeskySolve()
+    max_iter: int = 1000
+    tol: float = 1e-3
+    step_size: float = 1.0
 
     def wald_test(self, TS: ArrayLike, df: int) -> Array:
         """
@@ -90,7 +80,7 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         weight: ArrayLike,
         eta: ArrayLike,
         mu: ArrayLike,
-        alpha: ArrayLike = 0.0,
+        alpha: ScalarLike = 0.0,
     ) -> Tuple[Array, Array, Array]:
         infor = (X * weight).T @ X
         infor_inv = jnpla.inv(infor)
@@ -107,11 +97,9 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         X: ArrayLike,
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
-        robust_se: bool = False,
         init: ArrayLike = None,
-        alpha_init: ArrayLike = jnp.float64(
-            jnp.zeros((1,))
-        ),  # start with float64 for non-NB family
+        alpha_init: ScalarLike = 0.0,
+        robust_se: bool = False,
     ) -> GLMState:
         """Report Wald test p value"""
         beta, n_iter, converged, alpha = irls(
@@ -141,9 +129,9 @@ class GLM(eqx.Module, metaclass=ABCMeta):
         beta_se = jnp.where(robust_se, huber_se, infor_se)
 
         beta = beta.squeeze()  # (p,)
-        TS = beta / beta_se
+        stat = beta / beta_se
 
-        pval_wald = self.wald_test(TS, df)
+        pval_wald = self.wald_test(stat, df)
 
         return GLMState(
             beta,
@@ -158,6 +146,33 @@ class GLM(eqx.Module, metaclass=ABCMeta):
             resid,
             alpha,
         )
+
+    def calc_eta_and_dispersion(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        offset_eta: ArrayLike = 0.0,
+    ) -> Array:
+        n, p = X.shape
+        init_val = self.family.init_eta(y)
+        if isinstance(self.family, NegativeBinomial):
+            jaxqtl_pois = GLM(family=Poisson(), max_iter=self.max_iter)
+            glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
+
+            # fit covariate-only model (null)
+            alpha_init = n / jnp.sum(
+                (y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2
+            )
+            eta = glm_state_pois.eta
+            disp = self.family.estimate_dispersion(X, y, eta, alpha=alpha_init)
+
+            # convert disp to 0.1 if bad initialization
+            disp = jnp.nan_to_num(disp, nan=0.1)
+        else:
+            eta = jnp.asarray(0.0)
+            disp = jnp.asarray(0.0)
+
+        return eta, disp
 
 
 def huber_var(

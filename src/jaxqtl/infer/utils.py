@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 from typing import NamedTuple, Tuple
 
 import pandas as pd
@@ -6,30 +6,18 @@ import pandas as pd
 import equinox as eqx
 import jax.lax as lax
 import jax.numpy as jnp
-from jax import Array
 from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
-from jax.typing import ArrayLike
+from jaxtyping import Array, ArrayLike
 
-from jaxqtl.families.distribution import ExponentialFamily, Poisson
 from jaxqtl.infer.glm import GLM, GLMState
 from jaxqtl.io.readfile import ReadyDataState
 
 
 class CisGLMState(NamedTuple):
-    # af: Array
-    # ma_count: Array
     beta: Array
     se: Array
     p: Array
-    num_iters: Array
-    converged: Array
-    alpha: Array
-
-
-class CisGLMScoreState(NamedTuple):
-    p: Array
-    Z: Array
     num_iters: Array
     converged: Array
     alpha: Array
@@ -85,142 +73,6 @@ def _setup_G_y(
     return G, jnp.array(y), var_df
 
 
-@eqx.filter_jit
-def cis_scan(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    family: ExponentialFamily,
-    offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
-    max_iter: int = 100,
-) -> CisGLMState:
-    """
-    run GLM across variants in a flanking window of given gene
-    cis-widow: plus and minus W base pairs, total length 2*cis_window
-    Wald test from fitting full alt model
-    cis_scan is used for nominal mapping
-    """
-    glm = GLM(family=family, max_iter=max_iter)
-
-    # initiate SNP scan with model with covariate
-    glmstate_cov_only = glm.fit(
-        X, y, offset_eta=offset_eta, robust_se=robust_se, init=family.init_eta(y)
-    )
-
-    def _func(carry, snp):
-        M = jnp.hstack((X, snp[:, jnp.newaxis]))
-        glmstate = glm.fit(
-            M,
-            y,
-            offset_eta=offset_eta,
-            robust_se=robust_se,
-            init=glmstate_cov_only.eta,
-        )
-
-        return carry, CisGLMState(
-            beta=glmstate.beta[-1],
-            se=glmstate.se[-1],
-            p=glmstate.p[-1],
-            num_iters=glmstate.num_iters,
-            converged=glmstate.converged,
-            alpha=jnp.zeros((1,)),
-        )
-
-    _, state = lax.scan(_func, 0.0, G.T)
-
-    return state
-
-
-@eqx.filter_jit
-def cis_scan_NB(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    family: ExponentialFamily,
-    offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
-    max_iter: int = 100,
-) -> CisGLMState:
-    """
-    fit full model for wald test in NB model
-    """
-    glm = GLM(family=family, max_iter=max_iter)
-
-    def _func(carry, snp):
-        M = jnp.hstack((X, snp[:, jnp.newaxis]))
-
-        # init_val = family.init_eta(y)
-        #
-        # jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
-        # glm_state_pois = jaxqtl_pois.fit(M, y, init=init_val, offset_eta=offset_eta)
-        #
-        # alpha_init = len(y) / jnp.sum(
-        #     (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
-        # )
-        alpha_n = family.calc_dispersion(
-            M, y
-        )  # , glm_state_pois.eta, alpha=alpha_init)
-
-        # convert alpha_n to 0.1 if bad initialization
-        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
-
-        glmstate = glm.fit(
-            M,
-            y,
-            offset_eta=offset_eta,
-            robust_se=robust_se,
-            # init=glm_state_pois.eta,
-            init=family.init_eta(y),
-            alpha_init=alpha_n,
-        )
-
-        return carry, CisGLMState(
-            beta=glmstate.beta[-1],
-            se=glmstate.se[-1],
-            p=glmstate.p[-1],
-            num_iters=glmstate.num_iters,
-            converged=glmstate.converged,
-            alpha=glmstate.alpha,
-        )
-
-    _, state = lax.scan(_func, 0.0, G.T)
-
-    return state
-
-
-@eqx.filter_jit
-def cis_scan_intercept_only(
-    X: ArrayLike,
-    Y: ArrayLike,
-    family: ExponentialFamily,
-    offset_eta: ArrayLike = 0.0,
-    maxiter: int = 100,
-) -> Array:
-    """
-    run GLM across variants in a flanking window of given gene
-    cis-widow: plus and minus W base pairs, total length 2*cis_window
-    """
-    glm = GLM(family=family, max_iter=maxiter)
-    n, _ = Y.shape
-
-    def _func(carry, y):
-        init_val = glm.family.init_eta(y.reshape((n, 1)))
-        glmstate = glm.fit(
-            X,
-            y.reshape((n, 1)),
-            offset_eta=offset_eta,
-            init=init_val,
-        )
-
-        # return resid
-        return carry, y.reshape((n,)) - glmstate.mu.reshape((n,))
-
-    _, state = lax.scan(_func, 0.0, Y.T)
-
-    return state
-
-
 def score_test_snp(
     G: ArrayLike, X: ArrayLike, glm_null_res: GLMState
 ) -> Tuple[Array, Array, Array, Array]:
@@ -245,7 +97,7 @@ def score_test_snp(
     return Z, pval, g_score, g_var
 
 
-class HypothesisTest(eqx.Module, metaclass=ABCMeta):
+class HypothesisTest(eqx.Module):
     def __call__(self, X, G, y, family, offset_eta, robust_se, max_iter):
         return self.test(X, G, y, family, offset_eta, robust_se, max_iter)
 
@@ -260,21 +112,14 @@ class WaldTest(HypothesisTest):
 
         def _func(carry, snp):
             M = jnp.hstack((X, snp[:, jnp.newaxis]))
-
-            # move the following to calc_dispersion() will cause circular import
-            alpha_init, eta = init_alpha_by_pois(Poisson(), X, max_iter, offset_eta, y)
-            alpha_n = family.calc_dispersion(M, y, eta, alpha=alpha_init)
-
-            # convert alpha_n to 0.1 if bad initialization
-            alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
-
+            eta, alpha_n = glm.calc_eta_and_dispersion(M, y, offset_eta)
             glmstate = glm.fit(
                 M,
                 y,
                 offset_eta=offset_eta,
-                robust_se=robust_se,
                 init=eta,
                 alpha_init=alpha_n,
+                robust_se=robust_se,
             )
 
             return carry, CisGLMState(
@@ -295,23 +140,11 @@ class ScoreTest(HypothesisTest):
     def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
         glm = GLM(family=family, max_iter=max_iter)
 
-        init_val = family.init_eta(y)
-
-        jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
-        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
-
-        # fit covariate-only model (null)
-        alpha_init = len(y) / jnp.sum(
-            (y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2
-        )
-        alpha_n = family.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
-
-        # convert alpha_n to 0.1 if bad initialization
-        alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
+        eta, alpha_n = glm.calc_eta_and_dispersion(X, y, offset_eta)
 
         # Note: linear model might start with bad init
         glmstate_cov_only = glm.fit(
-            X, y, offset_eta=offset_eta, init=glm_state_pois.eta, alpha_init=alpha_n
+            X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n
         )
 
         Z, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
@@ -326,15 +159,3 @@ class ScoreTest(HypothesisTest):
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
         )
-
-
-def init_alpha_by_pois(family, X, max_iter, offset_eta, y) -> Tuple[Array, Array]:
-    """
-    fit poisson to find a good initialization for alpha and eta
-    then fit NB
-    """
-    init_val = family.init_eta(y)
-    jaxqtl_pois = GLM(family=Poisson(), max_iter=max_iter)
-    glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
-    alpha = len(y) / jnp.sum((y / family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
-    return alpha, glm_state_pois.eta

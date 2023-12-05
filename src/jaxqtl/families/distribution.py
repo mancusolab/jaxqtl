@@ -7,13 +7,11 @@ import equinox as eqx
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
-from jax import config, lax
+from jax import lax
 from jax.scipy.special import gammaln, xlog1py, xlogy
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from .links import Identity, Link, Log, Logit, NBlink, Power
-
-config.update("jax_enable_x64", True)
 
 
 class ExponentialFamily(eqx.Module):
@@ -92,9 +90,9 @@ class ExponentialFamily(eqx.Module):
         alpha: ScalarLike = 0.01,
         step_size: ScalarLike = 1.0,
     ) -> Array:
-        return jnp.zeros((1,))
+        return jnp.asarray(0.0)
 
-    def calc_dispersion(
+    def estimate_dispersion(
         self,
         X: ArrayLike,
         y: ArrayLike,
@@ -105,7 +103,7 @@ class ExponentialFamily(eqx.Module):
         max_iter: int = 1000,
         offset_eta: ScalarLike = 0.0,
     ) -> Array:
-        return jnp.zeros((1,))
+        return jnp.asarray(0.0)
 
     def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
         """
@@ -251,7 +249,7 @@ class NegativeBinomial(ExponentialFamily):
         return y
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        return jnp.array([1.0])
+        return jnp.asarray(1.0)
 
     def negloglikelihood(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
@@ -315,7 +313,7 @@ class NegativeBinomial(ExponentialFamily):
 
         return jnp.exp(log_alpha_n)
 
-    def calc_dispersion(
+    def estimate_dispersion(
         self,
         X: ArrayLike,
         y: ArrayLike,
@@ -326,8 +324,6 @@ class NegativeBinomial(ExponentialFamily):
         max_iter=1000,
         offset_eta=0.0,
     ) -> Array:
-        # alpha, eta = init_alpha_by_pois(Poisson(), X, max_iter, offset_eta, y)
-
         def body_fun(val: Tuple):
             diff, num_iter, alpha_o = val
             log_alpha_o = jnp.log(alpha_o)

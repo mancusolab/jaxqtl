@@ -141,7 +141,7 @@ def run_sim(
         alpha_init = len(y) / jnp.sum(
             (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
         )
-        alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
+        alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
         # convert alpha_n to 0.1 if bad initialization
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
@@ -189,7 +189,9 @@ def run_sim(
         alpha_init = len(y) / jnp.sum(
             (y / nb_fam.glink.inverse(glm_null_pois.eta) - 1) ** 2
         )
-        alpha_n = nb_fam.calc_dispersion(X_cov, y, glm_null_pois.eta, alpha=alpha_init)
+        alpha_n = nb_fam.estimate_dispersion(
+            X_cov, y, glm_null_pois.eta, alpha=alpha_init
+        )
         # convert alpha_n to 0.1 if bad initialization
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 

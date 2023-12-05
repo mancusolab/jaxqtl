@@ -72,7 +72,7 @@ def test_sim_NB():
     alpha_init = len(y) / jnp.sum(
         (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
     )
-    alpha_n = nb_fam.calc_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
+    alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),

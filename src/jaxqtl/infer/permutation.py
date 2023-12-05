@@ -1,4 +1,4 @@
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 from typing import Tuple
 
 import equinox as eqx
@@ -7,7 +7,6 @@ import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
 from jax import Array, grad, jit, lax
-from jax.config import config
 from jax.scipy.special import polygamma
 from jax.scipy.stats import norm
 from jax.typing import ArrayLike
@@ -15,10 +14,8 @@ from jax.typing import ArrayLike
 from jaxqtl.families.distribution import ExponentialFamily
 from jaxqtl.infer.utils import HypothesisTest, ScoreTest
 
-config.update("jax_enable_x64", True)
 
-
-class Permutation(eqx.Module, metaclass=ABCMeta):
+class Permutation(eqx.Module):
     """
     For a given cis-window around a gene (L variants), perform permutation test to
     identify (one candidate) eQTL for this gene.
@@ -45,10 +42,7 @@ class Permutation(eqx.Module, metaclass=ABCMeta):
 
 
 class DirectPerm(Permutation):
-    max_perm_direct: int
-
-    def __init__(self, max_perm_direct: int = 10000):
-        self.max_perm_direct = max_perm_direct
+    max_perm_direct: int = 10000
 
     def __call__(
         self,
@@ -192,12 +186,8 @@ def _calc_adjp_beta(p_obs: ArrayLike, params: ArrayLike) -> Array:
 
 
 class BetaPerm(DirectPerm):
-    max_perm_direct: int
-    max_iter_beta: int
-
-    def __init__(self, max_perm_direct: int = 1000, max_iter_beta: int = 1000):
-        self.max_iter_beta = max_iter_beta
-        super().__init__(max_perm_direct)
+    max_perm_direct: int = 1000
+    max_iter_beta: int = 1000
 
     def __call__(  # type: ignore
         self,
