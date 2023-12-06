@@ -10,13 +10,14 @@ from jax import numpy as jnp
 from jax.typing import ArrayLike
 from jaxtyping import Array
 
-from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.permutation import BetaPerm
-from jaxqtl.infer.utils import CisGLMState, HypothesisTest, ScoreTest
-from jaxqtl.io.readfile import ReadyDataState
-from jaxqtl.log import get_log
-from jaxqtl.map.utils import _get_geno_info, _setup_G_y
-from jaxqtl.post.qvalue import add_qvalues
+from ..families.distribution import ExponentialFamily
+from ..infer.permutation import BetaPerm
+from ..infer.stderr import ErrVarEstimation, FisherInfoError, HuberError
+from ..infer.utils import CisGLMState, HypothesisTest, ScoreTest
+from ..io.readfile import ReadyDataState
+from ..log import get_log
+from ..post.qvalue import add_qvalues
+from .utils import _get_geno_info, _setup_G_y
 
 
 @dataclass
@@ -116,7 +117,7 @@ def map_cis(
     ]
 
     results = []
-
+    se_estimator = FisherInfoError() if robust_se else HuberError()
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -156,7 +157,7 @@ def map_cis(
             g_key,
             sig_level,
             offset_eta,
-            robust_se,
+            se_estimator,
             n_perm,
             test,
             max_iter,
@@ -214,7 +215,7 @@ def map_cis_single(
     key_init: rdm.PRNGKey,
     sig_level: float = 0.05,
     offset_eta: ArrayLike = 0.0,
-    robust_se: bool = False,
+    se_estimator: ErrVarEstimation = FisherInfoError(),
     n_perm: int = 1000,
     test: HypothesisTest = ScoreTest(),
     max_iter: int = 500,
@@ -226,7 +227,7 @@ def map_cis_single(
     sig_level: desired significance level (not used)
     perm: Permutation method
     """
-    cisglmstate = test(X, G, y, family, offset_eta, robust_se, max_iter)
+    cisglmstate = test(X, G, y, family, offset_eta, se_estimator, max_iter)
 
     beta_key, direct_key = rdm.split(key_init)
 
@@ -243,7 +244,7 @@ def map_cis_single(
         sig_level,
         offset_eta,
         test,
-        robust_se,
+        se_estimator,
         max_iter,
     )
 

@@ -9,7 +9,9 @@ from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
-from jaxqtl.infer.glm import GLM, GLMState
+from ..families.distribution import ExponentialFamily
+from .glm import GLM, GLMState
+from .stderr import ErrVarEstimation, FisherInfoError
 
 
 class CisGLMState(NamedTuple):
@@ -44,16 +46,43 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
 
 
 class HypothesisTest(eqx.Module):
-    def __call__(self, X, G, y, family, offset_eta, robust_se, max_iter):
-        return self.test(X, G, y, family, offset_eta, robust_se, max_iter)
+    def __call__(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+    ) -> CisGLMState:
+        return self.test(X, G, y, family, offset_eta, se_estimator, max_iter)
 
     @abstractmethod
-    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+    ) -> CisGLMState:
         pass
 
 
 class WaldTest(HypothesisTest):
-    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+    ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 
         def _func(carry, snp):
@@ -65,7 +94,7 @@ class WaldTest(HypothesisTest):
                 offset_eta=offset_eta,
                 init=eta,
                 alpha_init=alpha_n,
-                robust_se=robust_se,
+                se_estimator=se_estimator,
             )
 
             return carry, CisGLMState(
@@ -83,13 +112,24 @@ class WaldTest(HypothesisTest):
 
 
 class ScoreTest(HypothesisTest):
-    def test(self, X, G, y, family, offset_eta, robust_se, max_iter):
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+    ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 
         eta, alpha_n = glm.calc_eta_and_dispersion(X, y, offset_eta)
 
         # Note: linear model might start with bad init
-        glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n)
+        glmstate_cov_only = glm.fit(
+            X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n, se_estimator=se_estimator
+        )
 
         zscore, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
         beta = score / score_var

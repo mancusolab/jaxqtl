@@ -16,7 +16,6 @@ class IRLSState(NamedTuple):
     alpha: Array
 
 
-# # @partial(jax.jit, static_argnames=["max_iter", "tol"])
 @eqx.filter_jit
 def irls(
     X: ArrayLike,

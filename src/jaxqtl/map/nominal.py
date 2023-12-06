@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from jaxtyping import ArrayLike
 
 from ..families.distribution import ExponentialFamily
+from ..infer.stderr import FisherInfoError, HuberError
 from ..infer.utils import HypothesisTest, ScoreTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
@@ -58,7 +59,7 @@ def map_nominal(
     alpha = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
-
+    se_estimator = FisherInfoError() if robust_se else HuberError()
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -88,7 +89,7 @@ def map_nominal(
                 str(rend),
             )
 
-        result = test(X, G, y, family, offset_eta, robust_se, max_iter)
+        result = test(X, G, y, family, offset_eta, se_estimator, max_iter)
 
         if verbose:
             log.info(

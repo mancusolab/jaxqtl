@@ -12,8 +12,9 @@ from jax.scipy.special import polygamma
 from jax.scipy.stats import norm
 from jax.typing import ArrayLike
 
-from jaxqtl.families.distribution import ExponentialFamily
-from jaxqtl.infer.utils import HypothesisTest, ScoreTest
+from ..families.distribution import ExponentialFamily
+from .stderr import ErrVarEstimation, FisherInfoError
+from .utils import HypothesisTest, ScoreTest
 
 
 class Permutation(eqx.Module):
@@ -36,7 +37,7 @@ class Permutation(eqx.Module):
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
         test: HypothesisTest = ScoreTest(),
-        robust_se: bool = False,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 500,
     ) -> Array:
         pass
@@ -56,14 +57,14 @@ class DirectPerm(Permutation):
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
         test: HypothesisTest = ScoreTest(),
-        robust_se: bool = False,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 500,
     ) -> Array:
         def _func(key, x):
             del x
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se, max_iter)
+            glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], se_estimator, max_iter)
 
             return key, jnp.nanmin(glmstate.p)
 
@@ -192,7 +193,7 @@ class BetaPerm(DirectPerm):
         sig_level: float = 0.05,
         offset_eta: ArrayLike = 0.0,
         test: HypothesisTest = ScoreTest(),
-        robust_se: bool = False,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 500,
     ) -> Tuple[Array, Array]:
         """Perform permutation to estimate beta distribution parameters
@@ -212,7 +213,7 @@ class BetaPerm(DirectPerm):
             sig_level,
             offset_eta,
             test,
-            robust_se,
+            se_estimator,
             max_iter,
         )
         p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
