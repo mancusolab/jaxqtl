@@ -102,19 +102,19 @@ class ExponentialFamily(eqx.Module):
     ) -> Array:
         return jnp.asarray(0.0)
 
-    def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         """
         If canonical link, then this is identity function
         """
-        return eta
+        return jnp.asarray(eta)
 
-    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink_score(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         """
         If canonical link, then this is identity function
         """
         return jnp.ones_like(eta)
 
-    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink_hess(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return jnp.zeros_like(eta)
 
 
@@ -333,14 +333,14 @@ class NegativeBinomial(ExponentialFamily):
 
         return alpha
 
-    def _hlink(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         """
         Using log link in g function
         """
         return jnp.log1p(-1.0 / (alpha * jnp.exp(eta)))
 
-    def _hlink_score(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink_score(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return 1.0 / (alpha * jnp.exp(eta) + 1.0)
 
-    def _hlink_hess(self, eta: ArrayLike, alpha: ArrayLike = jnp.zeros((1,))):
+    def _hlink_hess(self, eta: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
         return -alpha * jnp.exp(eta) / (alpha * jnp.exp(eta) + 1) ** 2
