@@ -131,6 +131,9 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "jaxopt"]
 # Tests can use magic values, assertions, and relative imports
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 
+[tool.mypy]
+allow_redefinition = true
+
 [tool.coverage.run]
 source_pkgs = ["jaxqtl", "tests"]
 branch = true
@@ -140,12 +143,22 @@ omit = [
 ]
 
 [tool.coverage.paths]
-giddyup = ["src/jaxqtl", "*/jaxqtl/src/jaxqtl"]
+jaxqtl = ["src/jaxqtl", "*/jaxqtl/src/jaxqtl"]
 tests = ["tests", "*/jaxqtl/tests"]
 
 [tool.coverage.report]
 exclude_lines = [
     "no cov",
-    "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
+    # Don't complain if non-runnable code isn't run:
+    "if 0:",
+    "if __name__ == .__main__.:",
+    # Have to re-enable the standard pragma
+    "pragma: no cover",
+    # Don't complain about missing debug-only code:
+    "def __repr__",
+    "if self.debug",
+    # Don't complain if tests don't hit defensive assertion code:
+    "raise AssertionError",
+    "raise NotImplementedError",
 ]
