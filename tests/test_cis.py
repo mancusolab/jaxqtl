@@ -13,7 +13,8 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis, map_fit_intercept_only, map_nominal, write_parqet
+from jaxqtl.map.cis import map_cis, write_parqet
+from jaxqtl.map.nominal import map_nominal
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
@@ -112,8 +113,8 @@ def test_cis_waldtest():
 start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
-    test=ScoreTest(),
     family=NegativeBinomial(),
+    test=ScoreTest(),
     offset_eta=offset_eta,
     n_perm=1000,
     compute_qvalue=False,
@@ -137,17 +138,12 @@ mapcis_out_wald = map_cis(
     dat,
     family=Poisson(),
     offset_eta=offset_eta,
-    robust_se=False,
     n_perm=1000,
+    robust_se=False,
     compute_qvalue=True,
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
 mapcis_out_wald.to_csv(
     "./example/result/n94_waldtest_pois_res.tsv", sep="\t", index=False
-)
-
-# fit intercept only model for each gene to check model assumptions
-mapcis_intercept_only_mu = map_fit_intercept_only(
-    dat, family=Poisson(), offset_eta=offset_eta
 )

@@ -14,7 +14,8 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import H5AD, PheBedReader, SingleCellFilter
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import map_cis, map_nominal
+from jaxqtl.map.cis import map_cis
+from jaxqtl.map.nominal import map_nominal
 from jaxqtl.post import rfunc
 
 sys.path.insert(1, os.path.dirname(__file__))

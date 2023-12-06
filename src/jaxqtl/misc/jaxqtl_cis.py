@@ -14,18 +14,15 @@ from jax.config import config
 from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.utils import ScoreTest, WaldTest, _setup_G_y
+from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import ReadyDataState, create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map import (  # _get_geno_info,
-    map_cis,
-    map_fit_intercept_only,
-    map_nominal,
-    write_parqet,
-)
+from jaxqtl.map.cis import map_cis, write_parqet
+from jaxqtl.map.nominal import map_nominal
+from jaxqtl.map.utils import _setup_G_y
 
 
 def get_logger(name, path=None):
@@ -306,8 +303,8 @@ def main(args):
                 standardize=True,
                 window=args.window,
                 offset_eta=offset_eta,
-                compute_qvalue=args.qvalue,
                 n_perm=args.nperm,
+                compute_qvalue=args.qvalue,
                 log=log,
             )
             outdf_cis_score.to_csv(
@@ -321,9 +318,9 @@ def main(args):
                 standardize=True,
                 window=args.window,
                 offset_eta=offset_eta,
-                compute_qvalue=args.qvalue,
-                robust_se=args.robust,
                 n_perm=args.nperm,
+                robust_se=args.robust,
+                compute_qvalue=args.qvalue,
                 log=log,
             )
             outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
@@ -354,12 +351,13 @@ def main(args):
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
 
     elif args.mode == "fitnull":
-        mapcis_intercept_only_mu = map_fit_intercept_only(
-            dat, family=family, offset_eta=offset_eta
-        )
-        mapcis_intercept_only_mu.to_csv(
-            args.out + ".fit.resid.tsv.gz", sep="\t", index=False
-        )
+        pass
+        # mapcis_intercept_only_mu = map_fit_intercept_only(
+        #     dat, family=family, offset_eta=offset_eta
+        # )
+        # mapcis_intercept_only_mu.to_csv(
+        #     args.out + ".fit.resid.tsv.gz", sep="\t", index=False
+        # )
     else:
         log.info("please select available methods.")
         sys.exit()
