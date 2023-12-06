@@ -36,11 +36,11 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
     g_var = jnp.sum(w_g_resid**2, axis=0)
 
     g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
-    Z = g_score / jnp.sqrt(g_var)
+    zscore = g_score / jnp.sqrt(g_var)
 
-    pval = norm.cdf(-abs(Z)) * 2
+    pval = 2 * norm.sf(abs(zscore))
 
-    return Z, pval, g_score, g_var
+    return zscore, pval, g_score, g_var
 
 
 class HypothesisTest(eqx.Module):
@@ -91,7 +91,7 @@ class ScoreTest(HypothesisTest):
         # Note: linear model might start with bad init
         glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n)
 
-        Z, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
+        zscore, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
         beta = score / score_var
         se = 1.0 / jnp.sqrt(score_var)
 
