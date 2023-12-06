@@ -4,6 +4,7 @@ from typing import NamedTuple, Tuple
 import equinox as eqx
 import jax.lax as lax
 import jax.numpy as jnp
+
 from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
@@ -20,9 +21,7 @@ class CisGLMState(NamedTuple):
     alpha: Array
 
 
-def score_test_snp(
-    G: ArrayLike, X: ArrayLike, glm_null_res: GLMState
-) -> Tuple[Array, Array, Array, Array]:
+def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[Array, Array, Array, Array]:
     """test for additional covariate g
     only require fit null model using fitted covariate only model + new vector g
     X is the full design matrix containing covariates and g
@@ -90,9 +89,7 @@ class ScoreTest(HypothesisTest):
         eta, alpha_n = glm.calc_eta_and_dispersion(X, y, offset_eta)
 
         # Note: linear model might start with bad init
-        glmstate_cov_only = glm.fit(
-            X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n
-        )
+        glmstate_cov_only = glm.fit(X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n)
 
         Z, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
         beta = score / score_var

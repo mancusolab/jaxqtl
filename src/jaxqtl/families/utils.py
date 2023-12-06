@@ -1,5 +1,6 @@
 import jax
 import jax.numpy as jnp
+
 from jax.scipy.special import betainc, expit
 from jaxtyping import ArrayLike
 
@@ -29,6 +30,4 @@ def t_cdf(value: ArrayLike, df: float, loc: ArrayLike = 0.0, scale: ArrayLike = 
 
     # when scaled < 0, returns 0.5 * Beta(df/2, 0.5).cdf(beta_value)
     # when scaled > 0, returns 1 - 0.5 * Beta(df/2, 0.5).cdf(beta_value)
-    return 0.5 * (
-        1 + jnp.sign(scaled) - jnp.sign(scaled) * betainc(0.5 * df, 0.5, beta_value)
-    )
+    return 0.5 * (1 + jnp.sign(scaled) - jnp.sign(scaled) * betainc(0.5 * df, 0.5, beta_value))

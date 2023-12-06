@@ -3,6 +3,7 @@ from abc import abstractmethod
 import equinox as eqx
 import jax.numpy as jnp
 import jax.scipy.special as jspec
+
 from jaxtyping import Array, ArrayLike, Scalar
 
 from .utils import _clipped_expit, _grad_per_sample

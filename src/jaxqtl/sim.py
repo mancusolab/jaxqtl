@@ -3,9 +3,11 @@ from typing import NamedTuple
 import numpy as np
 import pandas as pd
 import qtl.norm
+
 from numpy import ndarray
 
 import jax.numpy as jnp
+
 from jax import Array
 
 from .families.distribution import (
@@ -138,26 +140,20 @@ def run_sim(
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=False)
 
         nb_fam = NegativeBinomial()
-        alpha_init = len(y) / jnp.sum(
-            (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
-        )
+        alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2)
         alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
         # convert alpha_n to 0.1 if bad initialization
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
         jaxqtl_nb = GLM(family=nb_fam)
-        glm_state_nb = jaxqtl_nb.fit(
-            X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=False
-        )
+        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=False)
 
         pval_nb_wald = np.append(pval_nb_wald, glm_state_nb.p[-1])
         pval_pois_wald = np.append(pval_pois_wald, glm_state_pois.p[-1])
 
         # robust poisson and NB
         glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=True)
-        glm_state_nb = jaxqtl_nb.fit(
-            X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=True
-        )
+        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=True)
 
         pval_nb_wald_robust = np.append(pval_nb_wald_robust, glm_state_nb.p[-1])
         pval_pois_wald_robust = np.append(pval_pois_wald_robust, glm_state_pois.p[-1])
@@ -180,27 +176,17 @@ def run_sim(
         # score test for poisson and NB
         X_cov = X[:, 0:-1]
         glm_null_pois = jaxqtl_pois.fit(X_cov, y, init=init_pois)
-        _, pval, _, _ = score_test_snp(
-            G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_null_pois
-        )
+        _, pval, _, _ = score_test_snp(G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_null_pois)
 
         pval_pois_score = np.append(pval_pois_score, pval)
 
-        alpha_init = len(y) / jnp.sum(
-            (y / nb_fam.glink.inverse(glm_null_pois.eta) - 1) ** 2
-        )
-        alpha_n = nb_fam.estimate_dispersion(
-            X_cov, y, glm_null_pois.eta, alpha=alpha_init
-        )
+        alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_null_pois.eta) - 1) ** 2)
+        alpha_n = nb_fam.estimate_dispersion(X_cov, y, glm_null_pois.eta, alpha=alpha_init)
         # convert alpha_n to 0.1 if bad initialization
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
-        glm_state_nb = jaxqtl_nb.fit(
-            X_cov, y, init=glm_null_pois.eta, alpha_init=alpha_n
-        )
-        _, pval, _, _ = score_test_snp(
-            G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb
-        )
+        glm_state_nb = jaxqtl_nb.fit(X_cov, y, init=glm_null_pois.eta, alpha_init=alpha_n)
+        _, pval, _, _ = score_test_snp(G=X[:, -1].reshape((n, 1)), X=X_cov, glm_null_res=glm_state_nb)
 
         pval_nb_score = np.append(pval_nb_score, pval)
 

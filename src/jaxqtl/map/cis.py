@@ -5,6 +5,7 @@ import numpy as np
 import pandas as pd
 
 import jax.random as rdm
+
 from jax import numpy as jnp
 from jax.typing import ArrayLike
 from jaxtyping import Array
@@ -24,15 +25,11 @@ class MapCisSingleState:
     pval_beta: Array
     beta_param: Array
 
-    def get_lead(
-        self, key: rdm.PRNGKey, random_tiebreak: bool = False
-    ) -> Tuple[List, int]:
+    def get_lead(self, key: rdm.PRNGKey, random_tiebreak: bool = False) -> Tuple[List, int]:
         # break tie to call lead eQTL
         if random_tiebreak:
             key, split_key = rdm.split(key)
-            ties_ind = jnp.argwhere(
-                self.cisglm.p == jnp.nanmin(self.cisglm.p)
-            )  # return (k, 1)
+            ties_ind = jnp.argwhere(self.cisglm.p == jnp.nanmin(self.cisglm.p))  # return (k, 1)
             vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
         else:
             # take first occurrence
@@ -48,9 +45,7 @@ class MapCisSingleState:
             self.cisglm.se[vdx],
             self.pval_beta,
             self.cisglm.alpha[vdx],
-            self.cisglm.converged[
-                vdx
-            ],  # if wald test, this full model converged or not; if score, then cov-model
+            self.cisglm.converged[vdx],  # if wald test, this full model converged or not; if score, then cov-model
         ]
 
         result = [element.tolist() for element in result]
@@ -175,9 +170,7 @@ def map_cis(
                 str(rend),
             )
 
-        result_out = _prepare_cis_result(
-            G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df
-        )
+        result_out = _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df)
         results.append(result_out)
 
     # filter results based on user specification (e.g., report all, report top, etc)
@@ -189,9 +182,7 @@ def map_cis(
     return result_df
 
 
-def _prepare_cis_result(
-    G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df
-):
+def _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df):
     g_info = _get_geno_info(G)
     # get info at lead hit, and lead hit index
     row, vdx = result.get_lead(key, random_tiebreak)

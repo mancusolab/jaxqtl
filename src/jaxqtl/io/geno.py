@@ -1,10 +1,12 @@
 import gzip
+
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from typing import NamedTuple
 
 import numpy as np
 import pandas as pd
+
 from cyvcf2 import VCF
 from pandas_plink import read_plink
 
@@ -72,9 +74,7 @@ class VCFReader(GenoIO):
         vcf.close()
 
         #  chrom        snp       cm     pos a0 a1  i
-        bim = pd.DataFrame(
-            bim_list, columns=["chrom", "snp", "cm", "pos", "alt", "ref", "i"]
-        )
+        bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "cm", "pos", "alt", "ref", "i"])
 
         G = pd.DataFrame(genotype).T
         # G = G.fillna(G.mean())  # really slow
@@ -85,9 +85,7 @@ class VCFReader(GenoIO):
 
 
 # A function to convert gtf to tss bed
-def gtf_to_tss_bed(
-    annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id="gene_id"
-):
+def gtf_to_tss_bed(annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id="gene_id"):
     """Parse genes and TSSs from GTF and return DataFrame for BED output
     This function is from: https://github.com/broadinstitute/pyqtl/blob/master/qtl/io.py
     """
@@ -150,8 +148,6 @@ def gtf_to_tss_bed(
     bed_df = bed_df[mask]
 
     # sort by start position
-    bed_df = bed_df.groupby("chr", sort=False, group_keys=False).apply(
-        lambda x: x.sort_values("start")
-    )
+    bed_df = bed_df.groupby("chr", sort=False, group_keys=False).apply(lambda x: x.sort_values("start"))
 
     return bed_df

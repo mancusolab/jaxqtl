@@ -7,6 +7,7 @@ import equinox as eqx
 import jax.debug
 import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
+
 from jax import lax
 from jax.scipy.special import gammaln, xlog1py, xlogy
 from jaxtyping import Array, ArrayLike, ScalarLike
@@ -40,9 +41,7 @@ class ExponentialFamily(eqx.Module):
         pass
 
     @abstractmethod
-    def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
-    ) -> Array:
+    def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike) -> Array:
         pass
 
     @abstractmethod
@@ -55,9 +54,7 @@ class ExponentialFamily(eqx.Module):
         """
         return -X.T @ (y - mu) / self.scale(X, y, mu)
 
-    def random_gen(
-        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
-    ) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         pass
 
     def calc_weight(
@@ -130,9 +127,7 @@ class Gaussian(ExponentialFamily):
     glink: Link = Identity()
     _links: ClassVar[List[Type[Link]]] = [Identity, Log, Power]
 
-    def random_gen(
-        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
-    ) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.normal(mu, scale)
         return y
 
@@ -173,9 +168,7 @@ class Binomial(ExponentialFamily):
         Identity,
     ]  # Probit, Cauchy, LogC, CLogLog, LogLog
 
-    def random_gen(
-        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
-    ) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.binomial(1, mu)
         return y
 
@@ -207,9 +200,7 @@ class Poisson(ExponentialFamily):
     glink: Link = Log()
     _links: ClassVar[List[Type[Link]]] = [Identity, Log]  # Sqrt
 
-    def random_gen(
-        self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
-    ) -> Array:
+    def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.poisson(mu)
         return y
 
@@ -240,9 +231,7 @@ class NegativeBinomial(ExponentialFamily):
     glink: Link = Log()
     _links: ClassVar[List[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
 
-    def random_gen(
-        self, mu: jnp.ndarray, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0
-    ) -> np.ndarray:
+    def random_gen(self, mu: jnp.ndarray, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> np.ndarray:
         r = 1 / alpha
         p = mu / (mu + r)
         y = np.random.negative_binomial(r, 1 - p)
@@ -251,9 +240,7 @@ class NegativeBinomial(ExponentialFamily):
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
-    def negloglikelihood(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike
-    ) -> Array:
+    def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike) -> Array:
         r = 1.0 / alpha
         mu = self.glink.inverse(eta)
         p = mu / (mu + r)

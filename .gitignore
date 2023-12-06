@@ -1,3 +1,6 @@
+# auto-gen version file
+src/jaxqtl/_version.py
+
 # Temporary and binary files
 *~
 *.py[cod]

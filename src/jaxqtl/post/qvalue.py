@@ -1,19 +1,11 @@
-# Adapt from code in tensorqtl created by Francois Aguet
-import os
-import sys
 from typing import Optional, Tuple
 
 import numpy as np
 import pandas as pd
 
-# jax.scipy.interpolate don't have bspline, so use scipy here
 from scipy import interpolate, stats
 
 import jax.numpy as jnp
-
-sys.path.insert(1, os.path.dirname(__file__))  # ?
-
-# port https://github.com/nfusi/qvalue/blob/master/qvalue/qvalue.py to use jax
 
 
 def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.ndarray:
@@ -28,16 +20,12 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
     assert p.min() >= 0 and p.max() <= 1, "p values not in valid range [0, 1]."
     if 1 < ll < 4:
         log.info("if length of lambda greater than 1, you need at least 4 values.")
-    assert (
-        lam.min() >= 0 and lam.max() < 1
-    ), "ERROR: qvalue_lambda must be within [0, 1)."
+    assert lam.min() >= 0 and lam.max() < 1, "ERROR: qvalue_lambda must be within [0, 1)."
 
     if p.max() < lam.max():
         lam = np.array([0.0])
         ll = 1
-        log.info(
-            "Warning: maximum p-value is smaller than lambda range. Set lam=0, fall back BH method."
-        )
+        log.info("Warning: maximum p-value is smaller than lambda range. Set lam=0, fall back BH method.")
     # assert p.max() >= lam.max(), (
     #     "ERROR: maximum p-value is smaller than lambda range. "
     #     "Change the range of lambda or use qvalue_truncp() for truncated p-values."
@@ -45,9 +33,7 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
 
     # Determines pi0
     if ll == 1:
-        pi0 = np.mean(p >= lam[0]) / (
-            1 - lam[0]
-        )  # extract value from one element array
+        pi0 = np.mean(p >= lam[0]) / (1 - lam[0])  # extract value from one element array
         pi0 = np.append(pi0, 1).min()
     else:
         # evaluate pi0 for different lambdas
@@ -58,9 +44,7 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
         pi0 = np.array(pi0)
 
         # fit a smooth cubic spline between pi0 vs. lam (same length)
-        tck = interpolate.splrep(
-            lam, pi0, k=3, s=len(lam)
-        )  # add s=len() can smooth out the boundary
+        tck = interpolate.splrep(lam, pi0, k=3, s=len(lam))  # add s=len() can smooth out the boundary
         pi0Smooth = interpolate.splev(lam[-1], tck)
         pi0 = np.append(pi0Smooth, 1).min()
 
@@ -170,9 +154,7 @@ def add_qvalues(
 
     # determine global min(p) significance threshold and calculate nominal p-value threshold for each gene
     if pval_col == "pval_beta":
-        lb = (
-            cis_df.loc[cis_df["qval"] <= fdr, "pval_beta"].sort_values().values
-        )  # ascending
+        lb = cis_df.loc[cis_df["qval"] <= fdr, "pval_beta"].sort_values().values  # ascending
         ub = cis_df.loc[cis_df["qval"] > fdr, "pval_beta"].sort_values().values
 
         if lb.shape[0] > 0:  # significant phenotypes
@@ -183,8 +165,6 @@ def add_qvalues(
             else:
                 pthreshold = lb
             log.info(f"  * min p-value threshold @ FDR {fdr}: {pthreshold:.6g}")
-            cis_df["pval_nominal_threshold"] = stats.beta.ppf(
-                pthreshold, cis_df["beta_shape1"], cis_df["beta_shape2"]
-            )
+            cis_df["pval_nominal_threshold"] = stats.beta.ppf(pthreshold, cis_df["beta_shape1"], cis_df["beta_shape2"])
 
     return cis_df

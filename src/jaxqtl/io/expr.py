@@ -1,6 +1,7 @@
 import pandas as pd
 
 import jax.numpy as jnp
+
 from jax import Array
 
 

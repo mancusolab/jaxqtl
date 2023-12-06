@@ -4,6 +4,7 @@ import equinox as eqx
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
+
 from jaxopt import linear_solve as ls
 from jaxtyping import Array, ArrayLike
 

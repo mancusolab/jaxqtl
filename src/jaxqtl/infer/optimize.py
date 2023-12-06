@@ -1,6 +1,7 @@
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
+
 from jax import Array, lax, numpy as jnp
 from jaxtyping import ArrayLike, ScalarLike
 
@@ -55,9 +56,7 @@ def irls(
     init_beta = jnp.zeros((p, 1))
     init_tuple = (10000.0, 10000.0, 0, init_beta, eta + offset_eta, alpha_init)
 
-    likelihood_n, diff, num_iters, beta, eta, alpha = lax.while_loop(
-        cond_fun, body_fun, init_tuple
-    )
+    likelihood_n, diff, num_iters, beta, eta, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged, alpha)

@@ -8,6 +8,7 @@ import pandas as pd
 import statsmodels.api as sm
 
 import jax.numpy as jnp
+
 from jax.config import config
 from jaxtyping import ArrayLike
 
@@ -16,7 +17,7 @@ from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
-from jaxqtl.io.readfile import ReadyDataState, create_readydata
+from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import map_nominal
@@ -47,9 +48,7 @@ def get_logger(name, path=None):
     return logger
 
 
-def cis_scan_score_sm(
-    X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0
-):
+def cis_scan_score_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0):
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
@@ -68,9 +67,7 @@ def cis_scan_score_sm(
 
     # print(sm_res.summary())
     for snp in G.T:
-        chi2, sm_p, _ = sm_res.score_test(
-            params_constrained=sm_res.params, exog_extra=snp
-        )
+        chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=snp)
         chi2_vec.append(chi2)
         p_vec.append(sm_p)
 
@@ -118,9 +115,7 @@ def map_cis_nominal_score_sm(
     nominal_p = []
     num_var_cis = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
-    var_df_all = pd.DataFrame(
-        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
-    )
+    var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
@@ -205,9 +200,7 @@ def main(args):
     argp.add_argument("-geno", type=str, help="Genotype prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Covariate path")
     argp.add_argument("-pheno", type=str, help="Pheno path")
-    argp.add_argument(
-        "-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model"
-    )
+    argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
     argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
     argp.add_argument(
         "-mode",
@@ -215,9 +208,7 @@ def main(args):
         choices=["nominal", "cis", "fitnull"],
         help="Cis or nominal mapping",
     )
-    argp.add_argument(
-        "-test-method", type=str, choices=["wald", "score"], help="Wald or score test"
-    )
+    argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
     argp.add_argument("-window", type=int, default=500000)
     argp.add_argument("-nperm", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
@@ -329,9 +320,7 @@ def main(args):
                 compute_qvalue=args.qvalue,
                 log=log,
             )
-            outdf_cis_score.to_csv(
-                args.out + ".cis_score.tsv.gz", sep="\t", index=False
-            )
+            outdf_cis_score.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             outdf_cis_wald = map_cis(
                 dat,
@@ -385,9 +374,7 @@ def main(args):
         sys.exit()
 
     if args.statsmodel:
-        out_df = map_cis_nominal_score_sm(
-            dat, standardize=True, log=log, window=args.window, offset_eta=offset_eta
-        )
+        out_df = map_cis_nominal_score_sm(dat, standardize=True, log=log, window=args.window, offset_eta=offset_eta)
         write_parqet(outdf=out_df, method="sm_score", out_path=args.out)
 
     return 0

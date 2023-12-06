@@ -1,6 +1,7 @@
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
+
 from jax import Array, numpy as jnp
 from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm
@@ -67,9 +68,7 @@ class GLM(eqx.Module):
         if isinstance(self.family, Gaussian):
             pval = t_cdf(-abs(TS), df) * 2  # follow t(n-p-1) for Gaussian
         else:
-            pval = (
-                norm.cdf(-abs(TS)) * 2
-            )  # follow Normal(0, 1), this gives more accurate p value than chi2(1)
+            pval = norm.cdf(-abs(TS)) * 2  # follow Normal(0, 1), this gives more accurate p value than chi2(1)
 
         return pval
 
@@ -117,9 +116,7 @@ class GLM(eqx.Module):
 
         eta = X @ beta + offset_eta
         mu = self.family.glink.inverse(eta)
-        resid = (y - mu) * self.family.glink.deriv(
-            mu
-        )  # note: this is the working resid
+        resid = (y - mu) * self.family.glink.deriv(mu)  # note: this is the working resid
 
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
 
@@ -160,9 +157,7 @@ class GLM(eqx.Module):
             glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset_eta=offset_eta)
 
             # fit covariate-only model (null)
-            alpha_init = n / jnp.sum(
-                (y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2
-            )
+            alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
             eta = glm_state_pois.eta
             disp = self.family.estimate_dispersion(X, y, eta, alpha=alpha_init)
 
@@ -188,14 +183,7 @@ def huber_var(
     """
     phi = 1.0
     # calculate observed hessian
-    W = (
-        1
-        / phi
-        * (
-            family._hlink_score(eta, alpha) / family.glink.deriv(mu)
-            - family._hlink_hess(eta, alpha) * (y - mu)
-        )
-    )
+    W = 1 / phi * (family._hlink_score(eta, alpha) / family.glink.deriv(mu) - family._hlink_hess(eta, alpha) * (y - mu))
     hess_inv = jnpla.inv(-(X * W).T @ X)
 
     score_no_x = (y - mu) / (family.variance(mu, alpha) * family.glink.deriv(mu)) * phi

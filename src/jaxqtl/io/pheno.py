@@ -1,5 +1,6 @@
 import os
 import re
+
 from abc import ABCMeta, abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional
@@ -10,6 +11,7 @@ import pandas as pd
 import qtl.io
 import qtl.norm
 import scanpy as sc
+
 from anndata import AnnData
 from scipy.sparse import diags
 
@@ -31,9 +33,7 @@ class SingleCellFilter:
     percent_mt: int = 5  # 5 means 5%
     norm_target_sum: float = 1e5  # not recommended
     bulk_method: str = "mean"
-    bulk_min_prop: float = (
-        0.0  # Minimum proportion of cells that express a gene in a sample.
-    )
+    bulk_min_prop: float = 0.0  # Minimum proportion of cells that express a gene in a sample.
     bulk_min_smpls: int = 0  # Minimum number of samples with >= proportion of cells with expression than min_prop
     bulk_min_cells: int = 0
     bulk_min_count: int = 0
@@ -108,9 +108,7 @@ class H5AD(PhenoIO):
 
         # create pd.Dataframe
         count = pd.DataFrame(dat.bulk.X)  # sample_cell x gene
-        count = count.set_index(
-            [dat.bulk.obs[filter_opt.id_col], dat.bulk.obs[filter_opt.celltype_col]]
-        )
+        count = count.set_index([dat.bulk.obs[filter_opt.id_col], dat.bulk.obs[filter_opt.celltype_col]])
         count.columns = dat.bulk.var.index  # use var.index as gene names
 
         return count
@@ -126,19 +124,13 @@ class H5AD(PhenoIO):
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
-        cell_type_list = (
-            pd.read_csv(celltype_path, sep="\t", header=None).iloc[:, 0].to_list()
-        )
+        cell_type_list = pd.read_csv(celltype_path, sep="\t", header=None).iloc[:, 0].to_list()
 
         for cell_type in cell_type_list:
-            pheno_onetype = pheno[
-                pheno.index.get_level_values(filter_opt.celltype_col) == cell_type
-            ]
+            pheno_onetype = pheno[pheno.index.get_level_values(filter_opt.celltype_col) == cell_type]
 
             # remove cell type index
-            pheno_onetype = pheno_onetype.reset_index(
-                level=filter_opt.celltype_col, drop=True
-            )
+            pheno_onetype = pheno_onetype.reset_index(level=filter_opt.celltype_col, drop=True)
 
             # transpose s.t samples on columns, put ensembl_id back to column
             bed = pheno_onetype.T
@@ -148,14 +140,10 @@ class H5AD(PhenoIO):
             gene_map = load_gene_gft_bed(gtf_bed_path)
 
             if autosomal_only:
-                gene_map = gene_map.loc[
-                    gene_map.chr.isin([str(i) for i in range(1, 23)])
-                ]
+                gene_map = gene_map.loc[gene_map.chr.isin([str(i) for i in range(1, 23)])]
 
             # inner join
-            out = pd.merge(
-                gene_map, bed, left_on="ensemble_id", right_on=filter_opt.geneid_col
-            )
+            out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on=filter_opt.geneid_col)
             out = out.drop("ensemble_id", axis=1)
             out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
 
@@ -180,9 +168,7 @@ class PheBedReader(PhenoIO):
 
     def __call__(self, pheno_path):
         if pheno_path.endswith((".bed.gz", ".bed")):
-            phenotype_df = pd.read_csv(
-                pheno_path, sep="\t", index_col=3, dtype={"#chr": str, "#Chr": str}
-            )
+            phenotype_df = pd.read_csv(pheno_path, sep="\t", index_col=3, dtype={"#chr": str, "#Chr": str})
         elif pheno_path.endswith(".parquet"):
             phenotype_df = pd.read_parquet(pheno_path)
             phenotype_df.set_index(phenotype_df.columns[3], inplace=True)
@@ -191,9 +177,7 @@ class PheBedReader(PhenoIO):
 
         # convert all columns to lower case and rename #Chr to chr
         phenotype_df.rename(
-            columns={
-                i: i.lower().replace("#chr", "chr") for i in phenotype_df.columns[:3]
-            },
+            columns={i: i.lower().replace("#chr", "chr") for i in phenotype_df.columns[:3]},
             inplace=True,
         )
 
@@ -259,9 +243,7 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
         count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
     elif method == "tmm":
         # use edger TMM method to calculate size factor and convert to counts per million
-        tmm_counts_df = qtl.norm.edger_cpm(
-            count_df.iloc[:, 4:], normalized_lib_sizes=True
-        )
+        tmm_counts_df = qtl.norm.edger_cpm(count_df.iloc[:, 4:], normalized_lib_sizes=True)
         # # mask is filter by gene
         # inverse normal transformation on each gene (row)
         norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)

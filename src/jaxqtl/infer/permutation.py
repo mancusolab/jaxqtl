@@ -6,6 +6,7 @@ import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
+
 from jax import Array, grad, jit, lax
 from jax.scipy.special import polygamma
 from jax.scipy.stats import norm
@@ -61,9 +62,7 @@ class DirectPerm(Permutation):
         def _func(key, x):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            glmstate = test(
-                X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se, max_iter
-            )
+            glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se, max_iter)
 
             return key, jnp.nanmin(glmstate.p)
 
@@ -130,13 +129,7 @@ def infer_beta(
         scale = -pg_1k * pg_1n + (pg_1k + pg_1n) * pg_1kn
 
         # combine into single tensor
-        sec_gamma = (
-            0.5
-            * jnp.array(
-                [[[i_k, i_kkn], [i_kkn, i_knn]], [[i_nkk, i_nnk], [i_nnk, i_n]]]
-            )
-            / scale
-        )
+        sec_gamma = 0.5 * jnp.array([[[i_k, i_kkn], [i_kkn, i_knn]], [[i_nkk, i_nnk], [i_nnk, i_n]]]) / scale
 
         return info_mat, sec_gamma
 
@@ -165,9 +158,7 @@ def infer_beta(
 
     init_tuple = (10000.0, 1000.0, 0, init)
     lik, diff, num_iters, params = lax.while_loop(cond_fun, body_fun, init_tuple)
-    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(
-        float
-    )
+    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(float)
 
     return jnp.array([params[0], params[1], converged])
 
