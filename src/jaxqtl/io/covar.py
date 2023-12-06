@@ -25,8 +25,6 @@ def covar_reader(covar_path: str) -> pd.DataFrame:
     else:
         raise ValueError("Unsupported covariate file type.")
 
-    assert (
-        not covar.isnull().values.any()
-    ), "Missing values are not allowed in covariate file."
+    assert not covar.isnull().values.any(), "Missing values are not allowed in covariate file."
 
     return covar

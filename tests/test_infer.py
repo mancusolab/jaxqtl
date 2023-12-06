@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import statsmodels
 import statsmodels.api as sm
+
 from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
     Poisson as smPoisson,
@@ -9,12 +10,15 @@ from statsmodels.discrete.discrete_model import (
 from utils import assert_array_eq
 
 import jax.numpy as jnp
+
 from jax import config
 
 from jaxqtl.families.distribution import Binomial, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
+from jaxqtl.infer.stderr import HuberError
 from jaxqtl.infer.utils import score_test_snp
+
 
 config.update("jax_enable_x64", True)
 
@@ -148,17 +152,13 @@ def test_CGsolve_realdata():
     """
     # AssertionError: get diff result
     """
-    dat = jnp.array(
-        pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
-    )
+    dat = jnp.array(pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t"))
     y = dat[:, -2][:, jnp.newaxis]
     X = dat[:, 0:-2]
 
     sm_state = smPoisson(np.array(y), np.array(X)).fit()
 
-    jaxqtl_poisson_cg = GLM(
-        family=Poisson(), max_iter=maxiter, solver=CGSolve(), step_size=stepsize
-    )
+    jaxqtl_poisson_cg = GLM(family=Poisson(), max_iter=maxiter, solver=CGSolve(), step_size=stepsize)
     init_pois = jaxqtl_poisson_cg.family.init_eta(y)
     glm_state = jaxqtl_poisson_cg.fit(X, y, init=init_pois)
 
@@ -199,15 +199,17 @@ def test_robust_SE():
         family=sm.families.Poisson(),
         offset=np.array(library_size).reshape((len(library_size),)),
     ).fit()
-    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(
-        sm_mod, use_correction=False
-    )
+    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
 
-    jaxqtl_pois = GLM(family=Poisson(), max_iter=100, solver=CholeskySolve())
+    jaxqtl_pois = GLM(family=Poisson(), solver=CholeskySolve(), max_iter=100)
     init_pois = jaxqtl_pois.family.init_eta(y)
 
     glmstate = jaxqtl_pois.fit(
-        M, y, init=init_pois, offset_eta=library_size, robust_se=True
+        M,
+        y,
+        init=init_pois,
+        offset_eta=library_size,
+        se_estimator=HuberError(),
     )
 
     assert_array_eq(glmstate.se**2, jnp.diag(white_cov))
@@ -230,32 +232,17 @@ def test_NB():
     ).fit(maxiter=100)
     sm_alpha = sm_mod.params[-1]  # alpha estimate
 
-    jaxqtl_pois = GLM(
-        family=Poisson(),
-        max_iter=maxiter,
-        solver=CholeskySolve(),
-        step_size=stepsize,
-    )
-    init_pois = jaxqtl_pois.family.init_eta(y)
-    glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
-
-    nb_fam = NegativeBinomial()
-
-    alpha_init = len(y) / jnp.sum(
-        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
-    )
-    alpha_n = nb_fam.estimate_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
-
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
-        max_iter=maxiter,
         solver=CholeskySolve(),
+        max_iter=maxiter,
         step_size=stepsize,
     )
+    init_eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M, y, library_size)
     glm_state = jaxqtl_nb.fit(
         M,
         y,
-        init=glm_state_pois.eta,
+        init=init_eta,
         offset_eta=library_size,
         alpha_init=alpha_n.squeeze(),
     )
@@ -281,40 +268,23 @@ def test_NB_robust():
         np.array(M),
         offset=np.array(library_size).reshape((len(library_size),)),
     ).fit(maxiter=100)
-    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(
-        sm_mod, use_correction=False
-    )
-
-    jaxqtl_pois = GLM(
-        family=Poisson(),
-        max_iter=maxiter,
-        solver=CholeskySolve(),
-        step_size=stepsize,
-    )
-    init_pois = jaxqtl_pois.family.init_eta(y)
-    glm_state_pois = jaxqtl_pois.fit(M, y, init=init_pois, offset_eta=library_size)
-
-    nb_fam = NegativeBinomial()
-
-    alpha_init = len(y) / jnp.sum(
-        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
-    )
-    alpha_n = nb_fam.estimate_dispersion(M, y, glm_state_pois.eta, alpha=alpha_init)
+    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
 
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
-        max_iter=maxiter,
         solver=CholeskySolve(),
+        max_iter=maxiter,
         step_size=stepsize,
     )
+    init_eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M, y, library_size)
 
     glm_state_robust = jaxqtl_nb.fit(
         M,
         y,
-        init=glm_state_pois.eta,
+        init=init_eta,
         offset_eta=library_size,
         alpha_init=alpha_n.squeeze(),
-        robust_se=True,
+        se_estimator=HuberError(),
     )
 
     assert_array_eq(glm_state_robust.se**2, jnp.diag(white_cov)[:-1], rtol=1e-3)
@@ -339,39 +309,23 @@ def test_poisson_scoretest():
     sm_res = sm_glm.fit()
 
     # print(sm_res.summary())
-    chi2, sm_p, _ = sm_res.score_test(
-        params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"]
-    )
+    chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
-    mod_null = jaxqtl_pois.fit(
-        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
-    )
-    Z_GPA, pval_GPA, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
+    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
-    assert_array_eq(
-        pval_GPA, jnp.array(sm_p), rtol=1e-3
-    )  # check result with statsmodel
+    assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_pois.fit(
-        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
-    )
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
 
-    Z_TUCE, pval_TUCE, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_pois.fit(
-        X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset))
-    )
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
 
-    Z_PSI, pval_PSI, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
     pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
@@ -391,31 +345,21 @@ def test_bin_scoretest():
     sm_res = sm_glm.fit()
 
     # print(sm_res.summary())
-    chi2, sm_p, _ = sm_res.score_test(
-        params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"]
-    )
+    chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_GPA, pval_GPA, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
-    assert_array_eq(
-        pval_GPA, jnp.array(sm_p), rtol=1e-3
-    )  # check result with statsmodel
+    assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_TUCE, pval_TUCE, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
     mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_PSI, pval_PSI, _, _ = score_test_snp(
-        jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null
-    )
+    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
     pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
@@ -425,9 +369,7 @@ def test_bin_scoretest():
 
 
 def test_nb_scoretest():
-    Rres = pd.read_csv(
-        "./example/data/ENSG00000178607_rs74787440.nb.scoretest.tsv", sep="\t"
-    )
+    Rres = pd.read_csv("./example/data/ENSG00000178607_rs74787440.nb.scoretest.tsv", sep="\t")
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
     y = jnp.array(dat["y"])[:, jnp.newaxis]
@@ -436,30 +378,14 @@ def test_nb_scoretest():
     # print(sm_res.summary())
     M_cov = M[:, 0:-1]
 
-    jaxqtl_pois = GLM(
-        family=Poisson(),
-        max_iter=maxiter,
-        solver=CholeskySolve(),
-        step_size=stepsize,
-    )
-    init_pois = jaxqtl_pois.family.init_eta(y)
-    glm_state_pois = jaxqtl_pois.fit(M_cov, y, init=init_pois, offset_eta=library_size)
-
-    nb_fam = NegativeBinomial()
-    alpha_init = len(y) / jnp.sum(
-        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
-    )
-    alpha_n = nb_fam.estimate_dispersion(M_cov, y, glm_state_pois.eta, alpha=alpha_init)
-
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
         max_iter=maxiter,
         solver=CholeskySolve(),
         step_size=stepsize,
     )
-    glm_state = jaxqtl_nb.fit(
-        M_cov, y, init=glm_state_pois.eta, offset_eta=library_size, alpha_init=alpha_n
-    )
+    eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M_cov, y, library_size)
+    glm_state = jaxqtl_nb.fit(M_cov, y, init=eta, offset_eta=library_size, alpha_init=alpha_n)
 
     Z, pval, _, _ = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
 

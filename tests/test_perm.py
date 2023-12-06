@@ -1,10 +1,12 @@
 from utils import assert_array_eq
 
 import jax.numpy as jnp
+
 from jax import random
 from jax.config import config
 
 from jaxqtl.infer.permutation import infer_beta
+
 
 config.update("jax_enable_x64", True)
 
@@ -25,7 +27,7 @@ def test_betaperm():
     n_init = k_init * (1 / p_mean - 1)
     init = jnp.array([k_init, n_init])
 
-    res = infer_beta(p_perm, init, stepsize=1.0)
+    res = infer_beta(p_perm, init, step_size=1.0)
 
     observed = res[0:2]
     converged = res[2]
@@ -34,6 +36,4 @@ def test_betaperm():
     print(f"observed: {observed}; converged: {converged}")
 
     assert_array_eq(converged, jnp.asarray(1.0))
-    assert_array_eq(
-        observed, expected, rtol=5.2e-2
-    )  # this is ~ rtol=0.0513; close enough
+    assert_array_eq(observed, expected, rtol=5.2e-2)  # this is ~ rtol=0.0513; close enough

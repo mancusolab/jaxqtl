@@ -17,6 +17,7 @@ from .families.distribution import (
     Poisson,
 )
 from .infer.glm import GLM
+from .infer.stderr import HuberError
 from .infer.utils import score_test_snp
 
 
@@ -137,7 +138,7 @@ def run_sim(
         # fit poisson or negative binomial
         jaxqtl_pois = GLM(family=Poisson())
         init_pois = jaxqtl_pois.family.init_eta(y)
-        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=False)
+        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
 
         nb_fam = NegativeBinomial()
         alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2)
@@ -146,14 +147,14 @@ def run_sim(
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
         jaxqtl_nb = GLM(family=nb_fam)
-        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=False)
+        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n)
 
         pval_nb_wald = np.append(pval_nb_wald, glm_state_nb.p[-1])
         pval_pois_wald = np.append(pval_pois_wald, glm_state_pois.p[-1])
 
         # robust poisson and NB
-        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, robust_se=True)
-        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n, robust_se=True)
+        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, se_estimator=HuberError())
+        glm_state_nb = jaxqtl_nb.fit(X, y, init=glm_state_pois.eta, alpha_init=alpha_n, se_estimator=HuberError())
 
         pval_nb_wald_robust = np.append(pval_nb_wald_robust, glm_state_nb.p[-1])
         pval_pois_wald_robust = np.append(pval_pois_wald_robust, glm_state_pois.p[-1])

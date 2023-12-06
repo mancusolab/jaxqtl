@@ -57,9 +57,7 @@ def map_nominal(
     num_var_cis = []
     alpha = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
-    var_df_all = pd.DataFrame(
-        columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"]
-    )
+    var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene

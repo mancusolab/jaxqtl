@@ -1,1 +1,1 @@
-from . import glm, optimize, solve  # noqa 401
+from . import glm, optimize, permutation, solve, stderr, utils  # noqa 401

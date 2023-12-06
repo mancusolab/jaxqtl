@@ -60,6 +60,7 @@ class DirectPerm(Permutation):
         max_iter: int = 500,
     ) -> Array:
         def _func(key, x):
+            del x
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], robust_se, max_iter)
@@ -83,7 +84,7 @@ def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
 def infer_beta(
     p_perm: ArrayLike,
     init: ArrayLike,
-    stepsize=0.1,
+    step_size=0.1,
     tol=1e-3,
     max_iter=500,
 ) -> Array:
@@ -144,7 +145,7 @@ def infer_beta(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param - stepsize * direction - 0.5 * stepsize**2 * adjustment
+        new_param = old_param - step_size * direction - 0.5 * step_size**2 * adjustment
 
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
@@ -230,14 +231,9 @@ class BetaPerm(DirectPerm):
         return adj_p, beta_res
 
 
-def pval_from_Zstat(TS: ArrayLike, dof: float = 1.0):
-    # TS is the beta / se; use chi2(df)?
-    return norm.cdf(-abs(TS)) * 2
-
-
-def df_cost(TS, dof):
+def df_cost(zscore, dof):
     """minimize abs(1-alpha) as a function of M_eff"""
-    pval = pval_from_Zstat(TS, dof)
+    pval = 2 * norm.sf(jnp.fabs(zscore))
     mean = jnp.mean(pval)
     var = jnp.var(pval)
     return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0

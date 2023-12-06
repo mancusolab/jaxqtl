@@ -38,7 +38,7 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
     g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
     zscore = g_score / jnp.sqrt(g_var)
 
-    pval = 2 * norm.sf(abs(zscore))
+    pval = 2 * norm.sf(jnp.fabs(zscore))
 
     return zscore, pval, g_score, g_var
 

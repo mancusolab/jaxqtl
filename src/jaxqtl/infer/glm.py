@@ -1,9 +1,8 @@
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import equinox as eqx
 
 from jax import Array, numpy as jnp
-from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm
 from jaxtyping import ArrayLike, ScalarLike
 
@@ -16,6 +15,7 @@ from ..families.distribution import (
 from ..families.utils import t_cdf
 from .optimize import irls
 from .solve import CholeskySolve, LinearSolve
+from .stderr import ErrVarEstimation, FisherInfoError
 
 
 class GLMState(NamedTuple):
@@ -72,25 +72,6 @@ class GLM(eqx.Module):
 
         return pval
 
-    def sumstats(
-        self,
-        X: ArrayLike,
-        y: ArrayLike,
-        weight: ArrayLike,
-        eta: ArrayLike,
-        mu: ArrayLike,
-        alpha: ScalarLike = 0.0,
-    ) -> Tuple[Array, Array, Array]:
-        infor = (X * weight).T @ X
-        infor_inv = jnpla.inv(infor)
-        infor_se = jnp.sqrt(jnp.diag(infor_inv))
-
-        # huber sandwich
-        huber_v = huber_var(self.family, X, y, eta, mu, alpha)
-        huber_se = jnp.sqrt(huber_v)
-
-        return infor_se, huber_se, infor_inv
-
     def fit(
         self,
         X: ArrayLike,
@@ -98,7 +79,7 @@ class GLM(eqx.Module):
         offset_eta: ArrayLike = 0.0,
         init: ArrayLike = None,
         alpha_init: ScalarLike = 0.0,
-        robust_se: bool = False,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
     ) -> GLMState:
         """Report Wald test p value"""
         beta, n_iter, converged, alpha = irls(
@@ -120,11 +101,10 @@ class GLM(eqx.Module):
 
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
 
-        infor_se, huber_se, infor_inv = self.sumstats(X, y, weight, eta, mu, alpha)
+        resid_covar = se_estimator(self.family, X, y, eta, mu, weight, alpha)
+        beta_se = jnp.sqrt(jnp.diag(resid_covar))
 
         df = X.shape[0] - X.shape[1]
-        beta_se = jnp.where(robust_se, huber_se, infor_se)
-
         beta = beta.squeeze()  # (p,)
         stat = beta / beta_se
 
@@ -139,7 +119,7 @@ class GLM(eqx.Module):
             weight,
             n_iter,
             converged,
-            infor_inv,
+            resid_covar,
             resid,
             alpha,
         )
@@ -168,26 +148,3 @@ class GLM(eqx.Module):
             disp = jnp.asarray(0.0)
 
         return eta, disp
-
-
-def huber_var(
-    family: ExponentialFamily,
-    X: ArrayLike,
-    y: ArrayLike,
-    eta: ArrayLike,
-    mu: ArrayLike,
-    alpha: ArrayLike = jnp.float64(jnp.zeros((1,))),
-) -> Array:
-    """
-    Huber white sandwich estimator using observed hessian
-    """
-    phi = 1.0
-    # calculate observed hessian
-    W = 1 / phi * (family._hlink_score(eta, alpha) / family.glink.deriv(mu) - family._hlink_hess(eta, alpha) * (y - mu))
-    hess_inv = jnpla.inv(-(X * W).T @ X)
-
-    score_no_x = (y - mu) / (family.variance(mu, alpha) * family.glink.deriv(mu)) * phi
-    Bs = (X * (score_no_x**2)).T @ X
-    Vs = hess_inv @ Bs @ hess_inv
-
-    return jnp.diag(Vs)

@@ -24,9 +24,7 @@ def _get_geno_info(G: ArrayLike) -> _GenoInfo:
     return _GenoInfo(af, ma_counts)
 
 
-def _cis_window_cutter(
-    dat: ReadyDataState, chrom: str, start: int, end: int
-) -> Tuple[Array, pd.DataFrame]:
+def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) -> Tuple[Array, pd.DataFrame]:
     """
     return variant list in cis for given gene
     Map is a pandas data frame
@@ -45,18 +43,14 @@ def _cis_window_cutter(
     var_info = dat.bim
 
     cis_var_info = var_info.loc[
-        (var_info["chrom"] == str(chrom))
-        & (var_info["pos"] >= start)
-        & (var_info["pos"] <= end)
+        (var_info["chrom"] == str(chrom)) & (var_info["pos"] >= start) & (var_info["pos"] <= end)
     ]
 
     # subset G to cis variants (nxp)
     G_tocheck = jnp.take(dat.geno, jnp.array(cis_var_info.i), axis=1)
 
     # check monomorphic: G.T[:, [0]] find first occurrence on all genotype, var x 1
-    mono_var = (G_tocheck.T == G_tocheck.T[:, [0]]).all(
-        1
-    )  # bool (var, ), show whether given variant is monomorphic
+    mono_var = (G_tocheck.T == G_tocheck.T[:, [0]]).all(1)  # bool (var, ), show whether given variant is monomorphic
     not_mono_var = jnp.invert(mono_var)  # reverse False and True (same as "~" operator)
     G = G_tocheck[:, not_mono_var]  # take genotype that are NOT monomorphic
     cis_var_info = cis_var_info.loc[not_mono_var.tolist()]
