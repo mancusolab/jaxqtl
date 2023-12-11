@@ -59,7 +59,8 @@ def map_nominal(
     alpha = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
-    se_estimator = FisherInfoError() if robust_se else HuberError()
+    se_estimator = HuberError() if robust_se else FisherInfoError()
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
