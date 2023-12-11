@@ -121,6 +121,11 @@ def create_readydata(
     if log is None:
         log = get_log()
 
+    # check missing value in genotype df (N x M), fill each column with mean
+    check_na = geno.isnull().sum().sum()
+    if check_na > 0:
+        geno = geno.fillna(geno.mean())  # really slow
+
     # keep genes in autosomals
     if autosomal_only:
         pheno = pheno.loc[pheno.chr.isin([str(i) for i in range(1, 23)])]
