@@ -117,7 +117,8 @@ def map_cis(
     ]
 
     results = []
-    se_estimator = FisherInfoError() if robust_se else HuberError()
+    se_estimator = HuberError() if robust_se else FisherInfoError()
+
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
