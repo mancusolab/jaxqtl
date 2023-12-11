@@ -13,7 +13,7 @@ import jax.numpy as jnp
 
 from jax import config
 
-from jaxqtl.families.distribution import Binomial, NegativeBinomial, Poisson
+from jaxqtl.families.distribution import Binomial, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer.stderr import HuberError
@@ -288,6 +288,37 @@ def test_NB_robust():
     )
 
     assert_array_eq(glm_state_robust.se**2, jnp.diag(white_cov)[:-1], rtol=1e-3)
+
+
+def test_lm_scoretest():
+    jaxqtl_lm = GLM(family=Gaussian(), max_iter=maxiter, step_size=stepsize)
+    init_lm = jaxqtl_lm.family.init_eta(y_arr)
+
+    X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+
+    # statsmodel result
+    sm_glm = sm.GLM(np.array(y_arr), np.array(X_covar), family=sm.families.Gaussian())
+    sm_res = sm_glm.fit()
+
+    # print(sm_res.summary())
+    chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
+
+    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
+    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
+    print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
+    assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
+
+    X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
+    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
+
+    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
+    print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
+
+    X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
+    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
+
+    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
+    print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
 
 def test_poisson_scoretest():
