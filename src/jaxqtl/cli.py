@@ -197,21 +197,24 @@ def map_cis_nominal_score_sm(
 
 def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("geno", type=str, help="Genotype prefix, eg. chr17")
-    argp.add_argument("covar", type=str, help="Covariate path")
-    argp.add_argument("pheno", type=str, help="Pheno path")
-    argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], default="gaussian", help="Model")
-    argp.add_argument("--genelist", type=str, help="Path to gene list (no header)")
+    argp.add_argument("-geno", type=str, help="Genotype prefix, eg. chr17")
+    argp.add_argument("-covar", type=str, help="Covariate path")
+    argp.add_argument("-pheno", type=str, help="Pheno path")
+    argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
+    argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
+    argp.add_argument("-offset", type=str, help="Path to log offset (no header)")
+    argp.add_argument("-indlist", type=str, help="Path to individual list (no header); default is all")
     argp.add_argument(
-        "--mode",
+        "-mode",
         type=str,
         choices=["nominal", "cis", "fitnull"],
         help="Cis or nominal mapping",
     )
-    argp.add_argument("--test-method", type=str, choices=["wald", "score"], help="Wald or score test")
-    argp.add_argument("--window", type=int, default=500000)
-    argp.add_argument("--nperm", type=int, default=1000)
+    argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
+    argp.add_argument("-window", type=int, default=500000)
+    argp.add_argument("-nperm", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
+    argp.add_argument("-addpc", type=int, default=2, help="Add expression PCs")
     argp.add_argument(
         "--robust",
         action="store_true",
@@ -276,20 +279,31 @@ def main(args):
 
     genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
 
-    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True)
+    if args.indlist is not None:
+        indList = pd.read_csv(args.indlist, header=None, sep="\t").iloc[:, 0].to_list()
+    else:
+        indList = None
+
+    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True, ind_list=indList)
 
     # before filter gene list, calculate library size and set offset
-    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-    offset_eta = jnp.log(total_libsize)
+    if args.offset is None:
+        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+        offset_eta = jnp.log(total_libsize)
+    else:
+        offset_eta = pd.read_csv(args.offset, header=None, sep="\t").iloc[:, 0]
+        offset_eta = jnp.array(offset_eta).reshape((len(offset_eta), 1))
 
     # filter genes with no expressions at all
     dat.filter_gene(geneexpr_percent_cutoff=0.0)
 
     # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
-    dat.add_covar_pheno_PC(k=2)
+    if args.addpc > 0:
+        dat.add_covar_pheno_PC(k=args.addpc)
 
     if isinstance(family, Gaussian):
-        dat.transform_y(mode="log1p")  # log1p
+        # dat.transform_y(mode='log1p')  # log1p
+        # note: use pre-processed file as in tensorqtl
         offset_eta = jnp.zeros(offset_eta.shape)
 
     # filter gene list

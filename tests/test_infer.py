@@ -32,6 +32,11 @@ X_arr = jnp.array(spector_data.exog)
 maxiter = 100
 stepsize = 1.0
 
+jaxqtl_lm = GLM(family=Gaussian(), max_iter=maxiter, step_size=stepsize)
+init_lm = jaxqtl_lm.family.init_eta(y_arr)
+
+X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+
 
 def test_linear_regression_cho():
     # test linear regression function
