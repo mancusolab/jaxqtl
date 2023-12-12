@@ -11,6 +11,8 @@ pandas
 pandas_plink
 pyarrow
 python < 3.11
+qtl
 scanpy
+scikit-learn
 scipy
 typing_extensions
