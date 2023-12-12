@@ -72,13 +72,35 @@ extensions = [
     "sphinx.ext.ifconfig",
     "sphinx.ext.mathjax",
     "sphinx.ext.napoleon",
+    "sphinx_material",
+    # "sphinx_material.kbd_keys",
+    # "sphinx_material.apidoc.format_signatures",
+    # "sphinx_material.apidoc.python.apigen",
 ]
+
+rst_prolog = """
+.. role:: python(code)
+   :language: python
+   :class: highlight
+
+.. role:: rst(code)
+   :language: rst
+   :class: highlight
+
+.. role:: css(code)
+   :language: css
+   :class: highlight
+
+.. role:: dot(code)
+   :language: dot
+   :class: highlight
+"""
 
 # Add any paths that contain templates here, relative to this directory.
 templates_path = ["_templates"]
 
 # The suffix of source filenames.
-source_suffix = ".rst"
+source_suffix = [".rst", ".md"]  # ".rst"
 
 # The encoding of source files.
 # source_encoding = 'utf-8-sig'
@@ -123,7 +145,7 @@ release = version
 exclude_patterns = ["_build", "Thumbs.db", ".DS_Store", ".venv"]
 
 # The reST default role (used for this markup: `text`) to use for all documents.
-# default_role = None
+default_role = "any"
 
 # If true, '()' will be appended to :func: etc. cross-reference text.
 # add_function_parentheses = True
@@ -148,6 +170,91 @@ pygments_style = "sphinx"
 # If this is True, todo emits a warning for each TODO entries. The default is False.
 todo_emit_warnings = True
 
+# -- Options for apigen and type annotations
+autodoc_class_signature = "separated"
+
+python_apigen_modules = {
+    "jaxqtl": "api/",
+    "jaxqtl.families": "api/families/",
+    "jaxqtl.infer": "api/infer/",
+    "jaxqtl.io": "api/io/",
+    "jaxqtl.map": "api/map/",
+    "jaxqtl.post": "api/post/",
+}
+
+python_apigen_default_groups = [
+    (r".*:jaxqtl.infer.*", "Infer Public-members"),
+    (r"class:jaxqtl.infer.*", "Infer Classes"),
+    (r".*:jaxqtl.families.*", "Families Public-members"),
+    (r"class:jaxqtl.families.*", "Families Classes"),
+    (r".*:jaxqtl.io.*", "Io Public-members"),
+    (r"class:jaxqtl.io.*", "Io Classes"),
+    (r".*:jaxqtl.map.*", "Map Public-members"),
+    (r"class:jaxqtl.map.*", "Map Classes"),
+    (r".*:jaxqtl.post.*", "Post Public-members"),
+    (r"class:jaxqtl.post.*", "Post Classes"),
+    (r"method:.*\.__(str|repr)__", "String representation"),
+    # ("method:.*", "Methods"),
+    # ("classmethod:.*", "Class methods"),
+    # (r"method:.*\.__(init|new)__", "Constructors"),
+    # (r"method:.*\.[A-Z][a-z]*", "Constructors"),
+]
+
+python_apigen_default_order = [
+    ("class:.*", -6),
+    ("method:.*", -2),
+    ("classmethod:.*", -3),
+    ("property:.*", -1),
+    (r"method:.*\.__(init|new)__", -5),
+    (r"method:.*\.[A-Z][a-z]*", -5),
+    (r"method:.*\.__(str|repr)__", -4),
+]
+
+object_description_options = [
+    (
+        "py.*",
+        dict(
+            include_in_toc=False,
+            include_fields_in_toc=False,
+            wrap_signatures_with_css=True,
+        ),
+    ),
+    ("py.class", dict(include_in_toc=True)),
+    ("py.function", dict(include_in_toc=True)),
+]
+
+python_apigen_order_tiebreaker = "alphabetical"
+python_apigen_case_insensitive_filesystem = False
+python_apigen_show_base_classes = False
+
+# simplify typing names (e.g., typing.List -> list)
+# simplify Union and Optional types
+python_transform_type_annotations_pep585 = False
+python_transform_type_annotations_pep604 = True
+python_transform_type_annotations_concise_literal = True
+python_strip_self_type_annotations = True
+
+python_type_aliases = {
+    "jnp.ndarray": "jax.numpy.ndarray",
+}
+
+python_module_names_to_strip_from_xrefs = [
+    "jax._src.numpy.lax_numpy",
+]
+
+# fix namedtuple attribute types
+napoleon_use_ivar = True
+napoleon_google_docstring = True
+
+python_apigen_rst_prolog = """
+.. default-role:: py:obj
+
+.. default-literal-role:: python
+
+.. highlight:: python
+"""
+
+# Add any paths that contain templates here, relative to this directory.
 
 # -- Options for HTML output -------------------------------------------------
 
@@ -281,3 +388,31 @@ intersphinx_mapping = {
 }
 
 print(f"loading configurations for {project} {version} ...", file=sys.stderr)
+
+# -- Post process ------------------------------------------------------------
+import collections
+
+
+def remove_namedtuple_attrib_docstring(app, what, name, obj, skip, options):
+    if type(obj) is collections._tuplegetter:
+        return True
+    return skip
+
+
+def autodoc_process_signature(
+    app, what, name, obj, options, signature, return_annotation
+):
+    signature = modify_type_hints(signature)
+    return_annotation = modify_type_hints(return_annotation)
+    return signature, return_annotation
+
+
+def modify_type_hints(signature):
+    if signature:
+        signature = signature.replace("jnp", "~jax.numpy")
+    return signature
+
+
+def setup(app):
+    app.connect("autodoc-skip-member", remove_namedtuple_attrib_docstring)
+    app.connect("autodoc-process-signature", autodoc_process_signature)

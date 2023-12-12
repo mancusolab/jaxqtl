@@ -1,4 +1,5 @@
 import numpy as np
+
 from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
     Poisson as smPoisson,
@@ -6,12 +7,14 @@ from statsmodels.discrete.discrete_model import (
 from utils import assert_array_eq
 
 import jax.numpy as jnp
-from jax.config import config
+
+from jax import config
 
 from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
 from jaxqtl.sim import SimData
+
 
 config.update("jax_enable_x64", True)
 
@@ -52,9 +55,7 @@ def test_sim_NB():
     family = NegativeBinomial()
 
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(
-        alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed, beta0=beta0
-    )
+    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed, beta0=beta0)
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
@@ -69,9 +70,7 @@ def test_sim_NB():
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
 
     nb_fam = family
-    alpha_init = len(y) / jnp.sum(
-        (y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2
-    )
+    alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2)
     alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
     jaxqtl_nb = GLM(

@@ -3,14 +3,15 @@
 # import pandas as pd
 
 # import jax.numpy as jnp
-from jax.config import config
+from jax import config
 
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
-from jaxqtl.io.pheno import PheBedReader, bed_transform_y
+from jaxqtl.io.pheno import bed_transform_y, PheBedReader
 
 # from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
+
 
 # from jaxqtl.io.readfile import read_data
 

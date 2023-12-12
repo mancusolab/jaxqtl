@@ -29,12 +29,13 @@ class MapCisSingleState:
     def get_lead(self, key: rdm.PRNGKey, random_tiebreak: bool = False) -> Tuple[List, int]:
         """Get lead SNP result for each gene
 
-        :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=`True`
-        :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`  # noqa E501
+        :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=True
+        :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
         :return: lead SNP results and lead SNP index
         """
-        # break tie to call lead eQTL
+        # call lead eQTL
         if random_tiebreak:
+            # randomly break tie
             key, split_key = rdm.split(key)
             ties_ind = jnp.argwhere(self.cisglm.p == jnp.nanmin(self.cisglm.p))  # return (k, 1)
             vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
@@ -81,7 +82,7 @@ def map_cis(
     verbose: bool = True,
     log=None,
 ) -> pd.DataFrame:
-    """Cis mapping for each gene, report lead variant
+    """Cis eQTL mapping for each gene, report lead variant
 
     Run cis-eQTL mapping by fitting specified GLM model, such as Poisson and Negative Binomial.
     To test association between each SNP and gene expression, choose either score test (much faster) or
@@ -265,6 +266,7 @@ def map_cis_single(
 ) -> MapCisSingleState:
     """Fit GLM for SNP-gene pairs and report results
 
+    :rtype: MapCisSingleState
     :param X: array of covariates
     :param G: genotype array
     :param y: gene expression array
@@ -308,8 +310,7 @@ def map_cis_single(
 
 
 def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
-    """
-    write parquet file for nominal scan (split by chr)
+    """write parquet file for nominal scan (split by chr)
 
     :param outdf: data frame of full cis nominal mapping
     :param method: wald or score

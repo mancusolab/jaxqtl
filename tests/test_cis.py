@@ -6,7 +6,7 @@ from utils import assert_array_eq
 
 import jax.numpy as jnp
 
-from jax.config import config
+from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.utils import ScoreTest, WaldTest

@@ -25,13 +25,20 @@ def map_nominal(
     robust_se: bool = True,
     max_iter: int = 500,
 ):
-    """eQTL Mapping for all cis-SNP gene pairs
+    """cis eQTL Mapping for all cis-SNP gene pairs
 
-    append_intercept: add a column of ones in front for intercepts in design matrix
-    standardize: on covariates
-
-    Returns:
-        write out parquet file by chrom for efficient data storage and retrieval
+    :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param test: approach for hypothesis test, default to ScoreTest()
+    :param log: logger for QTL progress
+    :param append_intercept: `True` if want to append intercept, `False` otherwise
+    :param standardize: True` if want to standardize covariates data
+    :param window: window size (bp) of one side for cis scope, default to 500000, meaning in total 1Mb from left to right
+    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
+    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return: data frame of nominal mapping for cisSNPs - gene pairs
     """
     if log is None:
         log = get_log()

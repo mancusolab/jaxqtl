@@ -2,8 +2,7 @@ from utils import assert_array_eq
 
 import jax.numpy as jnp
 
-from jax import random
-from jax.config import config
+from jax import config, random
 
 from jaxqtl.infer.permutation import infer_beta
 
