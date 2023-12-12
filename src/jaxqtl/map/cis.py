@@ -27,6 +27,12 @@ class MapCisSingleState:
     beta_param: Array
 
     def get_lead(self, key: rdm.PRNGKey, random_tiebreak: bool = False) -> Tuple[List, int]:
+        """Get lead SNP result for each gene
+
+        :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=`True`
+        :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`  # noqa E501
+        :return: lead SNP results and lead SNP index
+        """
         # break tie to call lead eQTL
         if random_tiebreak:
             key, split_key = rdm.split(key)
@@ -76,8 +82,33 @@ def map_cis(
     log=None,
 ) -> pd.DataFrame:
     """Cis mapping for each gene, report lead variant
-    use permutation to determine cis-eQTL significance level (direct permutation + beta distribution method)
-    score test: fit null once and compute TS
+
+    Run cis-eQTL mapping by fitting specified GLM model, such as Poisson and Negative Binomial.
+    To test association between each SNP and gene expression, choose either score test (much faster) or
+    wald test.
+    For each gene, calculate the corrected p value using permutation to estimate the null distribution of
+    minimum p values.
+
+    :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param test: approach for hypothesis test, default to ScoreTest()
+    :param append_intercept: `True` if want to append intercept, `False` otherwise
+    :param standardize: `True` if want to standardize covariates data
+    :param seed: seed for permutation, default to 123
+    :param window: window size (bp) of one side for cis scope, default to 500000, meaning in total 1Mb from left to right
+    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
+    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
+    :param fdr_level: FDR level specified for across genes, default to 0.05 (not used if compute_qvalue=`False`)
+    :param pi0: specified probability of null (optional) when compute_qvalue=`True`
+    :param qvalue_lambda: an array of lambda value to fit a smooth spline (Optional)
+    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+    :param n_perm: number of permutation to estimate min p distribution for each gene using beta approximation approach, default to 1000
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param compute_qvalue: `True` if add qvalue for genes, default to `False`
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
+    :param log: logger for QTL progress
+    :return: data frame of QTL mapping results
     """
     if log is None:
         log = get_log()
@@ -128,7 +159,6 @@ def map_cis(
         G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
 
         # skip if no cis SNPs found
-        # TODO: double check that you have a non-None G that has 2-dim when no cis-SNPs exist
         if G.shape[1] == 0:
             if verbose:
                 log.info(
@@ -185,6 +215,18 @@ def map_cis(
 
 
 def _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df):
+    """Get lead SNPs and their information
+
+    :param G: genotype array
+    :param chrom: chromosome number
+    :param gene_name: gene name
+    :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=`True`
+    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
+    :param result: data frame of QTL mapping result
+    :param start_min: TSS start (0-based)
+    :param var_df: data frame of variant information (bim)
+    :return:
+    """
     g_info = _get_geno_info(G)
     # get info at lead hit, and lead hit index
     row, vdx = result.get_lead(key, random_tiebreak)
@@ -221,12 +263,20 @@ def map_cis_single(
     test: HypothesisTest = ScoreTest(),
     max_iter: int = 500,
 ) -> MapCisSingleState:
-    """Generate result of GLM for variants in cis
-    For given gene, find all variants in + and - window size TSS region
+    """Fit GLM for SNP-gene pairs and report results
 
-    window: width of flanking on either side of TSS
-    sig_level: desired significance level (not used)
-    perm: Permutation method
+    :param X: array of covariates
+    :param G: genotype array
+    :param y: gene expression array
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param key_init: key for jax RNG
+    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
+    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+    :param se_estimator: SE estimator using HuberError() or FisherInfoError()
+    :param n_perm: number of permutation to estimate min p distribution for each gene using beta approximation approach, default to 1000
+    :param test: approach for hypothesis test, default to ScoreTest()
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return: cis mapping results for a single gene
     """
     cisglmstate = test(X, G, y, family, offset_eta, se_estimator, max_iter)
 
@@ -234,6 +284,7 @@ def map_cis_single(
 
     # if we -always- use BetaPerm now, we may as well drop the class aspect and
     # call function directly...
+    # note: set max_perm_direct will change the parent class parameter
     perm = BetaPerm(max_perm_direct=n_perm)
     pval_beta, beta_param = perm(
         X,
@@ -259,6 +310,11 @@ def map_cis_single(
 def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
     """
     write parquet file for nominal scan (split by chr)
+
+    :param outdf: data frame of full cis nominal mapping
+    :param method: wald or score
+    :param out_path: output path
+    :return: None
     """
     # split by chrom
     for chrom in outdf["chrom"].unique().tolist():

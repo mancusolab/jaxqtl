@@ -19,10 +19,10 @@ from jaxqtl.log import get_log
 @dataclass
 class ReadyDataState:
     geno: Array  # sample x genes
-    bim: pd.DataFrame
+    bim: pd.DataFrame  # variants on rows, cols: chrom, snp, cm, pos, a0, a1, i
     pheno: ExpressionData
     pheno_meta: GeneMetaData
-    covar: Array  # sample x covariate
+    covar: Array  # sample x covariates
 
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
         if len(chrom) > 0:
