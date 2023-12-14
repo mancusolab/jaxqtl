@@ -20,7 +20,7 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import map_nominal
+from jaxqtl.map.nominal import map_nominal, map_nominal_covar
 from jaxqtl.map.utils import _get_geno_info, _setup_G_y
 
 
@@ -199,6 +199,8 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("-geno", type=str, help="Genotype prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Covariate path")
+    argp.add_argument("-add-covar", type=str, help="Covariate path for additional covariates")
+    argp.add_argument("-covar-test", type=str, help="Covariate to test")
     argp.add_argument("-pheno", type=str, help="Pheno path")
     argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
     argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
@@ -207,7 +209,7 @@ def main(args):
     argp.add_argument(
         "-mode",
         type=str,
-        choices=["nominal", "cis", "fitnull"],
+        choices=["nominal", "cis", "fitnull", "covar"],
         help="Cis or nominal mapping",
     )
     argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
@@ -275,7 +277,7 @@ def main(args):
     pheno_reader = PheBedReader()
     pheno = pheno_reader(args.pheno)
 
-    covar = covar_reader(args.covar)
+    covar = covar_reader(args.covar, args.add_covar, args.covar_test)
 
     genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
 
@@ -372,6 +374,18 @@ def main(args):
                 window=args.window,
                 offset_eta=offset_eta,
                 robust_se=args.robust,
+            )
+            write_parqet(outdf=out_df, method="wald", out_path=args.out)
+
+    elif args.mode == "covar":
+        if args.test_method == "score":
+            out_df = map_nominal_covar(
+                dat, family=family, test=ScoreTest(), offset_eta=offset_eta, robust_se=args.robust
+            )
+            write_parqet(outdf=out_df, method="score", out_path=args.out)
+        elif args.test_method == "wald":
+            out_df = map_nominal_covar(
+                dat, family=family, test=WaldTest(), offset_eta=offset_eta, robust_se=args.robust
             )
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
 

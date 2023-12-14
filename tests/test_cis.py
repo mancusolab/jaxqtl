@@ -16,24 +16,26 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import map_nominal
+from jaxqtl.map.nominal import map_nominal, map_nominal_covar
 
 
 pd.set_option("display.max_columns", 500)  # see cis output
 
 config.update("jax_enable_x64", True)
 
-# geno_path = "../example/local/NK_new/chr22"
-# covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
-# pheno_path = "../example/local/NK_new/NK.bed.gz"
-# genelist_path = "../example/local/NK_new/ENSG00000198125"
+geno_path = "../example/local/NK_new/chr22"
+covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
+addcovar_path = "../example/local/NK_new/prs.tsv"
+covar_test = "score"
+pheno_path = "../example/local/NK_new/NK.bed.gz"
+genelist_path = "../example/local/NK_new/ENSG00000198125"
 
 
-geno_path = "../example/data/chr22.n94"
-covar_path = "../example/data/donor_features.n94.tsv"
-pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
-genelist_path = "../example/data/genelist.tsv"
-# genelist_path = "../example/data/genelist_chr22.tsv"
+# geno_path = "../example/data/chr22.n94"
+# covar_path = "../example/data/donor_features.n94.tsv"
+# pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
+# genelist_path = "../example/data/genelist.tsv"
+# # genelist_path = "../example/data/genelist_chr22.tsv"
 
 log = get_log()
 
@@ -43,7 +45,9 @@ geno_reader = PlinkReader()
 geno, bim, sample_info = geno_reader(geno_path)
 
 log.info("Load covariates.")
+# covar = covar_reader(covar_path, addcovar_path, covar_test)
 covar = covar_reader(covar_path)
+
 
 log.info("Load phenotype.")
 pheno_reader = PheBedReader()
@@ -62,6 +66,7 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
+# dat.filter_gene(gene_list=gene_list)
 dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 # dat.filter_gene(gene_list=gene_list[50:55])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
@@ -118,7 +123,11 @@ mapcis_out_score_nb = map_cis(
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+# mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+
+mapnom_covar = map_nominal_covar(
+    dat, family=NegativeBinomial(), test=WaldTest(), offset_eta=offset_eta, robust_se=False
+)
 
 out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=WaldTest())
 # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)

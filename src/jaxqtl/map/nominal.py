@@ -6,7 +6,7 @@ from jaxtyping import ArrayLike
 
 from ..families.distribution import ExponentialFamily
 from ..infer.stderr import FisherInfoError, HuberError
-from ..infer.utils import HypothesisTest, ScoreTest
+from ..infer.utils import HypothesisTest, ScoreTest, WaldTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from .utils import _get_geno_info, _setup_G_y
@@ -152,3 +152,89 @@ def map_nominal(
         start_row = end_row
 
     return outdf
+
+
+def map_nominal_covar(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    test: HypothesisTest = WaldTest(),
+    log=None,
+    append_intercept: bool = True,
+    standardize: bool = True,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
+    max_iter: int = 500,
+):
+    """test association between gene expression and other covariates
+
+    :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param test: approach for hypothesis test, default to ScoreTest()
+    :param log: logger for QTL progress
+    :param append_intercept: `True` if want to append intercept, `False` otherwise
+    :param standardize: True` if want to standardize covariates data
+    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
+    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return: data frame of nominal mapping for cisSNPs - gene pairs
+    """
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar[:, :-1]  # separate the column from the rest
+    n, _ = X.shape
+    cov = dat.covar[:, -1].reshape((n, 1))
+
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    if standardize:
+        X = X / jnp.std(X, axis=0)
+
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    out_columns = ["phenotype_id", "chrom", "slope", "slope_se", "pval_nominal", "model_converged", "alpha_cov"]
+
+    phenotype_id = []
+    chrom_list = []
+    slope = []
+    slope_se = []
+    nominal_p = []
+    converged = []
+    alpha = []
+    se_estimator = HuberError() if robust_se else FisherInfoError()
+
+    for gene in gene_info:
+        gene_name, chrom, _, _ = gene
+
+        # pull cis G (sample x gene) and y for this gene
+        y = dat.pheno[gene_name]  # __getitem__
+
+        # skip if no cis SNPs found
+        if verbose:
+            log.info("Performing scan for %s", gene_name)
+
+        result = test(X, cov, y, family, offset_eta, se_estimator, max_iter)
+
+        if verbose:
+            log.info("Finished cis-qtl scan for %s", gene_name)
+
+        # combine results
+        phenotype_id.append(gene_name)
+        slope.append(result.beta.item())
+        slope_se.append(result.se.item())
+        nominal_p.append(result.p.item())
+        converged.append(result.converged.item())  # whether full model converged
+        alpha.append(result.alpha.item())
+        chrom_list.append(chrom)
+
+    # write result
+    result_out = [phenotype_id, chrom_list, slope, slope_se, nominal_p, converged, alpha]
+
+    result_df = pd.DataFrame(result_out, index=out_columns).T
+
+    return result_df
