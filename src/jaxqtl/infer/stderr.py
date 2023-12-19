@@ -21,6 +21,16 @@ class ErrVarEstimation(eqx.Module):
         weight: ArrayLike,
         alpha: ScalarLike = 0.0,
     ) -> Array:
+        """calculate standard errors for SNP
+
+        :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+        :param X: covariate data matrix (nxp)
+        :param y: outcome vector (nx1)
+        :param eta: linear component eta
+        :param mu: fitted mean
+        :param weight: weight for each individual
+        :param alpha: dispersion parameter in NB model
+        """
         pass
 
 

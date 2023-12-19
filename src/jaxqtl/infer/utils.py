@@ -28,6 +28,11 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
     only require fit null model using fitted covariate only model + new vector g
     X is the full design matrix containing covariates and g
     calculate score in full model using the model fitted from null model
+
+    :param G: genotype matrix
+    :param X: covariate data matrix (nxp)
+    :param glm_null_res: GLMState from null model (without adding SNP)
+    :return: Score test statistics, p value, score, (expected) variance of score
     """
     y_resid = jnp.squeeze(glm_null_res.resid, -1)
     x_W = X * glm_null_res.glm_wt
@@ -67,6 +72,17 @@ class HypothesisTest(eqx.Module):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
     ) -> CisGLMState:
+        """hypothesis test for association between SNP and outcome
+
+        :param X: covariate data matrix (nxp)
+        :param G: genotype matrix
+        :param y: outcome vector (nx1)
+        :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+        :param offset_eta: offset (nx1)
+        :param se_estimator: estimator for standard error, default to fisher information
+        :param max_iter: maximum iterations for fitting GLM, default to 1000
+        :return: CisGLMState
+        """
         return self.test(X, G, y, family, offset_eta, se_estimator, max_iter)
 
     @abstractmethod

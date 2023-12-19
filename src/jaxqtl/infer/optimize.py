@@ -29,6 +29,20 @@ def irls(
     offset_eta: ArrayLike = 0.0,
     alpha_init: ScalarLike = 0.0,
 ) -> IRLSState:
+    """IRLS to solve GLM
+
+    :param X: covariate data matrix (nxp)
+    :param y: outcome vector (nx1)
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param solver: linear equation solver
+    :param eta: linear component eta
+    :param max_iter: maximum iterations for fitting GLM, default to 1000
+    :param tol: tolerance for stopping, default to 0.001
+    :param step_size: step size to update the parameter at each step, default to 1.0
+    :param offset_eta: offset (nx1)
+    :param alpha_init: initial value for dispersion parameter alpha
+    :return: IRLSState
+    """
     n, p = X.shape
 
     def body_fun(val: Tuple):

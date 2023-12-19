@@ -60,6 +60,22 @@ class DirectPerm(Permutation):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 500,
     ) -> Array:
+        """
+
+        :param X: covariate data matrix (nxp)
+        :param y: outcome vector (nx1)
+        :param G: genotype matrix
+        :param obs_p: observed minimum p value for given gene (lead SNP p value); not used
+        :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+        :param key_init: jax PRNGKey
+        :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
+        :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+        :param test: approach for hypothesis test, default to ScoreTest()
+        :param se_estimator: SE estimator using HuberError() or FisherInfoError()
+        :param max_iter: maximum iterations for fitting GLM, default to 500
+        :return: permutation p values
+        """
+
         def _func(key, x):
             del x
             key, p_key = rdm.split(key)
@@ -75,8 +91,11 @@ class DirectPerm(Permutation):
 
 @eqx.filter_jit
 def _calc_adjp_naive(obs_pval: ArrayLike, pval: ArrayLike) -> Array:
-    """
-    obs_pval: the strongest nominal p value
+    """calculate adjusted minimum p value under beta distribution
+
+    :param obs_pval: observed minimum p value
+    :param pval: permutation minimum p values
+    :return: adjusted minimum p value
     """
     return (jnp.sum(pval < obs_pval) + 1) / (len(pval) + 1)
 
@@ -89,10 +108,17 @@ def infer_beta(
     tol=1e-3,
     max_iter=500,
 ) -> Array:
-    """
+    """Infer shape and scale parameter for beta distribution
     given p values from R permutations (strongest signals),
     use newton's method to estimate beta distribution parameters:
     p ~ Beta(k, n)
+
+    :param p_perm: permutation minimum p values
+    :param init: initial value for shape and scale
+    :param step_size: step size to update parameters at each step, default to 0.1
+    :param tol: tolerance for stopping, default to 0.001
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return:
     """
 
     def loglik(params, p: ArrayLike) -> Array:

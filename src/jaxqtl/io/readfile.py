@@ -25,6 +25,11 @@ class ReadyDataState:
     covar: Array  # sample x covariates
 
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
+        """Filter genotype data
+
+        :param maf_threshold: minor allele frequency, default to 0.0
+        :param chrom: include which chromosomes
+        """
         if len(chrom) > 0:
             # filter bim by chr
             self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
@@ -59,6 +64,10 @@ class ReadyDataState:
             raise ValueError(f"Unsupported mode {mode}")
 
     def add_covar_pheno_PC(self, k: int):
+        """calculate phenotype PCs
+
+        :param k: number of PC to calculate and append to covariates
+        """
         count_std = self.pheno.count.copy(deep=True)
         count_std = (count_std - count_std.mean()) / count_std.std()  # standardize genes
 
@@ -68,7 +77,11 @@ class ReadyDataState:
         self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
 
     def filter_gene(self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None):
-        """Filter genes to be mapped"""
+        """Filter genes
+
+        :param geneexpr_percent_cutoff: cutoff for proportion of gene expression, i.e., 0.01 means filter genes that are expressed in 0.01 x 100% individuals
+        :param gene_list: a list of genes to keep for eQTL mapping
+        """
         if gene_list is not None:
             gene_list_insample = list(set(self.pheno_meta.gene_map.phenotype_id).intersection(set(gene_list)))
             # filter pheno
@@ -117,6 +130,15 @@ def create_readydata(
 
     All these files must contain the same set of individuals, otherwise only complete data is retained.
     Internally we check ordering and guarantee they are in the same order as phenotype data
+
+    :param geno: genotype data frame
+    :param bim: bim data frame
+    :param pheno: gene expression data frame
+    :param covar: covariate data frame
+    :param log: logger
+    :param autosomal_only: `True` if keep only autosomal variants, default to `TRUE`
+    :param ind_list: path to a file to include only specified individuals
+    :return: ReadyDataState
     """
     if log is None:
         log = get_log()

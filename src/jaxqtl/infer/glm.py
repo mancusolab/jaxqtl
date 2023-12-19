@@ -1,4 +1,4 @@
-from typing import NamedTuple
+from typing import NamedTuple, Tuple
 
 import equinox as eqx
 
@@ -35,7 +35,7 @@ class GLMState(NamedTuple):
 class GLM(eqx.Module):
     """
     example:
-    model = jaxqtl.GLM(X, y, family="Gaussian", solver="qr", append=True)
+    model = jaxqtl.GLM(X, y, family=Gaussian(), solver=CholeskySolve())
     res = model.fit()
     print(res)
 
@@ -81,7 +81,16 @@ class GLM(eqx.Module):
         alpha_init: ScalarLike = 0.0,
         se_estimator: ErrVarEstimation = FisherInfoError(),
     ) -> GLMState:
-        """Report Wald test p value"""
+        """Fit GLM
+
+        :param X: covariate data matrix (nxp)
+        :param y: outcome vector (nx1)
+        :param offset_eta: offset (nx1)
+        :param init: initial value for betas
+        :param alpha_init: initial value for alpha in NB model, default to 0s
+        :param se_estimator: estimator for standard error, default to fisher information
+        :return: GLMState that contains model fitting result
+        """
         beta, n_iter, converged, alpha = irls(
             X,
             y,
@@ -129,7 +138,14 @@ class GLM(eqx.Module):
         X: ArrayLike,
         y: ArrayLike,
         offset_eta: ArrayLike = 0.0,
-    ) -> Array:
+    ) -> Tuple[Array, Array]:
+        """Calculate eta and dispersion parameter alpha
+
+        :param X: covariate data matrix (nxp)
+        :param y: outcome vector (nx1)
+        :param offset_eta: offset (nx1)
+        :return: eta, dispersion (alpha)
+        """
         n, p = X.shape
         init_val = self.family.init_eta(y)
         if isinstance(self.family, NegativeBinomial):

@@ -60,7 +60,7 @@ class H5AD(PhenoIO):
         self,
         dat: AnnData,
         filter_opt=SingleCellFilter,
-        divide_size_factor: bool = True,
+        divide_size_factor: bool = False,
         norm_fix_L: Optional[int] = None,
     ) -> pd.DataFrame:
         """Filter single cell data and create pseudo-bulk
@@ -68,9 +68,12 @@ class H5AD(PhenoIO):
         dat.var_name = 'ensembl_id'
         ref: https://scanpy-tutorials.readthedocs.io/en/latest/pbmc3k.html
 
-        Returns:
-            pseudo bulk RNA seq data for all cell types
-            index by ['donor_id', 'cell_type']
+        :param dat: AnnData
+        :param filter_opt: SingleCellFilter metrics
+        :param divide_size_factor: `TRUE` if normalize read counts between individuals
+        :param norm_fix_L: specify if normalize read counts to a fixed total amount
+        :return: pseudo bulk RNA seq data for all cell types, index by ['donor_id', 'cell_type']
+
         """
         # TODO: check these result, make col names consistent
         # filter cells by min number of genes expressed (in place)
@@ -231,7 +234,7 @@ def adjust_size_factor(adata: AnnData):
 
 
 def bed_transform_y(pheno_path: str, method: str = "log1p"):
-    """
+    """Perform transformation on gene expression count matrix
     count_df: rows are genes, columns are individual ID
     """
     count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})

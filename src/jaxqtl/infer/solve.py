@@ -22,6 +22,12 @@ class LinearSolve(eqx.Module):
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
+        """Linear equation solver
+
+        :param X: covariate data matrix (nxp)
+        :param r: residuals
+        :param weights: weights for each individual
+        """
         pass
 
 
