@@ -42,6 +42,17 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
 
     pval = 2 * norm.sf(jnp.fabs(zscore))
 
+    # # test spa test
+    # cgf = gu.Poisson(glm_null_res.mu.flatten())  # pred_mean is predicted mean from GLM
+    #
+    # def _spa(_, jdx):
+    #     pvalue_j = gu.saddlepoint_pvalue(g_score[jdx], g_resid[:, jdx], cgf)
+    #     return None, pvalue_j
+    #
+    # _, spa_pval = lax.scan(_spa, None, jnp.arange(len(zscore)))  # p is num snps
+
+    # import numpy as np; import jax; jax.debug.breakpoint()
+
     return zscore, pval, g_score, g_var
 
 

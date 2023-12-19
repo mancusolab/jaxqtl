@@ -382,12 +382,12 @@ def main(args):
             out_df = map_nominal_covar(
                 dat, family=family, test=ScoreTest(), offset_eta=offset_eta, robust_se=args.robust
             )
-            write_parqet(outdf=out_df, method="score", out_path=args.out)
+            out_df.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal_covar(
                 dat, family=family, test=WaldTest(), offset_eta=offset_eta, robust_se=args.robust
             )
-            write_parqet(outdf=out_df, method="wald", out_path=args.out)
+            out_df.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "fitnull":
         pass

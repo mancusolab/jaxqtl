@@ -25,16 +25,16 @@ config.update("jax_enable_x64", True)
 
 geno_path = "../example/local/NK_new/chr22"
 covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
-addcovar_path = "../example/local/NK_new/prs.tsv"
-covar_test = "score"
-pheno_path = "../example/local/NK_new/NK.bed.gz"
-genelist_path = "../example/local/NK_new/ENSG00000198125"
+# addcovar_path = "../example/local/NK_new/prs.tsv"
+# covar_test = "score"
+pheno_path = "../example/local/NK_new/NK.chr22.bed.gz"
+# genelist_path = "../example/local/NK_new/ENSG00000198125"
+genelist_path = "../example/data/genelist_spatest.tsv"
 
 
 # geno_path = "../example/data/chr22.n94"
 # covar_path = "../example/data/donor_features.n94.tsv"
 # pheno_path = "../example/data/n94_CD14_positive_monocyte.bed.gz"
-# genelist_path = "../example/data/genelist.tsv"
 # # genelist_path = "../example/data/genelist_chr22.tsv"
 
 log = get_log()
@@ -67,7 +67,9 @@ total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
 # dat.filter_gene(gene_list=gene_list)
-dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+# dat.filter_gene(geneexpr_percent_cutoff=0.01)
+# dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+dat.filter_gene(gene_list=["ENSG00000272834"])
 # dat.filter_gene(gene_list=gene_list[50:55])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
 
@@ -115,7 +117,7 @@ def test_cis_waldtest():
 start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
-    family=NegativeBinomial(),
+    family=Poisson(),
     test=ScoreTest(),
     offset_eta=offset_eta,
     n_perm=1000,
@@ -142,7 +144,7 @@ mapcis_out_wald = map_cis(
     offset_eta=offset_eta,
     n_perm=1000,
     robust_se=False,
-    compute_qvalue=True,
+    compute_qvalue=False,
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
