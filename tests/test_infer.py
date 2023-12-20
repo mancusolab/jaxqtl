@@ -277,8 +277,6 @@ def test_NB():
 
     assert_array_eq(glm_state.alpha, sm_alpha, rtol=1e-2)
     assert_array_eq(glm_state.beta / glm_state.se, R_res["Z"], rtol=1e-2)
-    # assert_array_eq(glm_state.beta, sm_mod.params[:-1])
-    # assert_array_eq(glm_state.se, sm_mod.bse[:-1])
 
 
 def test_NB_robust():
@@ -428,6 +426,7 @@ def test_bin_scoretest():
 
 
 def test_nb_scoretest():
+    # note: this is different b/c glm.scoretest() in R computes residuals like lm
     Rres = pd.read_csv("./example/data/ENSG00000178607_rs74787440.nb.scoretest.tsv", sep="\t")
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
