@@ -189,7 +189,7 @@ def test_1D_X():
     assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
-def test_robust_SE():
+def test_robust_SE_Poisson():
     """
     Compare sandwitch estimator from stats model to jaxqtl
     """
@@ -198,6 +198,7 @@ def test_robust_SE():
     y = jnp.array(dat["y"])[:, jnp.newaxis]
     library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
 
+    # test poisson robust
     sm_mod = sm.GLM(
         np.array(y),
         np.array(M),
@@ -206,7 +207,7 @@ def test_robust_SE():
     ).fit()
     white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
 
-    jaxqtl_pois = GLM(family=Poisson(), solver=CholeskySolve(), max_iter=100)
+    jaxqtl_pois = GLM(family=Poisson(), solver=CholeskySolve())
     init_pois = jaxqtl_pois.family.init_eta(y)
 
     glmstate = jaxqtl_pois.fit(
@@ -214,6 +215,28 @@ def test_robust_SE():
         y,
         init=init_pois,
         offset_eta=library_size,
+        se_estimator=HuberError(),
+    )
+
+    assert_array_eq(glmstate.se**2, jnp.diag(white_cov))
+
+
+def test_robust_SE_lm():
+    dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
+    M = jnp.array(dat.iloc[:, 0:12])
+    y = jnp.array(dat["y"])[:, jnp.newaxis]
+
+    # test lm robust
+    sm_mod = sm.GLM(np.array(y), np.array(M), family=sm.families.Gaussian()).fit()
+    white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
+
+    jaxqtl_lm = GLM(family=Gaussian(), solver=CholeskySolve())
+    init_lm = jaxqtl_lm.family.init_eta(y)
+
+    glmstate = jaxqtl_lm.fit(
+        M,
+        y,
+        init=init_lm,
         se_estimator=HuberError(),
     )
 

@@ -66,13 +66,13 @@ class HuberError(ErrVarEstimation):
         """
         Huber white sandwich estimator using observed hessian
         """
-        phi = 1.0  # pull scale from family?
+        phi = family.scale(X, y, mu)  # note: this scaler will cancel out in robust_cov
         gprime = family.glink.deriv(mu)
         # calculate observed hessian
         W = 1 / phi * (family._hlink_score(eta, alpha) / gprime - family._hlink_hess(eta, alpha) * (y - mu))
         hess_inv = jnpla.inv(-(X * W).T @ X)
 
-        score_no_x = (y - mu) / (family.variance(mu, alpha) * gprime) * phi
+        score_no_x = (y - mu) / (family.variance(mu, alpha) * gprime * phi)
         Bs = (X * (score_no_x**2)).T @ X
         robust_cov = hess_inv @ Bs @ hess_inv
 
