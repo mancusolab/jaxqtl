@@ -63,7 +63,7 @@ class ReadyDataState:
         else:
             raise ValueError(f"Unsupported mode {mode}")
 
-    def add_covar_pheno_PC(self, k: int):
+    def add_covar_pheno_PC(self, k: int, add_covar: Optional[str]):
         """calculate phenotype PCs
 
         :param k: number of PC to calculate and append to covariates
@@ -74,7 +74,11 @@ class ReadyDataState:
         pca_pheno = PCA(n_components=k)
         pca_pheno.fit(count_std)
         PCs = pca_pheno.fit_transform(count_std)  # nxk
-        self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
+
+        if add_covar is None:
+            self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
+        else:
+            self.covar = jnp.hstack((self.covar[:, :-1], PCs, self.covar[:, -1][:, jnp.newaxis]))
 
     def filter_gene(self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None):
         """Filter genes

@@ -86,6 +86,16 @@ class DirectPerm(Permutation):
 
         key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
+        # # TODO: write a for loop to write out pvals[-18] G, y, offset
+        # key = key_init
+        # for idx in range(self.max_perm_direct):
+        #     key, p_key = rdm.split(key)
+        #     perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
+        #     glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], se_estimator, max_iter)
+        #     pvals = jnp.nanmin(glmstate.p)  # G index 934
+        #
+        # import numpy as np; import jax; jax.debug.breakpoint()
+
         return pvals
 
 
@@ -177,15 +187,18 @@ def infer_beta(
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
 
-        # import jax; import jax.numpy.linalg as jnpla
-        # jax.debug.print("old_lik:{x}", x=old_lik)
-        # jax.debug.print("old_param:{x}", x=old_param)
-        # jax.debug.print("gamma:{x}", x=gamma)
-        # jax.debug.print("info_mat condition:{x}", x=jnpla.cond(info_mat))
-        # jax.debug.print("score:{x}", x=score_fn(old_param, p_perm))
-        # jax.debug.print("direction:{x}", x=direction)
-        # jax.debug.print("adjustment:{x}", x=adjustment)
-        # jax.debug.print("new_param:{x}", x=new_param)
+        import jax
+        import jax.numpy.linalg as jnpla
+
+        jax.debug.print("old_lik:{x}", x=old_lik)
+        jax.debug.print("old_param:{x}", x=old_param)
+        jax.debug.print("gamma:{x}", x=gamma)
+        jax.debug.print("info_mat condition:{x}", x=jnpla.cond(info_mat))
+        jax.debug.print("score:{x}", x=score_fn(old_param, p_perm))
+        jax.debug.print("direction:{x}", x=direction)
+        jax.debug.print("adjustment:{x}", x=adjustment)
+        jax.debug.print("new_param:{x}", x=new_param)
+        jax.debug.breakpoint()
 
         return new_lik, diff, num_iter + 1, new_param
 
@@ -254,11 +267,12 @@ class BetaPerm(DirectPerm):
         )
         p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
 
-        # init = jnp.ones(2)  # initialize with 1
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
         n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
+
         init = jnp.array([k_init, n_init])
+        # init = jnp.ones(2)
 
         # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)

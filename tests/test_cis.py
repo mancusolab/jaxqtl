@@ -69,7 +69,7 @@ offset_eta = jnp.log(total_libsize)
 # dat.filter_gene(gene_list=gene_list)
 # dat.filter_gene(geneexpr_percent_cutoff=0.01)
 # dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
-dat.filter_gene(gene_list=["ENSG00000272834"])
+dat.filter_gene(gene_list=["ENSG00000273289"])
 # dat.filter_gene(gene_list=gene_list[50:55])
 # dat.filter_gene(gene_list=['ENSG00000184113'])
 
@@ -120,7 +120,7 @@ mapcis_out_score_nb = map_cis(
     family=Poisson(),
     test=ScoreTest(),
     offset_eta=offset_eta,
-    n_perm=1000,
+    n_perm=983,
     compute_qvalue=False,
 )
 stop = timeit.default_timer()

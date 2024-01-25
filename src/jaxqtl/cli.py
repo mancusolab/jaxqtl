@@ -301,7 +301,7 @@ def main(args):
 
     # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
     if args.addpc > 0:
-        dat.add_covar_pheno_PC(k=args.addpc)
+        dat.add_covar_pheno_PC(k=args.addpc, add_covar=args.add_covar)
 
     if isinstance(family, Gaussian):
         # dat.transform_y(mode='log1p')  # log1p
