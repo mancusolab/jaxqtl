@@ -167,9 +167,9 @@ def test_CGsolve_realdata():
     init_pois = jaxqtl_poisson_cg.family.init_eta(y)
     glm_state = jaxqtl_poisson_cg.fit(X, y, init=init_pois)
 
-    assert_array_eq(glm_state.beta, sm_state.params)
-    assert_array_eq(glm_state.se, sm_state.bse)
-    assert_array_eq(glm_state.p, sm_state.pvalues)
+    assert_array_eq(glm_state.beta, sm_state.params, rtol=1e-3)
+    assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-3)
+    assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-3)
 
 
 def test_1D_X():

@@ -4,8 +4,8 @@ import equinox as eqx
 import jax.numpy as jnp
 import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
+import lineax as lx
 
-from jaxopt import linear_solve as ls
 from jaxtyping import Array, ArrayLike
 
 
@@ -70,15 +70,24 @@ class CGSolve(LinearSolve):
         weights: ArrayLike,
     ) -> Array:
         """not converged for some cases in real data;
-        Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol)
-        !!! Don't use this. Need future fix
+        Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol),
+        Now switch lineax
         """
         w_half = jnp.sqrt(weights)
         w_half_X = X * w_half
 
-        def _matvec(beta):
-            return w_half_X @ beta
+        # Method 1: CG solve
+        # cg_solver = lx.CG(atol=1e-5, rtol=1e-5)
+        # XtWX = w_half_X.T @ w_half_X
+        # operator = lx.MatrixLinearOperator(XtWX, lx.positive_semidefinite_tag)
+        # b = (weights * X).T @ r
+        # sol = lx.linear_solve(operator, b.squeeze(), solver=cg_solver)
 
-        # import jax; jax.debug.breakpoint()
-        # import pdb; pdb.set_trace()
-        return ls.solve_normal_cg(_matvec, r * w_half, init=jnp.zeros((X.shape[1], 1)))
+        # Method 2 (faster): CG solve using normal equation which solve A^t A x = A^t b
+        # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
+        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        operator = lx.MatrixLinearOperator(w_half_X)
+        b = w_half * r
+        sol = lx.linear_solve(operator, b.squeeze(), solver=ncg_solver)
+
+        return sol.value.reshape((len(sol.value), 1))

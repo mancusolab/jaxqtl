@@ -45,7 +45,7 @@ class SimData:
         self.pfeatures = 2  # intercept, sex, age, genotype of one SNP
         self.family = family
 
-    def gen_data(
+    def sim_bulk_data(
         self,
         scale: float = 1.0,
         alpha: float = 0.0,
@@ -65,17 +65,59 @@ class SimData:
         np.random.seed(seed)
 
         X[:, 0] = np.ones((n,))  # intercept
-        # age = np.random.normal(40, 4, (n,))
-        # X[:, 1] = (age - age.mean()) / age.std()  # center, standardize age
-        # sex = np.random.binomial(1, 0.5, (n,))
-        # X[:, 2] = (sex - sex.mean()) / sex.std()  # sex (0, 1)
-        #
+
         # # simulate genotype for one SNP
         X[:, 1] = np.random.binomial(2, maf, (n,))  # genotype (0,1,2)
 
-        # generate true betas
         # TODO: Drop covariate effect; only use intercept (different value) for null model
-        # see if power and type I error differ
+        # beta = np.random.normal(0, 1, beta_shape)
+        beta = np.ones(beta_shape)
+        beta[0] = beta0
+
+        if model == "null":
+            beta[-1] = 0.0
+        else:
+            beta[-1] = true_beta
+
+        eta = X @ beta
+        mu = self.family.glink.inverse(eta)
+
+        y = self.family.random_gen(mu, scale=scale, alpha=alpha)
+
+        return SimState(jnp.array(X), jnp.array(y), jnp.array(beta))
+
+    def sim_sc_data(
+        self,
+        scale: float = 1.0,
+        alpha: float = 0.0,
+        maf: float = 0.3,
+        model: str = "alt",
+        beta0: float = 1.0,
+        true_beta: float = 0.0,
+        seed: int = 1,
+        # V_a: float = 0.01,
+        # V_re: float = 0.5,
+        # V_disp: float = 0.0,
+        # baseline_mu: float = 0.0,
+    ) -> SimState:
+        n = self.nobs
+        p = self.pfeatures
+        X_shape = (n, p)
+        beta_shape = (p, 1)
+
+        # tot_var = V_a + V_re + V_disp
+        # lamb = np.exp(baseline_mu + (tot_var) / 2.0)
+        # h2_obs = lamb * (V_a) / (lamb * (np.exp(tot_var) - 1) + 1)
+
+        X = np.zeros(X_shape)
+
+        np.random.seed(seed)
+
+        X[:, 0] = np.ones((n,))  # intercept
+
+        # # simulate genotype for one SNP
+        X[:, 1] = np.random.binomial(2, maf, (n,))  # genotype (0,1,2)
+
         # beta = np.random.normal(0, 1, beta_shape)
         beta = np.ones(beta_shape)
         beta[0] = beta0
@@ -125,7 +167,7 @@ def run_sim(
     pval_nb_score_thr = np.array([])
 
     for i in range(num_sim):
-        X, y, beta = sim.gen_data(
+        X, y, beta = sim.sim_bulk_data(
             alpha=alpha,
             maf=maf,
             model=model,

@@ -12,7 +12,7 @@ from jax import config
 
 from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import CholeskySolve
+from jaxqtl.infer.solve import CGSolve, CholeskySolve
 from jaxqtl.sim import SimData
 
 
@@ -20,6 +20,7 @@ config.update("jax_enable_x64", True)
 
 step_size = 1.0
 max_iter = 100
+true_beta = 0.1
 
 
 def test_sim_poisson():
@@ -28,7 +29,7 @@ def test_sim_poisson():
     family = Poisson()
 
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=0.0, maf=0.3, model="alt", true_beta=0.1, seed=seed)
+    X, y, beta = sim.sim_bulk_data(alpha=0.0, maf=0.3, model="alt", true_beta=true_beta, seed=seed)
 
     # no intercept
     mod = smPoisson(np.array(y), np.array(X))
@@ -55,7 +56,7 @@ def test_sim_NB():
     family = NegativeBinomial()
 
     sim = SimData(n, family)
-    X, y, beta = sim.gen_data(alpha=true_alpha, maf=0.1, model="alt", true_beta=0.1, seed=seed, beta0=beta0)
+    X, y, beta = sim.sim_bulk_data(alpha=true_alpha, maf=0.1, model="alt", true_beta=true_beta, seed=seed, beta0=beta0)
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
@@ -63,7 +64,7 @@ def test_sim_NB():
     jaxqtl_pois = GLM(
         family=Poisson(),
         max_iter=max_iter,
-        solver=CholeskySolve(),
+        solver=CGSolve(),
         step_size=step_size,
     )
     init_pois = jaxqtl_pois.family.init_eta(y)
