@@ -18,34 +18,10 @@ from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
-from jaxqtl.log import get_log
+from jaxqtl.log import get_log, get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import map_nominal, map_nominal_covar
 from jaxqtl.map.utils import _get_geno_info, _setup_G_y
-
-
-def get_logger(name, path=None):
-    """get logger for factorgo progress"""
-    logger = logging.getLogger(name)
-    if not logger.handlers:
-        # Prevent logging from propagating to the root logger
-        logger.propagate = 0
-        console = logging.StreamHandler()
-        logger.addHandler(console)
-
-        # if need millisecond use : %(asctime)s.%(msecs)03d
-        log_format = "[%(asctime)s - %(levelname)s] %(message)s"
-        date_format = "%Y-%m-%d %H:%M:%S"
-        formatter = logging.Formatter(fmt=log_format, datefmt=date_format)
-        console.setFormatter(formatter)
-
-        if path is not None:
-            disk_log_stream = open("{}.log".format(path), "w")
-            disk_handler = logging.StreamHandler(disk_log_stream)
-            logger.addHandler(disk_handler)
-            disk_handler.setFormatter(formatter)
-
-    return logger
 
 
 def cis_scan_score_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0):
@@ -236,6 +212,12 @@ def main(args):
         help="Add q value",
     )
     argp.add_argument(
+        "--standardize",
+        action="store_true",
+        default=False,
+        help="Standardize covariates",
+    )
+    argp.add_argument(
         "--statsmodel",
         action="store_true",
         default=False,
@@ -329,7 +311,7 @@ def main(args):
                 dat,
                 family=family,
                 test=ScoreTest(),
-                standardize=True,
+                standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,
                 n_perm=args.nperm,
@@ -342,7 +324,7 @@ def main(args):
                 dat,
                 family=family,
                 test=WaldTest(),
-                standardize=True,
+                standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,
                 n_perm=args.nperm,
@@ -354,11 +336,11 @@ def main(args):
 
     elif args.mode == "nominal":
         if args.test_method == "score":
-            out_df = map_cis(
+            out_df = map_nominal(
                 dat,
                 family=family,
                 test=ScoreTest(),
-                standardize=True,
+                standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,
                 log=log,
@@ -369,7 +351,7 @@ def main(args):
                 dat,
                 test=WaldTest(),
                 family=family,
-                standardize=True,
+                standardize=args.standardize,
                 log=log,
                 window=args.window,
                 offset_eta=offset_eta,

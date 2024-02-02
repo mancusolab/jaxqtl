@@ -187,19 +187,6 @@ def infer_beta(
         new_lik = loglik(new_param, p_perm)
         diff = old_lik - new_lik
 
-        import jax
-        import jax.numpy.linalg as jnpla
-
-        jax.debug.print("old_lik:{x}", x=old_lik)
-        jax.debug.print("old_param:{x}", x=old_param)
-        jax.debug.print("gamma:{x}", x=gamma)
-        jax.debug.print("info_mat condition:{x}", x=jnpla.cond(info_mat))
-        jax.debug.print("score:{x}", x=score_fn(old_param, p_perm))
-        jax.debug.print("direction:{x}", x=direction)
-        jax.debug.print("adjustment:{x}", x=adjustment)
-        jax.debug.print("new_param:{x}", x=new_param)
-        jax.debug.breakpoint()
-
         return new_lik, diff, num_iter + 1, new_param
 
     def cond_fun(val: Tuple):

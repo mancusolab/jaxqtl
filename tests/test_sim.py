@@ -1,5 +1,7 @@
 import numpy as np
+import pandas as pd
 
+from pandas_plink import read_plink
 from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
     Poisson as smPoisson,
@@ -13,7 +15,7 @@ from jax import config
 from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CGSolve, CholeskySolve
-from jaxqtl.sim import SimData
+from jaxqtl.sim import run_sim, sim_data
 
 
 config.update("jax_enable_x64", True)
@@ -26,10 +28,10 @@ true_beta = 0.1
 def test_sim_poisson():
     seed = 1
     n = 1000
-    family = Poisson()
 
-    sim = SimData(n, family)
-    X, y, beta = sim.sim_bulk_data(alpha=0.0, maf=0.3, model="alt", true_beta=true_beta, seed=seed)
+    X, y, beta, _, _ = sim_data(
+        nobs=n, family=Poisson(), method="bulk", alpha=0.0, maf=0.3, eqtl_beta=true_beta, seed=seed, libsize=1
+    )
 
     # no intercept
     mod = smPoisson(np.array(y), np.array(X))
@@ -53,10 +55,18 @@ def test_sim_NB():
     n = 1000
     true_alpha = 1
     beta0 = 1
-    family = NegativeBinomial()
 
-    sim = SimData(n, family)
-    X, y, beta = sim.sim_bulk_data(alpha=true_alpha, maf=0.1, model="alt", true_beta=true_beta, seed=seed, beta0=beta0)
+    X, y, beta, _, _ = sim_data(
+        nobs=n,
+        family=NegativeBinomial(),
+        method="bulk",
+        alpha=true_alpha,
+        maf=0.1,
+        eqtl_beta=true_beta,
+        seed=seed,
+        beta0=beta0,
+        libsize=1,
+    )
 
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
@@ -70,7 +80,7 @@ def test_sim_NB():
     init_pois = jaxqtl_pois.family.init_eta(y)
     glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
 
-    nb_fam = family
+    nb_fam = NegativeBinomial()
     alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2)
     alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
 
@@ -89,3 +99,41 @@ def test_sim_NB():
     print(f"statsmodel params: {sm_state.params}")
     assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-3)
     assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
+
+
+def test_sim():
+    """
+    test sim for single cell data
+    """
+    n = 982
+    num_cells = 10
+    family = Poisson()
+    chr = 1
+
+    bim, fam, bed = read_plink(f"./example/data/sim_chr{chr}", verbose=False)
+    G = bed.compute()  # MxN array
+
+    NK_covar = pd.read_csv("./example/data/NK_covar_libsize.tsv", sep="\t")
+
+    covar = jnp.array(NK_covar[['sex', 'age']])
+    covar = covar / jnp.std(covar, axis=0)  # gives higher counts
+    # libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+    libsize = jnp.ones((n, 1))
+
+    res = run_sim(
+        maf=0.3,
+        n=n,
+        num_sim=3,
+        beta0=1.0,
+        family=family,
+        sample_covar_arr=covar,
+        covar_var=0.1,
+        m_causal=10,
+        libsize=libsize,
+        num_cells=num_cells,
+        method="sc",
+        geno_arr=G[0][:, np.newaxis],
+        out_path="./example/data/test_sim",
+    )
+
+    print(res)
