@@ -101,39 +101,39 @@ def test_sim_NB():
     assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
 
 
-def test_sim():
-    """
-    test sim for single cell data
-    """
-    n = 982
-    num_cells = 10
-    family = Poisson()
-    chr = 1
+# def test_sim():
+#     """
+#     test sim for single cell data
+#     """
+n = 982
+num_cells = 100
+family = Poisson()
+chr = 1
 
-    bim, fam, bed = read_plink(f"./example/data/sim_chr{chr}", verbose=False)
-    G = bed.compute()  # MxN array
+bim, fam, bed = read_plink(f"../example/data/sim_chr{chr}", verbose=False)
+G = bed.compute()  # MxN array
 
-    NK_covar = pd.read_csv("./example/data/NK_covar_libsize.tsv", sep="\t")
+NK_covar = pd.read_csv("../example/data/NK_covar_libsize.tsv", sep="\t")
 
-    covar = jnp.array(NK_covar[['sex', 'age']])
-    covar = covar / jnp.std(covar, axis=0)  # gives higher counts
-    # libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
-    libsize = jnp.ones((n, 1))
+covar = jnp.array(NK_covar[['sex', 'age']])
+covar = covar / jnp.std(covar, axis=0)  # gives higher counts
+# libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+libsize = jnp.ones((n, 1))
 
-    res = run_sim(
-        maf=0.3,
-        n=n,
-        num_sim=3,
-        beta0=1.0,
-        family=family,
-        sample_covar_arr=covar,
-        covar_var=0.1,
-        m_causal=10,
-        libsize=libsize,
-        num_cells=num_cells,
-        method="sc",
-        geno_arr=G[0][:, np.newaxis],
-        out_path="./example/data/test_sim",
-    )
+res = run_sim(
+    nobs=n,
+    num_cells=num_cells,
+    num_sim=3,
+    beta0=1.0,
+    family=family,
+    sample_covar_arr=covar,
+    covar_var=0.1,
+    m_causal=10,
+    # eqtl_beta=0,
+    libsize=libsize,
+    method="bulk",
+    G=G,
+    out_path="../example/data/test_sim",
+)
 
-    print(res)
+print(res)
