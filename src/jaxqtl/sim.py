@@ -75,6 +75,7 @@ def sim_data(
     X = jnp.ones((n, 1))  # intercept
 
     np.random.seed(seed)
+    key = rdm.PRNGKey(seed)
 
     if sample_covar_arr is not None:
         num_covar = sample_covar_arr.shape[1]
@@ -85,7 +86,8 @@ def sim_data(
     beta = np.ones(beta_shape)
     beta[0] = beta0
     if sample_covar_arr is not None:
-        beta[1 : p - 1] = np.random.normal(0, np.sqrt(covar_var), size=(num_covar, 1))
+        key, covar_key = rdm.split(key, 2)
+        beta[1 : p - 1] = rdm.normal(covar_key, size=(num_covar, 1)) * np.sqrt(covar_var)
 
     # geno in shape of nx1
     if geno_arr is not None:
@@ -97,7 +99,8 @@ def sim_data(
 
     if eqtl_beta is None:
         # sample eqtl effect from  N(0, V_a/M)
-        g_beta = np.random.normal(0, np.sqrt(V_a / m_causal))
+        key, g_key = rdm.split(key, 2)
+        g_beta = rdm.normal(g_key) * np.sqrt(V_a / m_causal)
     else:
         g_beta = eqtl_beta
 
@@ -110,12 +113,12 @@ def sim_data(
         h2obs = -9  # placeholder
     elif method == "sc":
         # sample random effect of each individual
-        bi = np.random.normal(0, np.sqrt(V_re), (n, 1))
+        key, re_key = rdm.split(key, 2)
+        bi = rdm.normal(re_key, (n, 1)) * np.sqrt(V_re)
         eta = eta + bi
         mu = family.glink.inverse(eta)
 
         # for each individual mu_i, broadcast to num_cells
-        key = rdm.PRNGKey(seed)
         key, y_key = rdm.split(key, 2)
         if family == Poisson():
             y = rdm.poisson(y_key, mu, shape=(n, num_cells))  # n x num_cells

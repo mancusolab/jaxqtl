@@ -160,7 +160,7 @@ class GLM(eqx.Module):
             # convert disp to 0.1 if bad initialization
             disp = jnp.nan_to_num(disp, nan=0.1)
         else:
-            eta = jnp.asarray(0.0)
-            disp = jnp.asarray(0.0)
+            eta = init_val
+            disp = jnp.asarray(0.0)  # alpha is non-zero only in NB model
 
         return eta, disp
