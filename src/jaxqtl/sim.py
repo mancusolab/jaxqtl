@@ -29,9 +29,9 @@ from jaxqtl.log import get_logger
 
 
 class SimState(NamedTuple):
-    X: Array
+    X: Array  # design matrix contains intercept + covariates + genotype
     y: Array
-    beta: Array
+    beta: Array  # true betas
     libsize: Array
     h2obs: Array
 
@@ -205,7 +205,7 @@ def run_sim(
             log_offset = jnp.repeat(jnp.log(libsize), num_cells)  # repeat each element n times [1,2,3] -> [1,1,2,2,3,3]
             y_mat = jnp.column_stack((log_offset.reshape(-1, 1), y.ravel().reshape(-1, 1)))
             df = pd.DataFrame(y_mat).reset_index()
-            df.columns = ['iid', 'log_offset', 'gene' + str(i)]
+            df.columns = ['iid', 'log_offset', 'gene' + str(i + 1)]
 
             iid_index = jnp.arange(1, nobs + 1)
             df.iid = jnp.repeat(iid_index, num_cells)
