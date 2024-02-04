@@ -6,6 +6,7 @@ fastparquet
 jax
 jaxlib
 jaxopt
+lineax
 numpy
 pandas
 pandas_plink

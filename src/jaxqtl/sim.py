@@ -420,7 +420,7 @@ def main(args):
     }
 
     df_pval = pd.DataFrame(data=d)
-    df_pval.to_csv(args.out + ".pval.tsv", sep="\t", index=False)
+    df_pval.to_csv(args.out + ".pval.tsv.gz", sep="\t", index=False)
 
     return 0
 
