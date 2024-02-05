@@ -106,8 +106,11 @@ def sim_data(
     else:
         g_beta = eqtl_beta
 
-    beta = beta.at[-1].set(g_beta)  # put genotype as last column
+    # rescale to match specified V_a
+    s2g = jnp.var(g * g_beta)
+    g_beta = g_beta * jnp.sqrt(V_a / s2g)
 
+    beta = beta.at[-1].set(g_beta)  # put genotype as last column
     eta = X @ beta + jnp.log(libsize)
 
     if method == "bulk":
