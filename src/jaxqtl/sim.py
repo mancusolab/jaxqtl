@@ -307,7 +307,7 @@ def main(args):
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
     argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
     argp.add_argument("-beta0", type=float, default=0, help="Intercept")
-    argp.add_argument("-eqtl-beta", type=float, default=0, help="true eqtl beta; use 0 for null model")
+    argp.add_argument("-eqtl-beta", type=float, help="true eqtl beta; use 0 for null model")
     argp.add_argument("-Va", type=float, default=0.1, help="Variance explained by genetics")
     argp.add_argument("-Vre", type=float, default=0.2, help="Variance explained by random effect (across individuals)")
     argp.add_argument("-Vdisp", type=float, default=0.0, help="Variance dispersion")
