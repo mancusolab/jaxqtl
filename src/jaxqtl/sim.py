@@ -144,6 +144,7 @@ def _calc_h2obs(V_a: float, V_disp: float, V_re: float, baseline_mu: float) -> A
 
 
 def run_sim(
+    seed: int = 1,
     nobs: int = 1000,
     num_cells: int = 200,
     family: ExponentialFamily = Poisson(),
@@ -189,7 +190,7 @@ def run_sim(
             maf=maf,
             beta0=beta0,  # intercept determine baseline counts
             eqtl_beta=eqtl_beta,
-            seed=i + 1,  # use simulation index
+            seed=i + seed,  # use simulation index
             V_a=V_a,
             V_re=V_re,
             V_disp=V_disp,
@@ -311,6 +312,7 @@ def main(args):
     argp.add_argument("-alpha", type=float, default=0.0, help="True dispersion parameter when simulating NB")
     argp.add_argument("-scale", type=float, default=0.0, help="used in linear model")
     argp.add_argument("-maf", type=float, default=0.1, help="MAF")
+    argp.add_argument("-seed", type=int, default=1, help="seed")
     argp.add_argument("-num-sim", type=int, default=1000, help="Number of simulation, equal to #markers in plink file")
     argp.add_argument("-fwer", type=float, default=0.05)
     argp.add_argument("-method", type=str, choices=["bulk", "sc"], help="either bulk or sc")
@@ -384,6 +386,7 @@ def main(args):
         baseline_mu=args.baseline_mu,
         libsize=libsize,  # shape nx1 (only simulate per-individual offset)
         G=G,
+        seed=args.seed,
         sample_covar_arr=covar,  # nxp
         num_sim=args.num_sim,
         out_path=args.out_sc,  # write out single cell data in saigeqtl format
