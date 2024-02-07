@@ -66,15 +66,14 @@ def sim_data(
     baseline_mu: float = 0.0,
     libsize: ArrayLike = 1,  # shape nx1 (only simulate per-individual offset, not cell level)
     geno_arr: Optional[ArrayLike] = None,
-    covar_var: float = 0.005,  # ~ 0.01 - 0.05
-    sample_covar_arr: Optional[ArrayLike] = None,  # nxp
+    sample_covar_arr: Optional[ArrayLike] = None,  # nxp, saigeqtl can't estimate ratio without covariates
 ) -> SimState:
     p = 2  # if covar not specified, then only intercept + genotype
     X = jnp.ones((nobs, 1))  # intercept
 
     key = rdm.PRNGKey(seed)
 
-    # append sample level covariates
+    # append sample level covariates to benchmark with saigeqtl
     if sample_covar_arr is not None:
         num_covar = sample_covar_arr.shape[1]
         p = num_covar + 2  # intercept + covars + genotype
@@ -87,7 +86,7 @@ def sim_data(
     # simulate effect from age and sex
     if sample_covar_arr is not None:
         key, covar_key = rdm.split(key, 2)
-        beta_covar = rdm.normal(covar_key, shape=(num_covar, 1)) * np.sqrt(covar_var)
+        beta_covar = jnp.ones((num_covar, 1)) * 0.0  # fix covariate effect to be small
         beta = beta.at[1 : p - 1].set(beta_covar)
 
     # geno in shape of nx1
@@ -106,9 +105,9 @@ def sim_data(
     else:
         g_beta = eqtl_beta
 
-    # rescale to match specified V_a
-    s2g = jnp.var(g * g_beta)
-    g_beta = g_beta * jnp.sqrt(V_a / s2g)
+    # rescale to match specified V_a (!don't need this right now)
+    # s2g = jnp.var(g * g_beta)
+    # g_beta = g_beta * jnp.sqrt(V_a / s2g)
 
     beta = beta.at[-1].set(g_beta)  # put genotype as last column
     eta = X @ beta + jnp.log(libsize)
@@ -120,7 +119,7 @@ def sim_data(
     elif method == "sc":
         # sample random effect of each individual
         key, re_key = rdm.split(key, 2)
-        bi = rdm.normal(re_key, (nobs, 1)) * np.sqrt(V_re)
+        bi = rdm.normal(re_key, (nobs, 1)) * np.sqrt(V_re) if V_re > 0 else 0
         eta = eta + bi
         mu = family.glink.inverse(eta)
 
@@ -164,7 +163,6 @@ def run_sim(
     baseline_mu: float = 0.0,
     libsize: ArrayLike = 1,  # shape nx1 (only simulate per-individual offset)
     G: Optional[ArrayLike] = None,  # shape of num_sim x n
-    covar_var: float = 0.005,  # ~ 0.01 - 0.05
     sample_covar_arr: Optional[ArrayLike] = None,  # nxp
     num_sim: int = 1000,
     out_path: Optional[str] = None,  # write out single cell data in saigeqtl format
@@ -201,7 +199,6 @@ def run_sim(
             baseline_mu=baseline_mu,
             libsize=libsize,  # shape nx1 (only simulate per-individual offset)
             geno_arr=snp,  # genotype is generated for num_sim
-            covar_var=covar_var,  # ~ 0.01 - 0.05
             sample_covar_arr=sample_covar_arr,  # nxp
         )
 
@@ -221,6 +218,9 @@ def run_sim(
 
             # convert back to pseudo-bulk for jaxqtl
             y = y.sum(axis=1).reshape(-1, 1)
+            pd.DataFrame({'mean_ct': [y.mean()]}).to_csv(
+                f"{out_path}.pheno{i+1}.mean_pseudo_ct.tsv.gz", sep="\t", index=False
+            )
 
         log_offset = jnp.log(libsize)
         jaxqtl_pois = GLM(family=Poisson())

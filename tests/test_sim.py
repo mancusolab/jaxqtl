@@ -106,7 +106,7 @@ def test_sim_NB():
 #     test sim for single cell data
 #     """
 n = 982
-num_cells = 100
+num_cells = 10
 family = Poisson()
 chr = 1
 
@@ -124,14 +124,13 @@ res = run_sim(
     nobs=n,
     num_cells=num_cells,
     num_sim=3,
-    beta0=1.0,
+    beta0=-0.1,
     family=family,
     sample_covar_arr=covar,
-    covar_var=0.1,
-    m_causal=10,
-    # eqtl_beta=0,
+    m_causal=1,
+    eqtl_beta=0.1,
     libsize=libsize,
-    method="bulk",
+    method="sc",
     G=G,
     out_path="../example/data/test_sim",
 )
