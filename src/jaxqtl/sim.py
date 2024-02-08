@@ -252,7 +252,7 @@ def run_sim(
         pval_pois_wald_robust = jnp.append(pval_pois_wald_robust, glm_state_pois.p[-1])
         pval_nb_wald_robust = jnp.append(pval_nb_wald_robust, glm_state_nb.p[-1])
 
-        # fit lm
+        # fit lm (genexN); only one gene so don't need convert to cpm per individual
         norm_df = qtl.norm.inverse_normal_transform(pd.DataFrame(y).T)
         y_norm = np.array(norm_df.T)
 
@@ -266,8 +266,10 @@ def run_sim(
 
         # score test for poisson and NB
         X_cov = X[:, 0:-1]
+        g = X[:, -1].reshape(-1, 1)
+
         glm_null_pois = jaxqtl_pois.fit(X_cov, y, init=init_pois, offset_eta=log_offset)
-        _, pval, _, _ = score_test_snp(G=X[:, -1].reshape(-1, 1), X=X_cov, glm_null_res=glm_null_pois)
+        _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_null_pois)
 
         pval_pois_score = jnp.append(pval_pois_score, pval)
 
@@ -275,12 +277,12 @@ def run_sim(
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
         glm_state_nb = jaxqtl_nb.fit(X_cov, y, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset)
-        _, pval, _, _ = score_test_snp(G=X[:, -1].reshape(-1, 1), X=X_cov, glm_null_res=glm_state_nb)
+        _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_nb)
 
         pval_nb_score = jnp.append(pval_nb_score, pval)
 
         glm_state_lm = jaxqtl_lm.fit(X_cov, y, init=init_lm)
-        _, pval, _, _ = score_test_snp(G=X[:, -1].reshape(-1, 1), X=X_cov, glm_null_res=glm_state_lm)
+        _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_lm)
 
         pval_lm_score = jnp.append(pval_lm_score, pval)
 
