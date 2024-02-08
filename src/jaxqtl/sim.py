@@ -57,7 +57,6 @@ def sim_data(
     alpha: float = 0.0,  # for NB model
     maf: float = 0.3,
     beta0: float = 1.0,  # intercept determine baseline counts
-    eqtl_beta: Optional[float] = None,
     seed: int = 1,
     V_a: float = 0.1,
     V_re: float = 0.2,
@@ -86,7 +85,7 @@ def sim_data(
     # simulate effect from age and sex
     if sample_covar_arr is not None:
         key, covar_key = rdm.split(key, 2)
-        beta_covar = jnp.ones((num_covar, 1)) * 0.0  # fix covariate effect to be small
+        beta_covar = jnp.ones((num_covar, 1)) * 0.001  # fix covariate effect to be small
         beta = beta.at[1 : p - 1].set(beta_covar)
 
     # geno in shape of nx1
@@ -98,12 +97,8 @@ def sim_data(
 
     X = jnp.column_stack((X, g))  # include genotype at last column
 
-    if eqtl_beta is None:
-        # sample eqtl effect from  N(0, V_a/M)
-        key, g_key = rdm.split(key, 2)
-        g_beta = rdm.normal(g_key) * np.sqrt(V_a / m_causal)
-    else:
-        g_beta = eqtl_beta
+    key, g_key = rdm.split(key, 2)
+    g_beta = rdm.normal(g_key) * np.sqrt(V_a / m_causal) if V_a > 0 else 0.0
 
     # rescale to match specified V_a (!don't need this right now)
     # s2g = jnp.var(g * g_beta)
@@ -155,7 +150,6 @@ def run_sim(
     alpha: float = 0.0,  # for NB model
     maf: float = 0.3,
     beta0: float = 1.0,  # intercept determine baseline counts
-    eqtl_beta: Optional[float] = None,
     V_a: float = 0.1,
     V_re: float = 0.2,
     V_disp: float = 0.0,
@@ -190,7 +184,6 @@ def run_sim(
             alpha=alpha,  # for NB model
             maf=maf,
             beta0=beta0,  # intercept determine baseline counts
-            eqtl_beta=eqtl_beta,
             seed=i + seed,  # use simulation index
             V_a=V_a,
             V_re=V_re,
@@ -309,8 +302,7 @@ def main(args):
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
     argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
     argp.add_argument("-beta0", type=float, default=0, help="Intercept")
-    argp.add_argument("-eqtl-beta", type=float, help="true eqtl beta; use 0 for null model")
-    argp.add_argument("-Va", type=float, default=0.1, help="Variance explained by genetics")
+    argp.add_argument("-Va", type=float, default=0.1, help="Variance explained by genetics, 0 means eqtl_beta=0")
     argp.add_argument("-Vre", type=float, default=0.2, help="Variance explained by random effect (across individuals)")
     argp.add_argument("-Vdisp", type=float, default=0.0, help="Variance dispersion")
     argp.add_argument("-baseline-mu", type=float, default=0.0, help="population baseline mu on observed scale")
@@ -383,7 +375,6 @@ def main(args):
         alpha=args.alpha,  # for NB model
         maf=args.maf,
         beta0=args.beta0,  # intercept determine baseline counts
-        eqtl_beta=args.eqtl_beta,
         V_a=args.Va,
         V_re=args.Vre,
         V_disp=args.Vdisp,
