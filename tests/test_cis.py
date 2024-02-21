@@ -16,7 +16,7 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import map_nominal, map_nominal_covar
+from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
 
 
 pd.set_option("display.max_columns", 500)  # see cis output
@@ -112,6 +112,8 @@ def test_cis_waldtest():
     assert_array_eq(outdf.slope, jnp.array(R_res["slope"]))
     assert_array_eq(outdf.slope_se, jnp.array(R_res["se"]))
 
+
+map_intercept = fit_intercept_only(dat, family=Poisson(), offset_eta=offset_eta, robust_se=False)
 
 # ~4s
 start = timeit.default_timer()

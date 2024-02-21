@@ -20,7 +20,7 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log, get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import map_nominal, map_nominal_covar
+from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
 from jaxqtl.map.utils import _get_geno_info, _setup_G_y
 
 
@@ -362,23 +362,19 @@ def main(args):
     elif args.mode == "covar":
         if args.test_method == "score":
             out_df = map_nominal_covar(
-                dat, family=family, test=ScoreTest(), offset_eta=offset_eta, robust_se=args.robust
+                dat, family=family, test=ScoreTest(), offset_eta=offset_eta, robust_se=args.robust, log=log
             )
             out_df.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal_covar(
-                dat, family=family, test=WaldTest(), offset_eta=offset_eta, robust_se=args.robust
+                dat, family=family, test=WaldTest(), offset_eta=offset_eta, robust_se=args.robust, log=log
             )
             out_df.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "fitnull":
         pass
-        # mapcis_intercept_only_mu = map_fit_intercept_only(
-        #     dat, family=family, offset_eta=offset_eta
-        # )
-        # mapcis_intercept_only_mu.to_csv(
-        #     args.out + ".fit.resid.tsv.gz", sep="\t", index=False
-        # )
+        out_df = fit_intercept_only(dat, family=family, offset_eta=offset_eta, robust_se=False, log=log)
+        out_df.to_csv(args.out + ".intercept_only." + args.model + ".tsv.gz", sep="\t", index=False)
     else:
         log.info("please select available methods.")
         sys.exit()

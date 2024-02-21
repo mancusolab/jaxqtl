@@ -5,6 +5,7 @@ from jax import numpy as jnp
 from jaxtyping import ArrayLike
 
 from ..families.distribution import ExponentialFamily
+from ..infer.glm import GLM
 from ..infer.stderr import FisherInfoError, HuberError
 from ..infer.utils import HypothesisTest, ScoreTest, WaldTest
 from ..io.readfile import ReadyDataState
@@ -234,6 +235,73 @@ def map_nominal_covar(
 
     # write result
     result_out = [phenotype_id, chrom_list, slope, slope_se, nominal_p, converged, alpha]
+
+    result_df = pd.DataFrame(result_out, index=out_columns).T
+
+    return result_df
+
+
+def fit_intercept_only(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    log=None,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+    robust_se: bool = True,
+    max_iter: int = 500,
+):
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    n = dat.pheno.count.shape[0]
+    X = jnp.ones((n, 1))
+
+    gene_info = dat.pheno_meta
+
+    out_columns = ["phenotype_id", "chrom", "slope", "model_converged", "alpha_cov"]
+
+    phenotype_id = []
+    chrom_list = []
+    slope = []
+    converged = []
+    alpha = []
+    se_estimator = HuberError() if robust_se else FisherInfoError()
+
+    for gene in gene_info:
+        gene_name, chrom, _, _ = gene
+
+        # pull cis G (sample x gene) and y for this gene
+        y = dat.pheno[gene_name]  # __getitem__
+
+        # skip if no cis SNPs found
+        if verbose:
+            log.info("Performing scan for %s", gene_name)
+
+        glm = GLM(family=family, max_iter=max_iter)
+
+        eta, alpha_n = glm.calc_eta_and_dispersion(X, y, offset_eta)
+        glmstate = glm.fit(
+            X,
+            y,
+            offset_eta=offset_eta,
+            init=eta,
+            alpha_init=alpha_n,
+            se_estimator=se_estimator,
+        )
+
+        if verbose:
+            log.info("Finished cis-qtl scan for %s", gene_name)
+
+        # combine results
+        phenotype_id.append(gene_name)
+        slope.append(glmstate.beta)
+        converged.append(glmstate.converged)  # whether full model converged
+        alpha.append(glmstate.alpha)
+        chrom_list.append(chrom)
+
+    # write result
+    result_out = [phenotype_id, chrom_list, slope, converged, alpha]
 
     result_df = pd.DataFrame(result_out, index=out_columns).T
 
