@@ -1,6 +1,11 @@
 from abc import abstractmethod
 from typing import Tuple
 
+import numpy.random
+import scipy
+
+from scipy.stats import ncx2
+
 import equinox as eqx
 import jax.numpy as jnp
 import jax.numpy.linalg as jnla
@@ -32,6 +37,7 @@ class Permutation(eqx.Module):
         y: ArrayLike,
         G: ArrayLike,
         obs_p: ArrayLike,
+        obs_z: ArrayLike,
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
@@ -52,6 +58,7 @@ class DirectPerm(Permutation):
         y: ArrayLike,
         G: ArrayLike,
         obs_p: ArrayLike,
+        obs_z: ArrayLike,
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
@@ -81,10 +88,11 @@ class DirectPerm(Permutation):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], se_estimator, max_iter)
+            # Note: permute individual rows of G can still preserve LD of variants (columns)
 
-            return key, jnp.nanmin(glmstate.p)
+            return key, jnp.nanmax(jnp.abs(glmstate.z))  # jnp.nanmin(glmstate.p)
 
-        key, pvals = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
+        key, z_stats = lax.scan(_func, key_init, xs=None, length=self.max_perm_direct)
 
         # # TODO: write a for loop to write out pvals[-18] G, y, offset
         # key = key_init
@@ -96,7 +104,7 @@ class DirectPerm(Permutation):
         #
         # import numpy as np; import jax; jax.debug.breakpoint()
 
-        return pvals
+        return z_stats
 
 
 @eqx.filter_jit
@@ -224,6 +232,7 @@ class BetaPerm(DirectPerm):
         y: ArrayLike,
         G: ArrayLike,
         obs_p: ArrayLike,
+        obs_z: ArrayLike,
         family: ExponentialFamily,
         key_init: rdm.PRNGKey,
         sig_level: float = 0.05,
@@ -231,7 +240,7 @@ class BetaPerm(DirectPerm):
         test: HypothesisTest = ScoreTest(),
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 500,
-    ) -> Tuple[Array, Array]:
+    ) -> Tuple[Array, Array, Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
         Estimate Beta(k,n) using Newton's gradient descent, step size = 1
@@ -239,11 +248,12 @@ class BetaPerm(DirectPerm):
             k, n estimates
             adjusted p value for lead SNP
         """
-        p_perm = super().__call__(
+        z_stats_perm = super().__call__(
             X,
             y,
             G,
             obs_p,
+            obs_z,
             family,
             key_init,
             sig_level,
@@ -252,26 +262,41 @@ class BetaPerm(DirectPerm):
             se_estimator,
             max_iter,
         )
-        p_perm = p_perm[~jnp.isnan(p_perm)]  # remove NAs
+
+        # use normal distribution to compute p (approximate t in lm wald)
+        p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
+        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+
+        # learn non-central parameter
+        # true_nc = scipy.optimize.newton(lambda x: df_cost(p_perm, x), 0.1, tol=1e-4, maxiter=50)
+        res = scipy.optimize.minimize(
+            lambda x: numpy.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4
+        )
+        true_nc = res.x[0]
+        opt_status = res.success  # whether optimizer exited successfully
+
+        # use non-central chi2 to recompute permutation pvals
+        p_perm = ncx2.sf(z_stats_perm**2, 1, true_nc)
 
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
         n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
 
         init = jnp.array([k_init, n_init])
-        # init = jnp.ones(2)
 
         # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
-        adj_p = _calc_adjp_beta(obs_p, beta_res[0:2])
+        adj_obs_p = ncx2.sf(obs_z**2, 1, true_nc)
+        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
 
-        return adj_p, beta_res
+        return adj_p, beta_res, true_nc, opt_status
 
 
-def df_cost(zscore, dof):
+def df_cost(zscore, nc):
     """minimize abs(1-alpha) as a function of M_eff"""
-    pval = 2 * norm.sf(jnp.fabs(zscore))
+    # pval = 2 * norm.sf(jnp.fabs(zscore))
+    pval = ncx2.sf(zscore**2, 1, nc)
     mean = jnp.mean(pval)
     var = jnp.var(pval)
     return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0

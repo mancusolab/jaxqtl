@@ -18,6 +18,7 @@ class CisGLMState(NamedTuple):
     beta: Array
     se: Array
     p: Array
+    z: Array  # !! add z
     num_iters: Array
     converged: Array
     alpha: Array
@@ -128,6 +129,7 @@ class WaldTest(HypothesisTest):
                 beta=glmstate.beta[-1],
                 se=glmstate.se[-1],
                 p=glmstate.p[-1],
+                z=glmstate.z[-1],
                 num_iters=glmstate.num_iters,
                 converged=glmstate.converged,
                 alpha=glmstate.alpha,
@@ -166,6 +168,7 @@ class ScoreTest(HypothesisTest):
             beta=beta,
             se=se,
             p=pval,
+            z=zscore,
             num_iters=glmstate_cov_only.num_iters,
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,

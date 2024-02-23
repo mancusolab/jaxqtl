@@ -288,7 +288,7 @@ def main(args):
     if isinstance(family, Gaussian):
         # dat.transform_y(mode='log1p')  # log1p
         # note: use pre-processed file as in tensorqtl
-        offset_eta = jnp.zeros(offset_eta.shape)
+        offset_eta = jnp.zeros_like(offset_eta)
 
     # filter gene list
     dat.filter_gene(gene_list=genelist)

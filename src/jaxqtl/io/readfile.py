@@ -63,10 +63,11 @@ class ReadyDataState:
         else:
             raise ValueError(f"Unsupported mode {mode}")
 
-    def add_covar_pheno_PC(self, k: int, add_covar: Optional[str]):
+    def add_covar_pheno_PC(self, k: int, add_covar: Optional[str] = None):
         """calculate phenotype PCs
 
         :param k: number of PC to calculate and append to covariates
+        :param add_covar: add covariate o
         """
         count_std = self.pheno.count.copy(deep=True)
         count_std = (count_std - count_std.mean()) / count_std.std()  # standardize genes
@@ -78,6 +79,7 @@ class ReadyDataState:
         if add_covar is None:
             self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
         else:
+            # Covariate already read, here put covariate of interest as last column after PC
             self.covar = jnp.hstack((self.covar[:, :-1], PCs, self.covar[:, -1][:, jnp.newaxis]))
 
     def filter_gene(self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None):

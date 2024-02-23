@@ -21,6 +21,7 @@ from .stderr import ErrVarEstimation, FisherInfoError
 class GLMState(NamedTuple):
     beta: Array
     se: Array
+    z: Array
     p: Array
     eta: Array
     mu: Array
@@ -122,6 +123,7 @@ class GLM(eqx.Module):
         return GLMState(
             beta,
             beta_se,
+            stat,
             pval_wald,
             eta,
             mu,

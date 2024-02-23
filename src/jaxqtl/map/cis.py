@@ -25,6 +25,8 @@ class MapCisSingleState:
     cisglm: CisGLMState
     pval_beta: Array
     beta_param: Array
+    opt_status: Array
+    true_nc: Array
 
     def get_lead(self, key: rdm.PRNGKey, random_tiebreak: bool = False) -> Tuple[List, int]:
         """Get lead SNP result for each gene
@@ -48,6 +50,8 @@ class MapCisSingleState:
             beta_1,
             beta_2,
             beta_converged,
+            jnp.array(self.opt_status),
+            jnp.array(self.true_nc),
             self.cisglm.p[vdx],
             self.cisglm.beta[vdx],
             self.cisglm.se[vdx],
@@ -140,6 +144,8 @@ def map_cis(
         "beta_shape1",
         "beta_shape2",
         "beta_converged",
+        "opt_status",
+        "true_nc",
         "pval_nominal",
         "slope",
         "slope_se",
@@ -288,11 +294,15 @@ def map_cis_single(
     # call function directly...
     # note: set max_perm_direct will change the parent class parameter
     perm = BetaPerm(max_perm_direct=n_perm)
-    pval_beta, beta_param = perm(
+    obs_p = jnp.nanmin(cisglmstate.p)
+    obs_z = cisglmstate.z[int(jnp.nanargmin(cisglmstate.p))]
+
+    pval_beta, beta_param, true_nc, opt_status = perm(
         X,
         y,
         G,
-        jnp.nanmin(cisglmstate.p),
+        obs_p,
+        obs_z,
         family,
         beta_key,
         sig_level,
@@ -303,9 +313,7 @@ def map_cis_single(
     )
 
     return MapCisSingleState(
-        cisglm=cisglmstate,
-        pval_beta=pval_beta,
-        beta_param=beta_param,
+        cisglm=cisglmstate, pval_beta=pval_beta, beta_param=beta_param, opt_status=opt_status, true_nc=true_nc
     )
 
 
