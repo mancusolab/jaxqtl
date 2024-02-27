@@ -200,10 +200,10 @@ def main(args):
         help="Robust SE",
     )
     argp.add_argument(
-        "--perm-count",
+        "--perm-pheno",
         action="store_true",
         default=False,
-        help="Permute count for type I error calibration",
+        help="Permute phenotype for type I error calibration",
     )
     argp.add_argument(
         "--qvalue",
@@ -294,11 +294,10 @@ def main(args):
     dat.filter_gene(gene_list=genelist)
 
     # permute gene expression for type I error calibration
-    if args.perm_count:
+    if args.perm_pheno:
         np.random.seed(args.perm_seed)
-        # assume one gene
         perm_idx = np.random.permutation(np.arange(0, len(dat.pheno.count)))
-        dat.pheno.count.iloc[:, 0] = dat.pheno.count.iloc[:, 0][perm_idx]
+        dat.pheno.count = dat.pheno.count.iloc[perm_idx]
         offset_eta = offset_eta[perm_idx]
 
     if dat.pheno_meta.gene_map.shape[0] < 1:
