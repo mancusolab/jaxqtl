@@ -188,6 +188,13 @@ def main(args):
         choices=["nominal", "cis", "fitnull", "covar"],
         help="Cis or nominal mapping",
     )
+    argp.add_argument(
+        "--platform",
+        "-p",
+        type=str,
+        choices=["cpu", "gpu", "tpu"],
+        help="platform, cpu, gpu or tpu",
+    )
     argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
     argp.add_argument("-window", type=int, default=500000)
     argp.add_argument("-nperm", type=int, default=1000)
@@ -233,9 +240,8 @@ def main(args):
 
     args = argp.parse_args(args)  # a list a strings
 
-    platform = "cpu"
     config.update("jax_enable_x64", True)
-    config.update("jax_platform_name", platform)
+    config.update("jax_platform_name", args.platform)
 
     log = get_logger(__name__, args.out)
     if args.verbose:
