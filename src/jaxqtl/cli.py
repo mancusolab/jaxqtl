@@ -7,9 +7,9 @@ import numpy as np
 import pandas as pd
 import statsmodels.api as sm
 
+import jax
 import jax.numpy as jnp
 
-from jax.config import config
 from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
@@ -240,8 +240,8 @@ def main(args):
 
     args = argp.parse_args(args)  # a list a strings
 
-    config.update("jax_enable_x64", True)
-    config.update("jax_platform_name", args.platform)
+    jax.config.update("jax_enable_x64", True)
+    jax.config.update("jax_platform_name", args.platform)
 
     log = get_logger(__name__, args.out)
     if args.verbose:

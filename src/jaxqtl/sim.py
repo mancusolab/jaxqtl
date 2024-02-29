@@ -10,10 +10,10 @@ import qtl.norm
 
 from pandas_plink import read_plink
 
+import jax
 import jax.numpy as jnp
 import jax.random as rdm
 
-from jax import config
 from jaxtyping import Array, ArrayLike
 
 from jaxqtl.families.distribution import (
@@ -325,8 +325,8 @@ def main(args):
     args = argp.parse_args(args)  # a list a strings
 
     platform = "cpu"
-    config.update("jax_enable_x64", True)
-    config.update("jax_platform_name", platform)
+    jax.config.update("jax_enable_x64", True)
+    jax.config.update("jax_platform_name", platform)
 
     log = get_logger(__name__, args.out)
     if args.verbose:
