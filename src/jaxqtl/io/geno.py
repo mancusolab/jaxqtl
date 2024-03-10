@@ -42,6 +42,7 @@ class PlinkReader(GenoIO):
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         bim, fam, bed = read_plink(bed_path, verbose=False)
         G = pd.DataFrame(bed.compute().T)  # nxp
+        G = 2 - G  # set alt as effect allele
 
         # TODO: add imputation for missing genotype etc...
         # G = G.fillna(G.mean())  # really slow
