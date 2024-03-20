@@ -185,7 +185,7 @@ def main(args):
     argp.add_argument(
         "-mode",
         type=str,
-        choices=["nominal", "cis", "fitnull", "covar"],
+        choices=["nominal", "cis", "fitnull", "covar", "trans"],
         help="Cis or nominal mapping",
     )
     argp.add_argument(
@@ -363,6 +363,18 @@ def main(args):
                 robust_se=args.robust,
             )
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
+
+    elif args.mode == "trans":
+        if args.test_method == "score":
+            out_df = map_nominal(
+                dat, family=family, offset_eta=offset_eta, test=ScoreTest(), mode="trans", robust_se=args.robust
+            )
+            out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
+        elif args.test_method == "wald":
+            out_df = map_nominal(
+                dat, family=family, offset_eta=offset_eta, test=WaldTest(), mode="trans", robust_se=args.robust
+            )
+            out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "covar":
         if args.test_method == "score":

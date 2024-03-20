@@ -1,4 +1,4 @@
-from typing import NamedTuple, Tuple
+from typing import NamedTuple, Optional, Tuple
 
 import pandas as pd
 
@@ -59,10 +59,30 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
     return G, cis_var_info
 
 
+def _check_geno(dat: ReadyDataState) -> Tuple[Array, pd.DataFrame]:
+    cis_var_info = dat.bim
+
+    # subset G to cis variants (nxp)
+    G_tocheck = dat.geno
+
+    # check monomorphic: G.T[:, [0]] find first occurrence on all genotype, var x 1
+    mono_var = (G_tocheck.T == G_tocheck.T[:, [0]]).all(1)  # bool (var, ), show whether given variant is monomorphic
+    not_mono_var = jnp.invert(mono_var)  # reverse False and True (same as "~" operator)
+    G = G_tocheck[:, not_mono_var]  # take genotype that are NOT monomorphic
+    cis_var_info = cis_var_info.loc[not_mono_var.tolist()]
+
+    # note: if no variants taken, then G has shape (n,0), cis_var_info has shape (0, 7); both 2-dim
+    return G, cis_var_info
+
+
 def _setup_G_y(
-    dat: ReadyDataState, gene_name: str, chrom: str, start: int, end: int
+    dat: ReadyDataState, gene_name: str, chrom: str, start: int, end: int, mode: Optional[str] = None
 ) -> Tuple[Array, Array, pd.DataFrame]:
-    G, var_df = _cis_window_cutter(dat, chrom, start, end)
+    if mode == "trans":
+        G, var_df = _check_geno(dat)
+    else:
+        G, var_df = _cis_window_cutter(dat, chrom, start, end)
+
     y = dat.pheno[gene_name]  # __getitem__
 
     return G, jnp.array(y), var_df

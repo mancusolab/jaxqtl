@@ -1,3 +1,5 @@
+from typing import Optional
+
 import numpy as np
 import pandas as pd
 
@@ -25,6 +27,7 @@ def map_nominal(
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
     max_iter: int = 500,
+    mode: Optional[str] = None,
 ):
     """cis eQTL Mapping for all cis-SNP gene pairs
 
@@ -75,7 +78,7 @@ def map_nominal(
         rend = end_max + window
 
         # pull cis G and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:
