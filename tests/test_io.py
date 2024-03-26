@@ -2,23 +2,22 @@ import jax.numpy as jnp
 
 from jax import config
 
-from jaxqtl.families.distribution import NegativeBinomial
-from jaxqtl.infer.utils import WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import bed_transform_y, PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map.nominal import map_nominal
 
 
 config.update("jax_enable_x64", True)
 
+celltype = "Mono_C"
+gene = "ENSG00000188536"
 geno_path = "../example/local/yazar2022_RAsnps"
 covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
 addcovar_path = "../example/local/NK_new/prs.tsv"
 covar_test = "score"
-pheno_path = "../../jaxqtl_project/data/OneK1K/pheno/celltype16/CD4_NC.bed.gz"
+pheno_path = f"../../jaxqtl_project/data/OneK1K/pheno/celltype16/{celltype}.bed.gz"
 
 log = get_log()
 
@@ -45,11 +44,7 @@ dat.add_covar_pheno_PC(k=2, add_covar=None)
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-dat.filter_gene(gene_list=["ENSG00000185650"])
-
-out_nb = map_nominal(
-    dat, family=NegativeBinomial(), offset_eta=offset_eta, test=WaldTest(), mode="trans", robust_se=False
-)
+dat.filter_gene(gene_list=[gene])
 
 # transformation by TMM and inverse rank normal transformation
 transform_method = "tmm"  # log1p, tmm

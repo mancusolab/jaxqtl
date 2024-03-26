@@ -365,26 +365,53 @@ def main(args):
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
 
     elif args.mode == "trans":
+        # genotype for trans-SNPs are read in from plink files, no trans-cutter
         if args.test_method == "score":
             out_df = map_nominal(
-                dat, family=family, offset_eta=offset_eta, test=ScoreTest(), mode="trans", robust_se=args.robust
+                dat,
+                family=family,
+                offset_eta=offset_eta,
+                test=ScoreTest(),
+                mode="trans",
+                standardize=args.standardize,
+                robust_se=args.robust,
+                log=log,
             )
             out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal(
-                dat, family=family, offset_eta=offset_eta, test=WaldTest(), mode="trans", robust_se=args.robust
+                dat,
+                family=family,
+                offset_eta=offset_eta,
+                test=WaldTest(),
+                mode="trans",
+                standardize=args.standardize,
+                robust_se=args.robust,
+                log=log,
             )
             out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "covar":
         if args.test_method == "score":
             out_df = map_nominal_covar(
-                dat, family=family, test=ScoreTest(), offset_eta=offset_eta, robust_se=args.robust, log=log
+                dat,
+                family=family,
+                test=ScoreTest(),
+                offset_eta=offset_eta,
+                standardize=args.standardize,
+                robust_se=args.robust,
+                log=log,
             )
             out_df.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal_covar(
-                dat, family=family, test=WaldTest(), offset_eta=offset_eta, robust_se=args.robust, log=log
+                dat,
+                family=family,
+                test=WaldTest(),
+                offset_eta=offset_eta,
+                standardize=args.standardize,
+                robust_se=args.robust,
+                log=log,
             )
             out_df.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
