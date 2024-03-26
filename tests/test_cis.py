@@ -122,8 +122,10 @@ def test_cis_waldtest():
 # # mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 
-out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
-# out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+# out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
+# # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+
+out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="estimate_ld_only")
 
 out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=WaldTest())
 

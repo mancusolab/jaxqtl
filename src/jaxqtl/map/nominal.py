@@ -109,8 +109,7 @@ def map_nominal(
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
             # only available for one gene
-            R_df, R_wt_df = _calc_LD(G, X, n, result.weights, var_df['snp'])
-            R_df.to_csv(ld_out + ".ld.tsv.gz", sep="\t", index=True)
+            R_wt_df = _calc_LD(G, X, result.weights, var_df['snp'])
             R_wt_df.to_csv(ld_out + ".ld_wt.tsv.gz", sep="\t", index=True)
             continue
 
@@ -169,24 +168,21 @@ def map_nominal(
     return outdf
 
 
-def _calc_LD(G, X, n, wts, snpid):
+def _calc_LD(G, X, wts, snpid):
     w_half_X = X * jnp.sqrt(wts)
     w_X = X * wts
 
     # project covariates from G
-    projection_covar = X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
-    G_resid = G - projection_covar @ G
-    G_resid = (G_resid - jnp.mean(G_resid, axis=0)) / jnp.std(G_resid, axis=0)
-    GtWG = (G_resid * wts).T @ G_resid
-    R_wt = GtWG / jnp.diag(GtWG)  # correct? check with Nick
+    infor_inv = jnpla.inv(w_half_X.T @ w_half_X)
+    G_resid = G - jnpla.multi_dot([X, infor_inv, w_X.T, G])
+    w_G_resid = G_resid * jnp.sqrt(wts)
 
-    # simple LD
-    G_std = (G - jnp.mean(G, axis=0)) / jnp.std(G, axis=0)
-    R = G_std.T @ G_std / n
+    w_G_resid = (w_G_resid - jnp.mean(w_G_resid, axis=0)) / jnp.std(w_G_resid, axis=0)
+    GtWG = (w_G_resid).T @ w_G_resid
+    R_wt = GtWG / jnp.diag(GtWG)
 
-    R_df = pd.DataFrame.from_records(R, index=snpid, columns=snpid)
     R_wt_df = pd.DataFrame.from_records(R_wt, index=snpid, columns=snpid)
-    return R_df, R_wt_df
+    return R_wt_df
 
 
 def map_nominal_covar(
