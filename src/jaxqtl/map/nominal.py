@@ -109,8 +109,8 @@ def map_nominal(
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
             # only available for one gene
-            R_wt_df = _calc_LD(G, X, result.weights, var_df['snp'])
-            R_wt_df.to_csv(ld_out + ".ld_wt.tsv.gz", sep="\t", index=True)
+            R_wt_df = _calc_LD(G, X, result.weights)
+            R_wt_df.to_csv(ld_out + ".ld_wt.tsv.gz", sep="\t", index=True, header=False)
             continue
 
         if verbose:
@@ -168,7 +168,7 @@ def map_nominal(
     return outdf
 
 
-def _calc_LD(G, X, wts, snpid):
+def _calc_LD(G, X, wts):
     w_half_X = X * jnp.sqrt(wts)
     w_X = X * wts
 
@@ -181,7 +181,7 @@ def _calc_LD(G, X, wts, snpid):
     GtWG = (w_G_resid).T @ w_G_resid
     R_wt = GtWG / jnp.diag(GtWG)
 
-    R_wt_df = pd.DataFrame.from_records(R_wt, index=snpid, columns=snpid)
+    R_wt_df = pd.DataFrame.from_records(R_wt)
     return R_wt_df
 
 
