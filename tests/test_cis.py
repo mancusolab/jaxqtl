@@ -108,21 +108,21 @@ def test_cis_waldtest():
 # map_intercept = fit_intercept_only(dat, family=Poisson(), offset_eta=offset_eta, robust_se=False)
 
 # ~4s
-start = timeit.default_timer()
-mapcis_out_score_nb = map_cis(
-    dat,
-    family=Poisson(),
-    test=ScoreTest(),
-    offset_eta=offset_eta,
-    n_perm=983,
-    compute_qvalue=False,
-)
-stop = timeit.default_timer()
-print("Time: ", stop - start)
-# mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+# start = timeit.default_timer()
+# mapcis_out_score_nb = map_cis(
+#     dat,
+#     family=Poisson(),
+#     test=ScoreTest(),
+#     offset_eta=offset_eta,
+#     n_perm=983,
+#     compute_qvalue=False,
+# )
+# stop = timeit.default_timer()
+# print("Time: ", stop - start)
+# # mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 
-out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=WaldTest())
+out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
 # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=WaldTest())

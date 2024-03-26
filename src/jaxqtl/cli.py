@@ -185,7 +185,7 @@ def main(args):
     argp.add_argument(
         "-mode",
         type=str,
-        choices=["nominal", "cis", "fitnull", "covar", "trans"],
+        choices=["nominal", "cis", "fitnull", "covar", "trans", "estimate_ld_only"],
         help="Cis or nominal mapping",
     )
     argp.add_argument(
@@ -363,6 +363,18 @@ def main(args):
                 robust_se=args.robust,
             )
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
+
+    elif args.mode == "estimate_ld_only":
+        _ = map_nominal(
+            dat,
+            family=family,
+            standardize=args.standardize,
+            window=args.window,
+            offset_eta=offset_eta,
+            log=log,
+            mode=args.mode,
+        )
+        log.info("write out LD matrix.")
 
     elif args.mode == "trans":
         # genotype for trans-SNPs are read in from plink files, no trans-cutter

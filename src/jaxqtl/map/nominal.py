@@ -3,6 +3,8 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+import jax.numpy.linalg as jnpla
+
 from jax import numpy as jnp
 from jaxtyping import ArrayLike
 
@@ -28,7 +30,8 @@ def map_nominal(
     robust_se: bool = True,
     max_iter: int = 500,
     mode: Optional[str] = None,
-):
+    ld_out: str = "./gene",
+) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
 
     :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
@@ -77,7 +80,7 @@ def map_nominal(
         lstart = max(0, start_min - window)
         rend = end_max + window
 
-        # pull cis G and y for this gene
+        # pull cis G (nxM) and y for this gene
         G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
 
         # skip if no cis SNPs found
@@ -102,6 +105,14 @@ def map_nominal(
             )
 
         result = test(X, G, y, family, offset_eta, se_estimator, max_iter)
+
+        # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
+        if mode == "estimate_ld_only":
+            # only available for one gene
+            R_df, R_wt_df = _calc_LD(G, X, n, result.weights, var_df['snp'])
+            R_df.to_csv(ld_out + ".ld.tsv.gz", sep="\t", index=True)
+            R_wt_df.to_csv(ld_out + ".ld_wt.tsv.gz", sep="\t", index=True)
+            continue
 
         if verbose:
             log.info(
@@ -156,6 +167,26 @@ def map_nominal(
         start_row = end_row
 
     return outdf
+
+
+def _calc_LD(G, X, n, wts, snpid):
+    w_half_X = X * jnp.sqrt(wts)
+    w_X = X * wts
+
+    # project covariates from G
+    projection_covar = X @ jnpla.inv(w_half_X.T @ w_half_X) @ w_X.T
+    G_resid = G - projection_covar @ G
+    G_resid = (G_resid - jnp.mean(G_resid, axis=0)) / jnp.std(G_resid, axis=0)
+    GtWG = (G_resid * wts).T @ G_resid
+    R_wt = GtWG / jnp.diag(GtWG)  # correct? check with Nick
+
+    # simple LD
+    G_std = (G - jnp.mean(G, axis=0)) / jnp.std(G, axis=0)
+    R = G_std.T @ G_std / n
+
+    R_df = pd.DataFrame.from_records(R, index=snpid, columns=snpid)
+    R_wt_df = pd.DataFrame.from_records(R_wt, index=snpid, columns=snpid)
+    return R_df, R_wt_df
 
 
 def map_nominal_covar(

@@ -22,6 +22,7 @@ class CisGLMState(NamedTuple):
     num_iters: Array
     converged: Array
     alpha: Array
+    weights: Array
 
 
 def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[Array, Array, Array, Array]:
@@ -133,6 +134,7 @@ class WaldTest(HypothesisTest):
                 num_iters=glmstate.num_iters,
                 converged=glmstate.converged,
                 alpha=glmstate.alpha,
+                weights=jnp.array([-9]),  # placeholder
             )
 
         _, state = lax.scan(_func, 0.0, G.T)
@@ -172,4 +174,5 @@ class ScoreTest(HypothesisTest):
             num_iters=glmstate_cov_only.num_iters,
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
+            weights=glmstate_cov_only.glm_wt,
         )
