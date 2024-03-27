@@ -374,7 +374,7 @@ def main(args):
         log.info("use specified library size.")
     else:
         libsize = jnp.ones((args.nobs, 1))
-        log.info(f"Use fixed library size : {args.libsize_fix}")
+        log.info("Use fixed library size 1")
 
     res = run_sim(
         nobs=args.nobs,
