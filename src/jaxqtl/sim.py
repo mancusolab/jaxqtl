@@ -373,7 +373,7 @@ def main(args):
         libsize = jnp.array(pd.read_csv(args.libsize_path, sep="\t").iloc[:, 0]).reshape((args.nobs, 1))
         log.info("use specified library size.")
     else:
-        libsize = jnp.ones((args.nobs, 1)) * args.libsize_fix
+        libsize = jnp.ones((args.nobs, 1))
         log.info(f"Use fixed library size : {args.libsize_fix}")
 
     res = run_sim(
