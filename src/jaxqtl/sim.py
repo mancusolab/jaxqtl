@@ -46,6 +46,8 @@ class SimResState(NamedTuple):
     pval_lm_wald_robust: Array
     pval_nb_score: Array
     pval_pois_score: Array
+    y_mean: Array
+    y_express_percent: Array
 
 
 def sim_data(
@@ -173,6 +175,9 @@ def run_sim(
     pval_lm_wald_robust = jnp.array([])
     pval_lm_score = jnp.array([])
 
+    y_mean = jnp.array([])
+    y_express_percent = jnp.array([])
+
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
         X, y, beta, libsize, h2obs = sim_data(
@@ -214,6 +219,9 @@ def run_sim(
             pd.DataFrame({'mean_ct': [y.mean()]}).to_csv(
                 f"{out_path}.pheno{i+1}.mean_pseudo_ct.tsv.gz", sep="\t", index=False
             )
+
+        y_mean = jnp.append(y_mean, (y / libsize).mean())
+        y_express_percent = jnp.append(y_express_percent, (y > 0).mean())
 
         log_offset = jnp.log(libsize)
         jaxqtl_pois = GLM(family=Poisson())
@@ -289,6 +297,8 @@ def run_sim(
         pval_lm_wald=pval_lm_wald,
         pval_lm_wald_robust=pval_lm_wald_robust,
         pval_lm_score=pval_lm_score,
+        y_mean=y_mean,
+        y_express_percent=y_express_percent,
     )
 
 
@@ -296,7 +306,7 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("-geno", type=str, help="Genotype plink prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Path to covariates, include age, sex and library size")
-    argp.add_argument("-libsize-fix", type=int, help="fixed library size value")
+    argp.add_argument("-libsize-path", type=int, help="path to read in library size, no header")
     argp.add_argument("-nobs", type=int, help="Sample size")
     argp.add_argument("-num-cells", type=int, default=100, help="Number of cells per person")
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
@@ -359,9 +369,9 @@ def main(args):
     else:
         covar = None
 
-    if args.libsize_fix is None:
-        libsize = jnp.array(covar_df['libsize']).reshape((-1, 1))
-        log.info("Use library size from covar file")
+    if args.libsize_path is not None:
+        libsize = jnp.array(pd.read_csv(args.libsize_path, sep="\t").iloc[:, 0]).reshape((args.nobs, 1))
+        log.info("use specified library size.")
     else:
         libsize = jnp.ones((args.nobs, 1)) * args.libsize_fix
         log.info(f"Use fixed library size : {args.libsize_fix}")
@@ -400,26 +410,28 @@ def main(args):
         'rej_lm_wald': [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
         'rej_lm_wald_robust': [jnp.mean(res.pval_lm_wald_robust[~jnp.isnan(res.pval_lm_wald_robust)] < args.fwer)],
         'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
+        'y_mean': [(res.y_mean).mean()],
+        'express_percent': [(res.y_express_percent).mean()],
     }
 
     df_rej = pd.DataFrame(data=d)
     df_rej.to_csv(args.out + ".tsv", sep="\t", index=False)
 
-    # write out pvalues of eqtls
-    d = {
-        'rej_nb_wald': res.pval_nb_wald,
-        'rej_nb_wald_robust': res.pval_nb_wald_robust,
-        'rej_nb_score': res.pval_nb_score,
-        'rej_pois_wald': res.pval_pois_wald,
-        'rej_pois_wald_robust': res.pval_pois_wald_robust,
-        'rej_pois_score': res.pval_pois_score,
-        'rej_lm_wald': res.pval_lm_wald,
-        'rej_lm_wald_robust': res.pval_lm_wald_robust,
-        'rej_lm_score': res.pval_lm_score,
-    }
-
-    df_pval = pd.DataFrame(data=d)
-    df_pval.to_csv(args.out + ".pval.tsv.gz", sep="\t", index=False)
+    # # write out pvalues of eqtls
+    # d = {
+    #     'rej_nb_wald': res.pval_nb_wald,
+    #     'rej_nb_wald_robust': res.pval_nb_wald_robust,
+    #     'rej_nb_score': res.pval_nb_score,
+    #     'rej_pois_wald': res.pval_pois_wald,
+    #     'rej_pois_wald_robust': res.pval_pois_wald_robust,
+    #     'rej_pois_score': res.pval_pois_score,
+    #     'rej_lm_wald': res.pval_lm_wald,
+    #     'rej_lm_wald_robust': res.pval_lm_wald_robust,
+    #     'rej_lm_score': res.pval_lm_score,
+    # }
+    #
+    # df_pval = pd.DataFrame(data=d)
+    # df_pval.to_csv(args.out + ".pval.tsv.gz", sep="\t", index=False)
 
     return 0
 

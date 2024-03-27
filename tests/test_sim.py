@@ -117,16 +117,16 @@ NK_covar = pd.read_csv("../example/data/NK_covar_libsize.tsv", sep="\t")
 
 covar = jnp.array(NK_covar[['sex', 'age']])
 covar = covar / jnp.std(covar, axis=0)  # gives higher counts
-# libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
-libsize = jnp.ones((n, 1))
+libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+# libsize = jnp.ones((n, 1))
 
 res = run_sim(
     nobs=n,
     num_cells=num_cells,
     num_sim=3,
-    beta0=-5,
+    beta0=-15,
     family=family,
-    sample_covar_arr=covar,
+    # sample_covar_arr=None,
     m_causal=1,
     V_a=0.1,
     libsize=libsize,
