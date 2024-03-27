@@ -373,6 +373,7 @@ def main(args):
             offset_eta=offset_eta,
             log=log,
             mode=args.mode,
+            ld_out=args.out,
         )
         log.info("write out LD matrix.")
 
