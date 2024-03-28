@@ -111,6 +111,7 @@ def map_nominal(
             # only available for one gene
             R_wt_df = _calc_LD(G, X, result.weights)
             R_wt_df.to_csv(ld_out + ".ld_wt.tsv.gz", sep="\t", index=False, header=False)
+            del R_wt_df
             continue
 
         if verbose:
