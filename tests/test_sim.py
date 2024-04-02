@@ -1,7 +1,5 @@
 import numpy as np
-import pandas as pd
 
-from pandas_plink import read_plink
 from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
     Poisson as smPoisson,
@@ -14,8 +12,9 @@ from jax import config
 
 from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
-from jaxqtl.infer.solve import CGSolve, CholeskySolve
-from jaxqtl.sim import run_sim, sim_data
+from jaxqtl.infer.solve import CholeskySolve
+from jaxqtl.infer.stderr import FisherInfoError
+from jaxqtl.sim import sim_data
 
 
 config.update("jax_enable_x64", True)
@@ -28,9 +27,10 @@ true_beta = 0.1
 def test_sim_poisson():
     seed = 1
     n = 1000
+    V_a = 0.1
 
     X, y, beta, _, _ = sim_data(
-        nobs=n, family=Poisson(), method="bulk", alpha=0.0, maf=0.3, eqtl_beta=true_beta, seed=seed, libsize=1
+        nobs=n, family=Poisson(), method="bulk", alpha=0.0, maf=0.3, V_a=V_a, seed=seed, libsize=1
     )
 
     # no intercept
@@ -51,10 +51,12 @@ def test_sim_poisson():
 
 
 def test_sim_NB():
-    seed = 1
+    seed = 2
     n = 1000
-    true_alpha = 1
-    beta0 = 1
+    true_alpha = 10
+    beta0 = -2
+    V_a = 0.1
+    log_offset = 0
 
     X, y, beta, _, _ = sim_data(
         nobs=n,
@@ -62,7 +64,7 @@ def test_sim_NB():
         method="bulk",
         alpha=true_alpha,
         maf=0.1,
-        eqtl_beta=true_beta,
+        V_a=V_a,
         seed=seed,
         beta0=beta0,
         libsize=1,
@@ -71,27 +73,19 @@ def test_sim_NB():
     mod = smNB(np.array(y), np.array(X))
     sm_state = mod.fit(maxiter=100)
 
-    jaxqtl_pois = GLM(
-        family=Poisson(),
-        max_iter=max_iter,
-        solver=CGSolve(),
-        step_size=step_size,
-    )
-    init_pois = jaxqtl_pois.family.init_eta(y)
-    glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois)
-
-    nb_fam = NegativeBinomial()
-    alpha_init = len(y) / jnp.sum((y / nb_fam.glink.inverse(glm_state_pois.eta) - 1) ** 2)
-    alpha_n = nb_fam.estimate_dispersion(X, y, glm_state_pois.eta, alpha=alpha_init)
-
     jaxqtl_nb = GLM(
         family=NegativeBinomial(),
         max_iter=max_iter,
         solver=CholeskySolve(),
-        step_size=step_size,
+        step_size=0.1,
     )
-    init_nb = jaxqtl_nb.family.init_eta(y)
-    glm_state = jaxqtl_nb.fit(X, y, init=init_nb, alpha_init=alpha_n)
+
+    init_nb, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(X, y, log_offset)
+    alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
+
+    glm_state = jaxqtl_nb.fit(
+        X, y, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset, se_estimator=FisherInfoError()
+    )
 
     print(f"jaxqtl alpha: {glm_state.alpha}")
     print(f"jaxqtl beta: {glm_state.beta}")
@@ -101,38 +95,38 @@ def test_sim_NB():
     assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
 
 
-# def test_sim():
-#     """
-#     test sim for single cell data
-#     """
-n = 982
-num_cells = 10
-family = Poisson()
-chr = 1
-
-bim, fam, bed = read_plink(f"../example/data/sim_chr{chr}", verbose=False)
-G = bed.compute()  # MxN array
-
-NK_covar = pd.read_csv("../example/data/NK_covar_libsize.tsv", sep="\t")
-
-covar = jnp.array(NK_covar[['sex', 'age']])
-covar = covar / jnp.std(covar, axis=0)  # gives higher counts
-libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
-# libsize = jnp.ones((n, 1))
-
-res = run_sim(
-    nobs=n,
-    num_cells=num_cells,
-    num_sim=3,
-    beta0=-15,
-    family=family,
-    # sample_covar_arr=None,
-    m_causal=1,
-    V_a=0.1,
-    libsize=libsize,
-    method="bulk",
-    G=G,
-    out_path="../example/data/test_sim",
-)
-
-print(res)
+# # def test_sim():
+# #     """
+# #     test sim for single cell data
+# #     """
+# n = 982
+# num_cells = 10
+# family = Poisson()
+# chr = 1
+#
+# bim, fam, bed = read_plink(f"../example/data/sim_chr{chr}", verbose=False)
+# G = bed.compute()  # MxN array
+#
+# NK_covar = pd.read_csv("../example/data/NK_covar_libsize.tsv", sep="\t")
+#
+# covar = jnp.array(NK_covar[['sex', 'age']])
+# covar = covar / jnp.std(covar, axis=0)  # gives higher counts
+# libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+# # libsize = jnp.ones((n, 1))
+#
+# res = run_sim(
+#     nobs=n,
+#     num_cells=num_cells,
+#     num_sim=3,
+#     beta0=-15,
+#     family=family,
+#     # sample_covar_arr=None,
+#     m_causal=1,
+#     V_a=0.1,
+#     libsize=libsize,
+#     method="bulk",
+#     G=G,
+#     out_path="../example/data/test_sim",
+# )
+#
+# print(res)

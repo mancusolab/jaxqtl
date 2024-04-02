@@ -157,7 +157,7 @@ class GLM(eqx.Module):
             # fit covariate-only model (null)
             alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
             eta = glm_state_pois.eta
-            disp = self.family.estimate_dispersion(X, y, eta, alpha=alpha_init)
+            disp = self.family.estimate_dispersion(X, y, eta, alpha=1.0 / alpha_init)
 
             # convert disp to 0.1 if bad initialization
             disp = jnp.nan_to_num(disp, nan=0.1)

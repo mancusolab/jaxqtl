@@ -111,6 +111,7 @@ def sim_data(
 
     if method == "bulk":
         mu = family.glink.inverse(eta)
+        np.random.seed(seed)  # for generating random num from np family
         y = family.random_gen(mu, scale=scale, alpha=alpha)
         h2obs = jnp.array([-9])  # placeholder
     elif method == "sc":
