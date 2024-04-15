@@ -253,6 +253,7 @@ def map_nominal_covar(
             keep_iid = ((y / lib_size) < prop_cutoff).squeeze()
             y = y[keep_iid]
             X = X[keep_iid]
+            cov = cov[keep_iid]
             offset_eta = offset_eta[keep_iid]
             if y.shape[0] < 2:
                 log.info("only 1 person left")
