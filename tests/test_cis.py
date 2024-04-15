@@ -125,11 +125,13 @@ def test_cis_waldtest():
 # out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
 # # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
-out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=ScoreTest(), max_iter=600)
+out_pois = map_nominal(dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest(), max_iter=600, prop_cutoff=1e-6)
 
 out_nb = map_nominal(
     dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="estimate_ld_only", max_iter=600
 )
+
+out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=ScoreTest(), max_iter=600)
 
 # ~250s
 start = timeit.default_timer()

@@ -30,6 +30,7 @@ def map_nominal(
     robust_se: bool = True,
     max_iter: int = 1000,
     mode: Optional[str] = None,
+    prop_cutoff: Optional[float] = None,
     ld_out: str = "./gene",
 ) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
@@ -82,6 +83,18 @@ def map_nominal(
 
         # pull cis G (nxM) and y for this gene
         G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
+
+        # filter by cutoff
+        if prop_cutoff is not None:
+            lib_size = np.exp(offset_eta)
+            keep_iid = ((y / lib_size) >= prop_cutoff).squeeze()
+            G = G[keep_iid]
+            y = y[keep_iid]
+            X = X[keep_iid]
+            offset_eta = offset_eta[keep_iid]
+            if y.shape[0] < 2:
+                log.info("only 1 person left")
+                exit()
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:

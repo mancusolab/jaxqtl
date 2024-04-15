@@ -202,6 +202,9 @@ def main(args):
     argp.add_argument("--perm-seed", type=int, default=1)
     argp.add_argument("-addpc", type=int, default=2, help="Add expression PCs")
     argp.add_argument(
+        "-prop-cutoff", type=float, help="keep individual with gene expression above this proportion threshold"
+    )
+    argp.add_argument(
         "--robust",
         action="store_true",
         default=False,
@@ -396,8 +399,9 @@ def main(args):
                 robust_se=args.robust,
                 log=log,
                 max_iter=args.max_iter,
+                prop_cutoff=args.prop_cutoff,
             )
-            out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
+            out_df.to_csv(args.out + ".above" + args.prop_cutoff + ".trans_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal(
                 dat,
@@ -409,8 +413,9 @@ def main(args):
                 robust_se=args.robust,
                 log=log,
                 max_iter=args.max_iter,
+                prop_cutoff=args.prop_cutoff,
             )
-            out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
+            out_df.to_csv(args.out + ".above" + args.prop_cutoff + ".trans_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "covar":
         if args.test_method == "score":
