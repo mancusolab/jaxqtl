@@ -28,7 +28,7 @@ def map_nominal(
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
-    max_iter: int = 500,
+    max_iter: int = 1000,
     mode: Optional[str] = None,
     ld_out: str = "./gene",
 ) -> pd.DataFrame:
@@ -196,7 +196,7 @@ def map_nominal_covar(
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
-    max_iter: int = 500,
+    max_iter: int = 1000,
 ):
     """test association between gene expression and other covariates
 
@@ -279,7 +279,7 @@ def fit_intercept_only(
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = True,
-    max_iter: int = 500,
+    max_iter: int = 1000,
 ):
     if log is None:
         log = get_log()

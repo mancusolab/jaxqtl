@@ -239,7 +239,7 @@ class BetaPerm(DirectPerm):
         offset_eta: ArrayLike = 0.0,
         test: HypothesisTest = ScoreTest(),
         se_estimator: ErrVarEstimation = FisherInfoError(),
-        max_iter: int = 500,
+        max_iter: int = 1000,
     ) -> Tuple[Array, Array, Array, Array]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values

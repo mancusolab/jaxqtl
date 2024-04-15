@@ -82,7 +82,7 @@ def map_cis(
     n_perm: int = 1000,
     robust_se: bool = False,
     compute_qvalue: bool = True,
-    max_iter: int = 500,
+    max_iter: int = 1000,
     verbose: bool = True,
     log=None,
 ) -> pd.DataFrame:
@@ -268,7 +268,7 @@ def map_cis_single(
     se_estimator: ErrVarEstimation = FisherInfoError(),
     n_perm: int = 1000,
     test: HypothesisTest = ScoreTest(),
-    max_iter: int = 500,
+    max_iter: int = 1000,
 ) -> MapCisSingleState:
     """Fit GLM for SNP-gene pairs and report results
 

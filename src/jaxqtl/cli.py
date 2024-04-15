@@ -198,6 +198,7 @@ def main(args):
     argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
     argp.add_argument("-window", type=int, default=500000)
     argp.add_argument("-nperm", type=int, default=1000)
+    argp.add_argument("-max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
     argp.add_argument("-addpc", type=int, default=2, help="Add expression PCs")
     argp.add_argument(
@@ -322,6 +323,7 @@ def main(args):
                 n_perm=args.nperm,
                 compute_qvalue=args.qvalue,
                 log=log,
+                max_iter=args.max_iter,
             )
             outdf_cis_score.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -336,6 +338,7 @@ def main(args):
                 robust_se=args.robust,
                 compute_qvalue=args.qvalue,
                 log=log,
+                max_iter=args.max_iter,
             )
             outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
@@ -349,6 +352,7 @@ def main(args):
                 window=args.window,
                 offset_eta=offset_eta,
                 log=log,
+                max_iter=args.max_iter,
             )
             write_parqet(outdf=out_df, method="score", out_path=args.out)
         elif args.test_method == "wald":
@@ -361,6 +365,7 @@ def main(args):
                 window=args.window,
                 offset_eta=offset_eta,
                 robust_se=args.robust,
+                max_iter=args.max_iter,
             )
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
 
@@ -374,6 +379,7 @@ def main(args):
             log=log,
             mode=args.mode,
             ld_out=args.out,
+            max_iter=args.max_iter,
         )
         log.info("write out LD matrix.")
 
@@ -389,6 +395,7 @@ def main(args):
                 standardize=args.standardize,
                 robust_se=args.robust,
                 log=log,
+                max_iter=args.max_iter,
             )
             out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -401,6 +408,7 @@ def main(args):
                 standardize=args.standardize,
                 robust_se=args.robust,
                 log=log,
+                max_iter=args.max_iter,
             )
             out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
 
@@ -414,6 +422,7 @@ def main(args):
                 standardize=args.standardize,
                 robust_se=args.robust,
                 log=log,
+                max_iter=args.max_iter,
             )
             out_df.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -425,12 +434,15 @@ def main(args):
                 standardize=args.standardize,
                 robust_se=args.robust,
                 log=log,
+                max_iter=args.max_iter,
             )
             out_df.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "fitnull":
         pass
-        out_df = fit_intercept_only(dat, family=family, offset_eta=offset_eta, robust_se=False, log=log)
+        out_df = fit_intercept_only(
+            dat, family=family, offset_eta=offset_eta, robust_se=False, log=log, max_iter=args.max_iter
+        )
         out_df.to_csv(args.out + ".intercept_only." + args.model + ".tsv.gz", sep="\t", index=False)
     else:
         log.info("please select available methods.")

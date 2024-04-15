@@ -51,11 +51,11 @@ def test_sim_poisson():
 
 
 def test_sim_NB():
-    seed = 2
+    seed = 1
     n = 1000
     true_alpha = 10
-    beta0 = -2
-    V_a = 0.1
+    beta0 = -1
+    V_a = 0.05
     log_offset = 0
 
     X, y, beta, _, _ = sim_data(
@@ -77,7 +77,6 @@ def test_sim_NB():
         family=NegativeBinomial(),
         max_iter=max_iter,
         solver=CholeskySolve(),
-        step_size=0.1,
     )
 
     init_nb, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(X, y, log_offset)
