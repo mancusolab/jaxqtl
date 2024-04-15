@@ -428,7 +428,7 @@ def main(args):
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
             )
-            out_df.to_csv(args.out + ".below" + args.prop_cutoff + ".cis_score.tsv.gz", sep="\t", index=False)
+            out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal_covar(
                 dat,
@@ -441,7 +441,7 @@ def main(args):
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
             )
-            out_df.to_csv(args.out + ".below" + args.prop_cutoff + ".cis_wald.tsv.gz", sep="\t", index=False)
+            out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "fitnull":
         pass
