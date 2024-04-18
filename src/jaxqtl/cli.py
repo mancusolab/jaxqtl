@@ -211,6 +211,12 @@ def main(args):
         help="Robust SE",
     )
     argp.add_argument(
+        "--ld-wt",
+        action="store_true",
+        default=False,
+        help="Whether add GLM weight to LD matrix",
+    )
+    argp.add_argument(
         "--perm-pheno",
         action="store_true",
         default=False,
@@ -383,6 +389,7 @@ def main(args):
             mode=args.mode,
             ld_out=args.out,
             max_iter=args.max_iter,
+            ld_wt=args.ld_wt,
         )
         log.info("write out LD matrix.")
 
