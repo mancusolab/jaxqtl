@@ -1,4 +1,5 @@
 import numpy as np
+import pandas as pd
 
 from statsmodels.discrete.discrete_model import (
     NegativeBinomial as smNB,
@@ -52,11 +53,15 @@ def test_sim_poisson():
 
 def test_sim_NB():
     seed = 1
-    n = 1000
+    n = 982
     true_alpha = 10
-    beta0 = -1
+    beta0 = -5
     V_a = 0.05
-    log_offset = 0
+    # libsize = 1  # not using lib size
+
+    NK_covar = pd.read_csv("./example/data/NK_covar_libsize.tsv", sep="\t")
+    libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+    log_offset = jnp.log(libsize)
 
     X, y, beta, _, _ = sim_data(
         nobs=n,
@@ -67,10 +72,10 @@ def test_sim_NB():
         V_a=V_a,
         seed=seed,
         beta0=beta0,
-        libsize=1,
+        libsize=libsize,
     )
 
-    mod = smNB(np.array(y), np.array(X))
+    mod = smNB(np.array(y), np.array(X), offset=log_offset.ravel())
     sm_state = mod.fit(maxiter=100)
 
     jaxqtl_nb = GLM(
@@ -92,40 +97,3 @@ def test_sim_NB():
     print(f"statsmodel params: {sm_state.params}")
     assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-3)
     assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
-
-
-# # def test_sim():
-# #     """
-# #     test sim for single cell data
-# #     """
-# n = 982
-# num_cells = 10
-# family = Poisson()
-# chr = 1
-#
-# bim, fam, bed = read_plink(f"../example/data/sim_chr{chr}", verbose=False)
-# G = bed.compute()  # MxN array
-#
-# NK_covar = pd.read_csv("../example/data/NK_covar_libsize.tsv", sep="\t")
-#
-# covar = jnp.array(NK_covar[['sex', 'age']])
-# covar = covar / jnp.std(covar, axis=0)  # gives higher counts
-# libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
-# # libsize = jnp.ones((n, 1))
-#
-# res = run_sim(
-#     nobs=n,
-#     num_cells=num_cells,
-#     num_sim=3,
-#     beta0=-15,
-#     family=family,
-#     # sample_covar_arr=None,
-#     m_causal=1,
-#     V_a=0.1,
-#     libsize=libsize,
-#     method="bulk",
-#     G=G,
-#     out_path="../example/data/test_sim",
-# )
-#
-# print(res)

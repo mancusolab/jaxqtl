@@ -307,7 +307,7 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("-geno", type=str, help="Genotype plink prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Path to covariates, include age, sex and library size")
-    argp.add_argument("-libsize-path", type=int, help="path to read in library size, no header")
+    argp.add_argument("-libsize-path", type=str, help="path to read in library size, no header")
     argp.add_argument("-nobs", type=int, help="Sample size")
     argp.add_argument("-num-cells", type=int, default=100, help="Number of cells per person")
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
@@ -417,22 +417,6 @@ def main(args):
 
     df_rej = pd.DataFrame(data=d)
     df_rej.to_csv(args.out + ".tsv", sep="\t", index=False)
-
-    # # write out pvalues of eqtls
-    # d = {
-    #     'rej_nb_wald': res.pval_nb_wald,
-    #     'rej_nb_wald_robust': res.pval_nb_wald_robust,
-    #     'rej_nb_score': res.pval_nb_score,
-    #     'rej_pois_wald': res.pval_pois_wald,
-    #     'rej_pois_wald_robust': res.pval_pois_wald_robust,
-    #     'rej_pois_score': res.pval_pois_score,
-    #     'rej_lm_wald': res.pval_lm_wald,
-    #     'rej_lm_wald_robust': res.pval_lm_wald_robust,
-    #     'rej_lm_score': res.pval_lm_score,
-    # }
-    #
-    # df_pval = pd.DataFrame(data=d)
-    # df_pval.to_csv(args.out + ".pval.tsv.gz", sep="\t", index=False)
 
     return 0
 
