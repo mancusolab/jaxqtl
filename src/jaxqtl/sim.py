@@ -185,8 +185,11 @@ def run_sim(
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
         # sample alpha from Array, works with one element
-        np.random.seed(i + seed)
-        alpha_sample = np.random.choice(alpha, 1)
+        if len(jnp.array([alpha])) > 1:
+            np.random.seed(i + seed)
+            alpha_sample = np.random.choice(alpha, 1)
+        else:
+            alpha_sample = alpha
 
         X, y, beta, libsize, h2obs = sim_data(
             nobs=nobs,
@@ -393,7 +396,7 @@ def main(args):
         log.info("sample from alpha.")
     else:
         alpha = args.alpha
-        log.info("Use fixed library size 1")
+        log.info("Use fixed alpha value")
 
     res = run_sim(
         nobs=args.nobs,
