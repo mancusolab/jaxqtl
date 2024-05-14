@@ -48,6 +48,7 @@ class SimResState(NamedTuple):
     pval_pois_score: Array
     y_mean: Array
     y_express_percent: Array
+    alpha_list: Array
 
 
 def sim_data(
@@ -150,7 +151,7 @@ def run_sim(
     family: ExponentialFamily = Poisson(),
     method: str = "bulk",
     scale: float = 1.0,  # for linear model
-    alpha: float = 0.0,  # for NB model
+    alpha: ArrayLike = 0.0,  # for NB model
     maf: float = 0.3,
     beta0: float = 1.0,  # intercept determine baseline counts
     V_a: float = 0.1,
@@ -179,15 +180,21 @@ def run_sim(
     y_mean = jnp.array([])
     y_express_percent = jnp.array([])
 
+    alpha_list = jnp.array([])
+
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
+        # sample alpha from Array, works with one element
+        np.random.seed(i + seed)
+        alpha_sample = np.random.choice(alpha, 1)
+
         X, y, beta, libsize, h2obs = sim_data(
             nobs=nobs,
             num_cells=num_cells,
             family=family,
             method=method,
             scale=scale,  # for linear model
-            alpha=alpha,  # for NB model
+            alpha=alpha_sample,  # for NB model
             maf=maf,
             beta0=beta0,  # intercept determine baseline counts
             seed=i + seed,  # use simulation index
@@ -288,6 +295,8 @@ def run_sim(
 
         pval_lm_score = jnp.append(pval_lm_score, pval)
 
+        alpha_list = jnp.append(alpha_list, alpha_sample)
+
     return SimResState(
         pval_nb_wald=pval_nb_wald,
         pval_nb_wald_robust=pval_nb_wald_robust,
@@ -300,6 +309,7 @@ def run_sim(
         pval_lm_score=pval_lm_score,
         y_mean=y_mean,
         y_express_percent=y_express_percent,
+        alpha_list=alpha_list,
     )
 
 
@@ -308,6 +318,7 @@ def main(args):
     argp.add_argument("-geno", type=str, help="Genotype plink prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Path to covariates, include age, sex and library size")
     argp.add_argument("-libsize-path", type=str, help="path to read in library size, no header")
+    argp.add_argument("-alpha-path", type=str, help="path to read in dispersion values, no header")
     argp.add_argument("-nobs", type=int, help="Sample size")
     argp.add_argument("-num-cells", type=int, default=100, help="Number of cells per person")
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
@@ -377,13 +388,20 @@ def main(args):
         libsize = jnp.ones((args.nobs, 1))
         log.info("Use fixed library size 1")
 
+    if args.alpha_path is not None:
+        alpha = jnp.array(pd.read_csv(args.alpha_path, sep="\t").iloc[:, 0])
+        log.info("sample from alpha.")
+    else:
+        alpha = args.alpha
+        log.info("Use fixed library size 1")
+
     res = run_sim(
         nobs=args.nobs,
         num_cells=args.num_cells,
         family=family,
         method=args.method,
         scale=args.scale,  # for linear model
-        alpha=args.alpha,  # for NB model
+        alpha=alpha,  # for NB model
         maf=args.maf,
         beta0=args.beta0,  # intercept determine baseline counts
         V_a=args.Va,
@@ -413,6 +431,7 @@ def main(args):
         'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
         'y_mean': [(res.y_mean).mean()],
         'express_percent': [(res.y_express_percent).mean()],
+        'alpha_mean': [(res.alpha_list).mean()],
     }
 
     df_rej = pd.DataFrame(data=d)
