@@ -1,25 +1,123 @@
 from abc import abstractmethod
-from typing import Tuple
+from typing import NamedTuple, Optional, Tuple
 
+import numpy
 import numpy.random
 import scipy
 
 from scipy.stats import ncx2
 
 import equinox as eqx
-import jax.numpy as jnp
 import jax.numpy.linalg as jnla
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
 
-from jax import Array, grad, jit, lax
+from jax import grad, jit, lax, numpy as jnp
 from jax.scipy.special import polygamma
 from jax.scipy.stats import norm
-from jax.typing import ArrayLike
+from jaxtyping import Array, ArrayLike
 
 from ..families.distribution import ExponentialFamily
+from ..families.utils import t_cdf
 from .stderr import ErrVarEstimation, FisherInfoError
 from .utils import HypothesisTest, ScoreTest
+
+
+class BetaState(NamedTuple):
+    adj_p: Array
+    beta_res: Array
+    true_nc: Array
+    opt_status: Array
+
+
+class InferBeta(eqx.Module):
+    max_iter: int = 1000
+
+    def __call__(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: Optional[ArrayLike]) -> BetaState:
+        """Infer beta parameter for permutation"""
+        return self.fit(z_stats_perm, obs_z, dof)
+
+    @abstractmethod
+    def fit(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: Optional[ArrayLike]) -> BetaState:
+        pass
+
+
+class InferBetaLM(InferBeta):
+    def fit(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: ArrayLike) -> BetaState:
+        def df_cost(zscore, dof):
+            """minimize abs(1-alpha) as a function of M_eff"""
+            pval = 2 * t_cdf(-jnp.fabs(zscore), dof)
+            mean = jnp.mean(pval)
+            var = jnp.var(pval)
+            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
+
+        # use normal distribution to compute p (approximate t in lm wald)
+        p_perm = 2 * t_cdf(-jnp.fabs(z_stats_perm), dof)
+        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+
+        # learn non-central parameter
+        # true_dof = scipy.optimize.newton(lambda x: df_cost(z_stats_perm, x), dof, tol=1e-4, maxiter=50)
+        res = scipy.optimize.minimize(
+            lambda x: numpy.abs(df_cost(z_stats_perm, x)), dof, method='Nelder-Mead', tol=1e-4
+        )
+        true_dof = res.x[0]
+        opt_status = res.success  # whether optimizer exited successfully
+
+        # use non-central chi2 to recompute permutation pvals
+        p_perm = 2 * t_cdf(-jnp.fabs(z_stats_perm), true_dof)
+
+        p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+        k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
+        n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
+
+        init = jnp.array([k_init, n_init])
+
+        # infer beta based on p_perm
+        beta_res = infer_beta(p_perm, init, max_iter=self.max_iter)
+
+        adj_obs_p = 2 * t_cdf(-jnp.fabs(obs_z), true_dof)
+        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
+
+        return BetaState(adj_p=adj_p, beta_res=beta_res, true_nc=true_dof, opt_status=opt_status)
+
+
+class InferBetaGLM(InferBeta):
+    def fit(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: Optional[ArrayLike]) -> BetaState:
+        def df_cost(zscore, nc):
+            """minimize abs(1-alpha) as a function of M_eff"""
+            pval = ncx2.sf(zscore**2, 1, nc)
+            mean = jnp.mean(pval)
+            var = jnp.var(pval)
+            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
+
+        # use normal distribution to compute p (approximate t in lm wald)
+        p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
+        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+
+        # learn non-central parameter
+        # true_nc = scipy.optimize.newton(lambda x: df_cost(p_perm, x), 0.1, tol=1e-4, maxiter=50)
+        res = scipy.optimize.minimize(
+            lambda x: numpy.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4
+        )
+        true_nc = res.x[0]
+        opt_status = res.success  # whether optimizer exited successfully
+
+        # use non-central chi2 to recompute permutation pvals
+        p_perm = ncx2.sf(z_stats_perm**2, 1, true_nc)
+
+        p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+        k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
+        n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
+
+        init = jnp.array([k_init, n_init])
+
+        # infer beta based on p_perm
+        beta_res = infer_beta(p_perm, init, max_iter=self.max_iter)
+
+        adj_obs_p = ncx2.sf(obs_z**2, 1, true_nc)
+        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
+
+        return BetaState(adj_p=adj_p, beta_res=beta_res, true_nc=true_nc, opt_status=opt_status)
 
 
 class Permutation(eqx.Module):
@@ -239,6 +337,7 @@ class BetaPerm(DirectPerm):
         offset_eta: ArrayLike = 0.0,
         test: HypothesisTest = ScoreTest(),
         se_estimator: ErrVarEstimation = FisherInfoError(),
+        beta_estimator: InferBeta = InferBetaGLM(),
         max_iter: int = 1000,
     ) -> Tuple[Array, Array, Array, Array]:
         """Perform permutation to estimate beta distribution parameters
@@ -263,40 +362,46 @@ class BetaPerm(DirectPerm):
             max_iter,
         )
 
-        # use normal distribution to compute p (approximate t in lm wald)
-        p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
-        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+        # # use normal distribution to compute p (approximate t in lm wald)
+        # p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
+        # z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+        #
+        # # learn non-central parameter
+        # # true_nc = scipy.optimize.newton(lambda x: df_cost(p_perm, x), 0.1, tol=1e-4, maxiter=50)
+        # res = scipy.optimize.minimize(
+        #     lambda x: numpy.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4
+        # )
+        # true_nc = res.x[0]
+        # opt_status = res.success  # whether optimizer exited successfully
+        #
+        # # use non-central chi2 to recompute permutation pvals
+        # p_perm = ncx2.sf(z_stats_perm**2, 1, true_nc)
+        #
+        # p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
+        # k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
+        # n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
+        #
+        # init = jnp.array([k_init, n_init])
+        #
+        # # infer beta based on p_perm
+        # beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
+        #
+        # adj_obs_p = ncx2.sf(obs_z**2, 1, true_nc)
+        # adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
 
-        # learn non-central parameter
-        # true_nc = scipy.optimize.newton(lambda x: df_cost(p_perm, x), 0.1, tol=1e-4, maxiter=50)
-        res = scipy.optimize.minimize(
-            lambda x: numpy.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4
-        )
-        true_nc = res.x[0]
-        opt_status = res.success  # whether optimizer exited successfully
+        n = X.shape[0]
+        p = X.shape[1] + 1  # covariates plus genotype
+        dof = n - p  # include intercept
 
-        # use non-central chi2 to recompute permutation pvals
-        p_perm = ncx2.sf(z_stats_perm**2, 1, true_nc)
-
-        p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
-        k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
-        n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
-
-        init = jnp.array([k_init, n_init])
-
-        # infer beta based on p_perm
-        beta_res = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
-
-        adj_obs_p = ncx2.sf(obs_z**2, 1, true_nc)
-        adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
+        adj_p, beta_res, true_nc, opt_status = beta_estimator(z_stats_perm, obs_z, dof)
 
         return adj_p, beta_res, true_nc, opt_status
 
 
-def df_cost(zscore, nc):
-    """minimize abs(1-alpha) as a function of M_eff"""
-    # pval = 2 * norm.sf(jnp.fabs(zscore))
-    pval = ncx2.sf(zscore**2, 1, nc)
-    mean = jnp.mean(pval)
-    var = jnp.var(pval)
-    return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
+# def df_cost(zscore, nc):
+#     """minimize abs(1-alpha) as a function of M_eff"""
+#     # pval = 2 * norm.sf(jnp.fabs(zscore))
+#     pval = ncx2.sf(zscore**2, 1, nc)
+#     mean = jnp.mean(pval)
+#     var = jnp.var(pval)
+#     return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0

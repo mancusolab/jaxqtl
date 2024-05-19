@@ -13,6 +13,7 @@ import jax.numpy as jnp
 from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
+from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
 from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
@@ -320,12 +321,19 @@ def main(args):
         log.info("No gene exist.")
         sys.exit()
 
+    # for lm wald test, use t distribution during permutation
+    if isinstance(family, Gaussian) and args.test_method == "wald":
+        beta_estimator = InferBetaLM()
+    else:
+        beta_estimator = InferBetaGLM()
+
     if args.mode == "cis":
         if args.test_method == "score":
             outdf_cis_score = map_cis(
                 dat,
                 family=family,
                 test=ScoreTest(),
+                beta_estimator=beta_estimator,
                 standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,
@@ -340,6 +348,7 @@ def main(args):
                 dat,
                 family=family,
                 test=WaldTest(),
+                beta_estimator=beta_estimator,
                 standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,

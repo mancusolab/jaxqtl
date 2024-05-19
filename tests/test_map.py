@@ -7,6 +7,7 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
+from jaxqtl.infer.permutation import InferBetaLM
 from jaxqtl.infer.utils import WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
@@ -87,8 +88,11 @@ mapcis_out_score_lm = map_cis(
     family=Gaussian(),
     test=WaldTest(),
     offset_eta=jnp.zeros((n_obs, 1)),
+    # offset_eta=offset_eta,
     n_perm=1000,
     compute_qvalue=False,
+    beta_estimator=InferBetaLM(),
+    seed=1,
 )
 
 mapnom_covar = map_nominal_covar(

@@ -11,7 +11,7 @@ from jax.typing import ArrayLike
 from jaxtyping import Array
 
 from ..families.distribution import ExponentialFamily
-from ..infer.permutation import BetaPerm
+from ..infer.permutation import BetaPerm, InferBeta, InferBetaGLM
 from ..infer.stderr import ErrVarEstimation, FisherInfoError, HuberError
 from ..infer.utils import CisGLMState, HypothesisTest, ScoreTest
 from ..io.readfile import ReadyDataState
@@ -69,6 +69,7 @@ def map_cis(
     dat: ReadyDataState,
     family: ExponentialFamily,
     test: HypothesisTest = ScoreTest(),
+    beta_estimator: InferBeta = InferBetaGLM(),
     append_intercept: bool = True,
     standardize: bool = True,
     seed: int = 123,
@@ -198,6 +199,7 @@ def map_cis(
             se_estimator,
             n_perm,
             test,
+            beta_estimator,
             max_iter,
         )
         if verbose:
@@ -268,6 +270,7 @@ def map_cis_single(
     se_estimator: ErrVarEstimation = FisherInfoError(),
     n_perm: int = 1000,
     test: HypothesisTest = ScoreTest(),
+    beta_estimator: InferBeta = InferBetaGLM(),
     max_iter: int = 1000,
 ) -> MapCisSingleState:
     """Fit GLM for SNP-gene pairs and report results
@@ -309,6 +312,7 @@ def map_cis_single(
         offset_eta,
         test,
         se_estimator,
+        beta_estimator,
         max_iter,
     )
 
