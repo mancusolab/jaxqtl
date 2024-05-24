@@ -389,7 +389,7 @@ def main(args):
         covar = None
 
     if args.libsize_path is not None:
-        libsize = jnp.array(pd.read_csv(args.libsize_path, sep="\t").iloc[:, 0]).reshape((args.nobs, 1))
+        libsize = jnp.array(pd.read_csv(args.libsize_path, sep="\t").iloc[:, 0]).reshape(-1, 1)
         log.info("use specified library size.")
     else:
         libsize = jnp.ones((args.nobs, 1))
