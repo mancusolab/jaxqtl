@@ -49,6 +49,7 @@ class SimResState(NamedTuple):
     y_mean: Array
     y_express_percent: Array
     alpha_list: Array
+    libsize_valid: Array
 
 
 def sim_data(
@@ -183,6 +184,7 @@ def run_sim(
 
     y_mean = jnp.array([])
     y_express_percent = jnp.array([])
+    libsize_valid = jnp.array([])
 
     alpha_list = jnp.array([])
 
@@ -237,6 +239,7 @@ def run_sim(
 
         y_mean = jnp.append(y_mean, (y / libsize).mean())
         y_express_percent = jnp.append(y_express_percent, (y > 0).mean())
+        libsize_valid = jnp.append(libsize_valid, (y / libsize <= 1.0).mean())
 
         log_offset = jnp.log(libsize)
         jaxqtl_pois = GLM(family=Poisson())
@@ -316,6 +319,7 @@ def run_sim(
         pval_lm_score=pval_lm_score,
         y_mean=y_mean,
         y_express_percent=y_express_percent,
+        libsize_valid=libsize_valid,
         alpha_list=alpha_list,
     )
 
@@ -439,6 +443,7 @@ def main(args):
         'y_mean': [(res.y_mean).mean()],
         'express_percent': [(res.y_express_percent).mean()],
         'alpha_mean': [(res.alpha_list).mean()],
+        'libsize_valid': [(res.libsize_valid).mean()],
     }
 
     df_rej = pd.DataFrame(data=d)
