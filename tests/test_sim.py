@@ -55,12 +55,12 @@ def test_sim_NB():
     seed = 1
     n = 982
     true_alpha = 10
-    beta0 = -5
-    V_a = 0.05
+    beta0 = -10
+    V_a = 0.1
     # libsize = 1  # not using lib size
 
-    NK_covar = pd.read_csv("./example/data/NK_covar_libsize.tsv", sep="\t")
-    libsize = jnp.array(NK_covar['libsize']).reshape((-1, 1))
+    libsize = jnp.array(pd.read_csv("../example/data/CD4_ET.libsize.tsv", sep="\t").iloc[:, 0]).reshape((-1, 1))
+
     log_offset = jnp.log(libsize)
 
     X, y, beta, _, _ = sim_data(

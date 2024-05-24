@@ -91,6 +91,10 @@ def sim_data(
         beta_covar = jnp.ones((num_covar, 1)) * 0.001  # fix covariate effect to be small
         beta = beta.at[1 : p - 1].set(beta_covar)
 
+    # sample libsize from array (works for constant array)
+    key, libsize_key = rdm.split(key, 2)
+    libsize = rdm.choice(libsize_key, libsize.ravel(), shape=(nobs, 1), replace=True)
+
     # geno in shape of nx1
     if geno_arr is not None:
         g = geno_arr
@@ -206,7 +210,7 @@ def run_sim(
             V_disp=V_disp,
             m_causal=m_causal,
             baseline_mu=baseline_mu,
-            libsize=libsize,  # shape nx1 (only simulate per-individual offset)
+            libsize=libsize,  # scalar or shape nx1 (only simulate per-individual offset)
             geno_arr=snp,  # genotype is generated for num_sim
             sample_covar_arr=sample_covar_arr,  # nxp
         )
@@ -320,8 +324,8 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("-geno", type=str, help="Genotype plink prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Path to covariates, include age, sex and library size")
-    argp.add_argument("-libsize-path", type=str, help="path to read in library size, no header")
-    argp.add_argument("-alpha-path", type=str, help="path to read in dispersion values, no header")
+    argp.add_argument("-libsize-path", type=str, help="path to read in library size, with header")
+    argp.add_argument("-alpha-path", type=str, help="path to read in dispersion values, with header")
     argp.add_argument("-nobs", type=int, help="Sample size")
     argp.add_argument("-num-cells", type=int, default=100, help="Number of cells per person")
     argp.add_argument("-m-causal", type=int, help="Number of causal variants")
