@@ -206,6 +206,9 @@ def main(args):
         "-prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
     )
     argp.add_argument(
+        "-express-percent", type=float, default=0.0, help="keep genes with gene expression above (>) this threshold"
+    )
+    argp.add_argument(
         "--robust",
         action="store_true",
         default=False,
@@ -314,7 +317,7 @@ def main(args):
         offset_eta = jnp.zeros_like(offset_eta)
 
     # filter gene list
-    dat.filter_gene(gene_list=genelist)
+    dat.filter_gene(gene_list=genelist, geneexpr_percent_cutoff=args.express_percent)
 
     # permute gene expression for type I error calibration
     if args.perm_pheno:
