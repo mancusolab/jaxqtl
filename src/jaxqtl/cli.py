@@ -14,7 +14,7 @@ from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
-from jaxqtl.infer.utils import ScoreTest, WaldTest
+from jaxqtl.infer.utils import CommonTest, RareTest, ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -212,6 +212,12 @@ def main(args):
         help="Robust SE",
     )
     argp.add_argument(
+        "--rare-snp",
+        action="store_true",
+        default=False,
+        help="Test for rare variants using SPA method",
+    )
+    argp.add_argument(
         "--ld-wt",
         action="store_true",
         default=False,
@@ -362,10 +368,13 @@ def main(args):
 
     elif args.mode == "nominal":
         if args.test_method == "score":
+            # only work for Poisson
+            score_test_func = RareTest() if args.rare_snp else CommonTest()
             out_df = map_nominal(
                 dat,
                 family=family,
                 test=ScoreTest(),
+                score_test=score_test_func,
                 standardize=args.standardize,
                 window=args.window,
                 offset_eta=offset_eta,

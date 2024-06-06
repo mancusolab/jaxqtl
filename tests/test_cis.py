@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.utils import ScoreTest, WaldTest
+from jaxqtl.infer.utils import RareTest, ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -125,7 +125,9 @@ def test_cis_waldtest():
 # out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
 # # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
-out_pois = map_nominal(dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest(), max_iter=600, prop_cutoff=1e-6)
+out_pois = map_nominal(
+    dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest(), score_test=RareTest(), max_iter=1000
+)
 
 out_nb = map_nominal(
     dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="estimate_ld_only", max_iter=600

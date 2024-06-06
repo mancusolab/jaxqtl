@@ -1,6 +1,8 @@
 from abc import abstractmethod
 from typing import NamedTuple, Tuple
 
+import giddyup as gu
+
 import equinox as eqx
 import jax.lax as lax
 import jax.numpy as jnp
@@ -49,18 +51,71 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
 
     pval = 2 * norm.sf(jnp.fabs(zscore))
 
-    # # test spa test
-    # cgf = gu.Poisson(glm_null_res.mu.flatten())  # pred_mean is predicted mean from GLM
-    #
-    # def _spa(_, jdx):
-    #     pvalue_j = gu.saddlepoint_pvalue(g_score[jdx], g_resid[:, jdx], cgf)
-    #     return None, pvalue_j
-    #
-    # _, spa_pval = lax.scan(_spa, None, jnp.arange(len(zscore)))  # p is num snps
-
-    # import numpy as np; import jax; jax.debug.breakpoint()
-
     return zscore, pval, g_score, g_var
+
+
+class ScoreTestSNP(eqx.Module):
+    def __call__(self, G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[Array, Array, Array, Array]:
+        """score test for common or rare variants
+
+        :param G:
+        :param X:
+        :param glm_null_res:
+        :return:
+        """
+
+        return self.test(G, X, glm_null_res)
+
+    @abstractmethod
+    def test(self, G, X, glm_null_res) -> Tuple[Array, Array, Array, Array]:
+        pass
+
+
+class CommonTest(ScoreTestSNP):
+    def test(self, G, X, glm_null_res) -> Tuple[Array, Array, Array, Array]:
+        y_resid = jnp.squeeze(glm_null_res.resid, -1)
+        x_W = X * glm_null_res.glm_wt
+        sqrt_wgt = jnp.sqrt(glm_null_res.glm_wt)
+
+        g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
+        w_g_resid = g_resid * sqrt_wgt
+        g_var = jnp.sum(w_g_resid**2, axis=0)
+
+        g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
+        zscore = g_score / jnp.sqrt(g_var)
+
+        pval = 2 * norm.sf(jnp.fabs(zscore))
+
+        return zscore, pval, g_score, g_var
+
+
+class RareTest(ScoreTestSNP):
+    def test(self, G, X, glm_null_res) -> Tuple[Array, Array, Array, Array]:
+        """Warning: for now only support Poisson"""
+
+        y_resid = jnp.squeeze(glm_null_res.resid, -1)
+        x_W = X * glm_null_res.glm_wt
+        sqrt_wgt = jnp.sqrt(glm_null_res.glm_wt)
+
+        g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
+        w_g_resid = g_resid * sqrt_wgt
+        g_var = jnp.sum(w_g_resid**2, axis=0)
+
+        g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
+        zscore = g_score / jnp.sqrt(g_var)
+
+        # test spa test
+        cgf = gu.Poisson(glm_null_res.mu.flatten())  # pred_mean is predicted mean from GLM
+
+        def _spa(_, jdx):
+            pvalue_j = gu.saddlepoint_pvalue(g_score[jdx], g_resid[:, jdx], cgf)
+            return None, pvalue_j
+
+        _, pval = lax.scan(_spa, None, jnp.arange(len(zscore)))  # p is num snps
+
+        # import numpy as np; import jax; jax.debug.breakpoint()
+
+        return zscore, pval, g_score, g_var
 
 
 class HypothesisTest(eqx.Module):
@@ -73,6 +128,7 @@ class HypothesisTest(eqx.Module):
         offset_eta: ArrayLike,
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
         """hypothesis test for association between SNP and outcome
 
@@ -85,7 +141,7 @@ class HypothesisTest(eqx.Module):
         :param max_iter: maximum iterations for fitting GLM, default to 1000
         :return: CisGLMState
         """
-        return self.test(X, G, y, family, offset_eta, se_estimator, max_iter)
+        return self.test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
 
     @abstractmethod
     def test(
@@ -97,6 +153,7 @@ class HypothesisTest(eqx.Module):
         offset_eta: ArrayLike,
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
         pass
 
@@ -111,6 +168,7 @@ class WaldTest(HypothesisTest):
         offset_eta: ArrayLike,
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 
@@ -152,6 +210,7 @@ class ScoreTest(HypothesisTest):
         offset_eta: ArrayLike,
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 
@@ -162,7 +221,7 @@ class ScoreTest(HypothesisTest):
             X, y, offset_eta=offset_eta, init=eta, alpha_init=alpha_n, se_estimator=se_estimator
         )
 
-        zscore, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
+        zscore, pval, score, score_var = score_test(G, X, glmstate_cov_only)
         beta = score / score_var
         se = 1.0 / jnp.sqrt(score_var)
 

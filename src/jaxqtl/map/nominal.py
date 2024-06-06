@@ -11,7 +11,7 @@ from jaxtyping import ArrayLike
 from ..families.distribution import ExponentialFamily
 from ..infer.glm import GLM
 from ..infer.stderr import FisherInfoError, HuberError
-from ..infer.utils import HypothesisTest, ScoreTest, WaldTest
+from ..infer.utils import CommonTest, HypothesisTest, ScoreTest, ScoreTestSNP, WaldTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from .utils import _get_geno_info, _setup_G_y
@@ -21,6 +21,7 @@ def map_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
     test: HypothesisTest = ScoreTest(),
+    score_test: ScoreTestSNP = CommonTest(),
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -105,7 +106,7 @@ def map_nominal(
                 str(rend),
             )
 
-        result = test(X, G, y, family, offset_eta, se_estimator, max_iter)
+        result = test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
 
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
@@ -196,6 +197,7 @@ def map_nominal_covar(
     dat: ReadyDataState,
     family: ExponentialFamily,
     test: HypothesisTest = WaldTest(),
+    score_test: ScoreTestSNP = CommonTest(),
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -269,7 +271,7 @@ def map_nominal_covar(
         if verbose:
             log.info("Performing scan for %s", gene_name)
 
-        result = test(X, cov, y, family, offset_eta, se_estimator, max_iter)
+        result = test(X, cov, y, family, offset_eta, se_estimator, max_iter, score_test)
 
         if verbose:
             log.info("Finished cis-qtl scan for %s", gene_name)
