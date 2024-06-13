@@ -19,7 +19,7 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.log import get_log, get_logger
 
 
-def cov_scan_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, model: str = "logit"):
+def cov_scan_sm(X: ArrayLike, M_annot: ArrayLike, y: ArrayLike, model: str = "logit"):
     """
     run GLM across variants in a flanking window of given gene
     cis-widow: plus and minus W base pairs, total length 2*cis_window
@@ -29,10 +29,12 @@ def cov_scan_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, model: str = "logit"):
     p_vec = []
     converged = []
     reg_vec = []
+    enrichment_vec = []
+    enrichment_se_vec = []
 
     # print(sm_res.summary())
-    for snp in G.T:
-        M = np.hstack((X, snp[:, np.newaxis]))
+    for one_annot in M_annot.T:
+        M = np.hstack((X, one_annot[:, np.newaxis]))
 
         if model == "logit":
             sm_glm = sm.Logit(
@@ -46,17 +48,54 @@ def cov_scan_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, model: str = "logit"):
         try:
             sm_res = sm_glm.fit(disp=False, warn_convergence=False, maxiter=1000)
             reg = 0
-        except Exception:
-            sm_res = sm_glm.fit_regularized(disp=False, warn_convergence=False, maxiter=1000)
-            reg = 1
+            fit_params = sm_res.params[-1]
+            bse_res = sm_res.bse[-1]
+            p_res = sm_res.pvalues[-1]
+            converged_res = sm_res.converged
 
-        beta_vec.append(sm_res.params[-1])
-        bse_vec.append(sm_res.bse[-1])
-        p_vec.append(sm_res.pvalues[-1])
-        converged.append(sm_res.converged)
+        except Exception:
+            try:
+                sm_res = sm_glm.fit_regularized(disp=False, warn_convergence=False, maxiter=1000)
+                reg = 1
+                fit_params = sm_res.params[-1]
+                bse_res = sm_res.bse[-1]
+                p_res = sm_res.pvalues[-1]
+                converged_res = sm_res.converged
+
+            except Exception:
+                reg = 1
+                fit_params = np.array([np.nan])
+                bse_res = np.array([np.nan])
+                p_res = np.array([np.nan])
+                converged_res = np.array([np.nan])
+
+        beta_vec.append(fit_params)
+        bse_vec.append(bse_res)
+        p_vec.append(p_res)
+        converged.append(converged_res)
         reg_vec.append(reg)
 
-    return beta_vec, bse_vec, p_vec, converged, reg_vec
+        # calculate enrichment
+        # enrichment = [sum(pip x annotation) / sum(annotation)] / (sum(pip) / N)
+        enrichment_obs = (y.ravel() @ one_annot) / jnp.sum(one_annot) / (y.sum() / len(y))
+
+        # perform 1000 bootstrap to get SE of enrichment
+        enrichment_perm = []
+        if enrichment_obs > 0:
+            for i in range(1000):
+                np.random.seed(i)
+                y_perm = np.random.choice(y.ravel(), size=len(y), replace=True)
+                enrichment = (y_perm @ one_annot) / jnp.sum(one_annot) / (y_perm.sum() / len(y_perm))
+                enrichment_perm.append(enrichment)
+            # note: here is variance, need to take square root
+            enrichment_se = jnp.sqrt(jnp.array(enrichment_perm).var())
+        else:
+            enrichment_se = jnp.nan
+
+        enrichment_vec.append(enrichment_obs)
+        enrichment_se_vec.append(enrichment_se)
+
+    return beta_vec, bse_vec, p_vec, converged, reg_vec, enrichment_vec, enrichment_se_vec
 
 
 def _cis_window_cutter(
@@ -133,6 +172,8 @@ def map_annot_sm(
         "pval_nominal",
         "model_converged",
         "reg",
+        "enrichment",
+        "enrichment_se",
     ]
 
     phenotype_id = []
@@ -144,6 +185,8 @@ def map_annot_sm(
     converged_list = []
     num_var_cis = []
     reg_list = []
+    enrichment_list = []
+    enrichment_se_list = []
 
     # all annotation names
     annot_names = annot.columns
@@ -180,18 +223,18 @@ def map_annot_sm(
             else:
                 continue
 
-        # TODO: use var_df to subset cis variant in annot file
+        # use var_df to subset cis variant in annot file
         cov = annot.iloc[var_df.i.values]
 
-        # PIP is only produced for one SNP if multi-allele, so need to remove duplicate in annotation
+        # remove duplicate in annotation
         cov = np.array(cov[var_df.snp.values.isin(pip_y.snp.values)])
 
         # remove cov all zeros
         take_annot = cov.sum(0) > 0
         cov = cov[:, take_annot]
 
-        # skip if no cis SNPs found
-        if cov.shape[1] == 0:
+        # skip if no cis SNPs found or one cis variant
+        if cov.shape[1] == 0 or cov.shape[0] < 2:
             if verbose:
                 log.info(
                     "No annot found for %s over region %s:%s-%s. Skipping.",
@@ -211,14 +254,14 @@ def map_annot_sm(
                 str(rend),
             )
 
-        X = jnp.ones_like(y)
+        X = jnp.ones_like(y)  # intercept
         if ldscore is not None:
             ld = ldscore.iloc[var_df.i.values]
             ld = ld[ld.SNP.isin(pip_y.snp.values)]
             ld = np.array(ld['L2']).reshape(-1, 1)
-            X = np.hstack((X, ld))
+            X = np.hstack((X, ld))  # intercept + cov
 
-        beta, se, p, converged, reg = cov_scan_sm(X, cov, y, model)
+        beta, se, p, converged, reg, enrichment, enrichment_se = cov_scan_sm(X, cov, y, model)
 
         if verbose:
             log.info(
@@ -243,6 +286,8 @@ def map_annot_sm(
         nominal_p.extend(p)
         converged_list.extend(converged)  # whether  model converged
         reg_list.extend(reg)
+        enrichment_list.extend(enrichment)
+        enrichment_se_list.extend(enrichment_se)
 
     # write result
     result_out = [
@@ -255,6 +300,8 @@ def map_annot_sm(
         nominal_p,
         converged_list,
         reg_list,
+        enrichment_list,
+        enrichment_se_list,
     ]
 
     result_df = pd.DataFrame(result_out, index=out_columns).T
@@ -333,7 +380,7 @@ def main(args):
     )
 
     out_df.to_csv(
-        f"{args.out}/chr{args.chr}.{args.celltype}.{args.model}.{args.pip_cs}.tss{args.adj_tss}.annot_res.gz",
+        f"{args.out}/chr{args.chr}.{args.celltype}.{args.model}.{args.pip_cs}.annot_res.gz",
         index=False,
         sep="\t",
     )
