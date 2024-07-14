@@ -192,6 +192,7 @@ def _calc_LD(G, X, wts, ld_wt):
 
     R_wt_df = pd.DataFrame.from_records(R_wt)
 
+    G = (G - jnp.mean(G, axis=0)) / jnp.std(G, axis=0)
     GtG = G.T @ G
     R = GtG / jnp.diag(GtG)
     R_df = pd.DataFrame.from_records(R)
