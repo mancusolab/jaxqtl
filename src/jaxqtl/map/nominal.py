@@ -33,6 +33,7 @@ def map_nominal(
     mode: Optional[str] = None,
     ld_out: str = "./gene",
     ld_wt: bool = True,
+    cond_snp: Optional[str] = None,
 ) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
 
@@ -106,7 +107,14 @@ def map_nominal(
                 str(rend),
             )
 
-        result = test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
+        # add conditional SNP
+        if cond_snp is not None:
+            cond_snp_idx = dat.bim.i[dat.bim.snp == cond_snp].values
+            cond_snp_vec = dat.geno[:, cond_snp_idx]
+            X_add_cov = jnp.append(X, cond_snp_vec, axis=1)
+            result = test(X_add_cov, G, y, family, offset_eta, se_estimator, max_iter, score_test)
+        else:
+            result = test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
 
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":

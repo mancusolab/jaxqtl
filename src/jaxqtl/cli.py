@@ -208,6 +208,7 @@ def main(args):
     argp.add_argument(
         "-express-percent", type=float, default=0.0, help="keep genes with gene expression above (>) this threshold"
     )
+    argp.add_argument("-cond-snp", type=str, default=None, help="conditional SNP id")
     argp.add_argument(
         "--robust",
         action="store_true",
@@ -383,6 +384,7 @@ def main(args):
                 offset_eta=offset_eta,
                 log=log,
                 max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
             )
             write_parqet(outdf=out_df, method="score", out_path=args.out)
         elif args.test_method == "wald":
@@ -396,6 +398,7 @@ def main(args):
                 offset_eta=offset_eta,
                 robust_se=args.robust,
                 max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
             )
             write_parqet(outdf=out_df, method="wald", out_path=args.out)
 
