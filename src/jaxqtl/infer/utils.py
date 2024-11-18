@@ -1,8 +1,7 @@
 from abc import abstractmethod
 from typing import NamedTuple, Tuple
 
-import giddyup as gu
-
+# import giddyup as gu
 import equinox as eqx
 import jax.lax as lax
 import jax.numpy as jnp
@@ -89,33 +88,33 @@ class CommonTest(ScoreTestSNP):
         return zscore, pval, g_score, g_var
 
 
-class RareTest(ScoreTestSNP):
-    def test(self, G, X, glm_null_res) -> Tuple[Array, Array, Array, Array]:
-        """Warning: for now only support Poisson"""
-
-        y_resid = jnp.squeeze(glm_null_res.resid, -1)
-        x_W = X * glm_null_res.glm_wt
-        sqrt_wgt = jnp.sqrt(glm_null_res.glm_wt)
-
-        g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
-        w_g_resid = g_resid * sqrt_wgt
-        g_var = jnp.sum(w_g_resid**2, axis=0)
-
-        g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
-        zscore = g_score / jnp.sqrt(g_var)
-
-        # test spa test
-        cgf = gu.Poisson(glm_null_res.mu.flatten())  # pred_mean is predicted mean from GLM
-
-        def _spa(_, jdx):
-            pvalue_j = gu.saddlepoint_pvalue(g_score[jdx], g_resid[:, jdx], cgf)
-            return None, pvalue_j
-
-        _, pval = lax.scan(_spa, None, jnp.arange(len(zscore)))  # p is num snps
-
-        # import numpy as np; import jax; jax.debug.breakpoint()
-
-        return zscore, pval, g_score, g_var
+# class RareTest(ScoreTestSNP):
+#     def test(self, G, X, glm_null_res) -> Tuple[Array, Array, Array, Array]:
+#         """Warning: for now only support Poisson"""
+#
+#         y_resid = jnp.squeeze(glm_null_res.resid, -1)
+#         x_W = X * glm_null_res.glm_wt
+#         sqrt_wgt = jnp.sqrt(glm_null_res.glm_wt)
+#
+#         g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
+#         w_g_resid = g_resid * sqrt_wgt
+#         g_var = jnp.sum(w_g_resid**2, axis=0)
+#
+#         g_score = (g_resid * glm_null_res.glm_wt).T @ y_resid
+#         zscore = g_score / jnp.sqrt(g_var)
+#
+#         # test spa test
+#         cgf = gu.Poisson(glm_null_res.mu.flatten())  # pred_mean is predicted mean from GLM
+#
+#         def _spa(_, jdx):
+#             pvalue_j = gu.saddlepoint_pvalue(g_score[jdx], g_resid[:, jdx], cgf)
+#             return None, pvalue_j
+#
+#         _, pval = lax.scan(_spa, None, jnp.arange(len(zscore)))  # p is num snps
+#
+#         # import numpy as np; import jax; jax.debug.breakpoint()
+#
+#         return zscore, pval, g_score, g_var
 
 
 class HypothesisTest(eqx.Module):

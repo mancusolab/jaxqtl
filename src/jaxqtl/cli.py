@@ -14,7 +14,7 @@ from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
-from jaxqtl.infer.utils import CommonTest, RareTest, ScoreTest, WaldTest
+from jaxqtl.infer.utils import CommonTest, ScoreTest, WaldTest  # , RareTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -373,7 +373,8 @@ def main(args):
     elif args.mode == "nominal":
         if args.test_method == "score":
             # only work for Poisson
-            score_test_func = RareTest() if args.rare_snp else CommonTest()
+            # score_test_func = RareTest() if args.rare_snp else CommonTest()
+            score_test_func = CommonTest()
             out_df = map_nominal(
                 dat,
                 family=family,
