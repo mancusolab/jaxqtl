@@ -395,7 +395,7 @@ def main(args):
                 acat_p = jnp.append(acat_p, _ACAT(pvec))
 
             out_cis['pval_acat'] = acat_p
-            write_parqet(outdf=out_cis, method="score", out_path=args.out)
+            out_cis.to_csv(args.out + ".cis_score_acat.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal(
                 dat,
@@ -417,7 +417,7 @@ def main(args):
                 acat_p = jnp.append(acat_p, _ACAT(pvec))
 
             out_cis['pval_acat'] = acat_p
-            write_parqet(outdf=out_df, method="wald", out_path=args.out)
+            out_cis.to_csv(args.out + ".cis_wald_acat.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "nominal":
         if args.test_method == "score":
