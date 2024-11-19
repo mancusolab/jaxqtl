@@ -2,6 +2,8 @@ from typing import NamedTuple, Optional, Tuple
 
 import pandas as pd
 
+import jax.scipy as sp
+
 from jax import numpy as jnp
 from jax._src.basearray import ArrayLike
 from jaxtyping import Array
@@ -86,3 +88,63 @@ def _setup_G_y(
     y = dat.pheno[gene_name]  # __getitem__
 
     return G, jnp.array(y), var_df
+
+
+def _ACAT(pvalues: ArrayLike, weights: Optional[ArrayLike] = None) -> Array:
+    '''acat_test()
+    # ref: https://gist.github.com/ryananeff/c66cdf086979b13e855f2c3d0f3e54e1
+    Aggregated Cauchy Assocaition Test
+    A p-value combination method using the Cauchy distribution.
+
+    Inspired by: https://github.com/yaowuliu/ACAT/blob/master/R/ACAT.R
+
+    Author: Ryan Neff
+
+    Inputs:
+        pvalues: <list or numpy array>
+            The p-values you want to combine.
+        weights: <list or numpy array>, default=None
+            The weights for each of the p-values. If None, equal weights are used.
+
+    Returns:
+        pval: <float>
+            The ACAT combined p-value.
+    '''
+    if any(jnp.isnan(pvalues)):
+        raise Exception("Cannot have NAs in the p-values.")
+    if any([(i > 1) | (i < 0) for i in pvalues]):
+        raise Exception("P-values must be between 0 and 1.")
+    if any([i == 1 for i in pvalues]) & any([i == 0 for i in pvalues]):
+        raise Exception("Cannot have both 0 and 1 p-values.")
+    if any([i == 0 for i in pvalues]):
+        print("Warn: p-values are exactly 0.")
+        return jnp.array([0])
+    if any([i == 1 for i in pvalues]):
+        print("Warn: p-values are exactly 1.")
+        return jnp.array([1])
+    if weights is None:
+        weights = [1 / len(pvalues) for i in pvalues]
+    elif len(weights) != len(pvalues):
+        raise Exception("Length of weights and p-values differs.")
+    elif any([i < 0 for i in weights]):
+        raise Exception("All weights must be positive.")
+    else:
+        weights = [i / len(weights) for i in weights]
+
+    pvalues = jnp.array(pvalues)
+    weights = jnp.array(weights)
+
+    if any([i < 1e-16 for i in pvalues]) is False:
+        cct_stat = sum(weights * jnp.tan((0.5 - pvalues) * jnp.pi))
+    else:
+        is_small = [i < (1e-16) for i in pvalues]
+        is_large = [i >= (1e-16) for i in pvalues]
+        cct_stat = sum((weights[is_small] / pvalues[is_small]) / jnp.pi)
+        cct_stat += sum(weights[is_large] * jnp.tan((0.5 - pvalues[is_large]) * jnp.pi))
+
+    if cct_stat > 1e15:
+        pval = (1 / cct_stat) / jnp.pi
+    else:
+        pval = 1 - sp.stats.cauchy.cdf(cct_stat)
+
+    return pval

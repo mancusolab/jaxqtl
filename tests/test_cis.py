@@ -9,7 +9,7 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.utils import RareTest, ScoreTest, WaldTest
+from jaxqtl.infer.utils import ScoreTest, WaldTest  # , RareTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -17,6 +17,7 @@ from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import map_nominal
+from jaxqtl.map.utils import _ACAT
 
 
 pd.set_option("display.max_columns", 500)  # see cis output
@@ -125,13 +126,25 @@ def test_cis_waldtest():
 # out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
 # # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
-out_pois = map_nominal(
-    dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest(), score_test=RareTest(), max_iter=1000
-)
+# out_pois = map_nominal(
+#     dat, family=Poisson(), offset_eta=offset_eta, test=ScoreTest(), score_test=CommonTest(), max_iter=1000
+# )
 
 out_nb = map_nominal(
-    dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="estimate_ld_only", max_iter=600
+    dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="nominal", max_iter=600
 )
+
+pvec = jnp.array(out_nb.pval_nominal)
+pvec = pvec[~jnp.isnan(pvec)]
+
+out_cis = out_nb.loc[out_nb.groupby('phenotype_id').pval_nominal.idxmin()]
+acat_p = jnp.array([])
+for gene in out_cis.phenotype_id.unique():
+    pvec = jnp.array(out_nb.loc[out_nb['phenotype_id'] == gene].pval_nominal)
+    pvec = pvec[~jnp.isnan(pvec)]
+    acat_p = jnp.append(acat_p, _ACAT(pvec))
+
+out_cis['pval_acat'] = acat_p
 
 out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=ScoreTest(), max_iter=600)
 

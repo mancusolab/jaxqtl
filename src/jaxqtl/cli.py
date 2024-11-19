@@ -22,7 +22,7 @@ from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log, get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
-from jaxqtl.map.utils import _get_geno_info, _setup_G_y
+from jaxqtl.map.utils import _ACAT, _get_geno_info, _setup_G_y
 
 
 def cis_scan_score_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0):
@@ -186,7 +186,7 @@ def main(args):
     argp.add_argument(
         "-mode",
         type=str,
-        choices=["nominal", "cis", "fitnull", "covar", "trans", "estimate_ld_only"],
+        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
         help="Cis or nominal mapping",
     )
     argp.add_argument(
@@ -369,6 +369,55 @@ def main(args):
                 max_iter=args.max_iter,
             )
             outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
+
+    elif args.mode == "cis_acat":
+        if args.test_method == "score":
+            # only work for Poisson
+            # score_test_func = RareTest() if args.rare_snp else CommonTest()
+            score_test_func = CommonTest()
+            out_df = map_nominal(
+                dat,
+                family=family,
+                test=ScoreTest(),
+                score_test=score_test_func,
+                standardize=args.standardize,
+                window=args.window,
+                offset_eta=offset_eta,
+                log=log,
+                max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
+            )
+            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
+            acat_p = jnp.array([])
+            for gene in out_cis.phenotype_id.unique():
+                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
+                pvec = pvec[~jnp.isnan(pvec)]
+                acat_p = jnp.append(acat_p, _ACAT(pvec))
+
+            out_cis['pval_acat'] = acat_p
+            write_parqet(outdf=out_cis, method="score", out_path=args.out)
+        elif args.test_method == "wald":
+            out_df = map_nominal(
+                dat,
+                test=WaldTest(),
+                family=family,
+                standardize=args.standardize,
+                log=log,
+                window=args.window,
+                offset_eta=offset_eta,
+                robust_se=args.robust,
+                max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
+            )
+            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
+            acat_p = jnp.array([])
+            for gene in out_cis.phenotype_id.unique():
+                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
+                pvec = pvec[~jnp.isnan(pvec)]
+                acat_p = jnp.append(acat_p, _ACAT(pvec))
+
+            out_cis['pval_acat'] = acat_p
+            write_parqet(outdf=out_df, method="wald", out_path=args.out)
 
     elif args.mode == "nominal":
         if args.test_method == "score":
