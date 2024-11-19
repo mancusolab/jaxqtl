@@ -387,6 +387,8 @@ def main(args):
                 max_iter=args.max_iter,
                 cond_snp=args.cond_snp,
             )
+
+            out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
             out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
             acat_p = jnp.array([])
             for gene in out_cis.phenotype_id.unique():
@@ -409,6 +411,8 @@ def main(args):
                 max_iter=args.max_iter,
                 cond_snp=args.cond_snp,
             )
+
+            out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
             out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
             acat_p = jnp.array([])
             for gene in out_cis.phenotype_id.unique():
