@@ -137,8 +137,8 @@ def _ACAT(pvalues: ArrayLike, weights: Optional[ArrayLike] = None) -> Array:
     if any([i < 1e-16 for i in pvalues]) is False:
         cct_stat = sum(weights * jnp.tan((0.5 - pvalues) * jnp.pi))
     else:
-        is_small = [i < (1e-16) for i in pvalues]
-        is_large = [i >= (1e-16) for i in pvalues]
+        is_small = jnp.array([i < (1e-16) for i in pvalues])
+        is_large = jnp.array([i >= (1e-16) for i in pvalues])
         cct_stat = sum((weights.take(is_small) / pvalues.take(is_small)) / jnp.pi)
         cct_stat += sum(weights.take(is_large) * jnp.tan((0.5 - pvalues.take(is_large)) * jnp.pi))
 
