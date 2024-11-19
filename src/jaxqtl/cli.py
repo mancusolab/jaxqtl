@@ -174,17 +174,17 @@ def map_cis_nominal_score_sm(
 
 def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("-geno", type=str, help="Genotype prefix, eg. chr17")
-    argp.add_argument("-covar", type=str, help="Covariate path")
-    argp.add_argument("-add-covar", type=str, help="Covariate path for additional covariates")
-    argp.add_argument("-covar-test", type=str, help="Covariate to test")
-    argp.add_argument("-pheno", type=str, help="Pheno path")
-    argp.add_argument("-model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
-    argp.add_argument("-genelist", type=str, help="Path to gene list (no header)")
-    argp.add_argument("-offset", type=str, help="Path to log offset (no header)")
-    argp.add_argument("-indlist", type=str, help="Path to individual list (no header); default is all")
+    argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr17")
+    argp.add_argument("--covar", type=str, help="Covariate path")
+    argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
+    argp.add_argument("--covar-test", type=str, help="Covariate to test")
+    argp.add_argument("--pheno", type=str, help="Pheno path")
+    argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
+    argp.add_argument("--genelist", type=str, help="Path to gene list (no header)")
+    argp.add_argument("--offset", type=str, help="Path to log offset (no header)")
+    argp.add_argument("--indlist", type=str, help="Path to individual list (no header); default is all")
     argp.add_argument(
-        "-mode",
+        "--mode",
         type=str,
         choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
         help="Cis or nominal mapping",
@@ -196,19 +196,19 @@ def main(args):
         choices=["cpu", "gpu", "tpu"],
         help="platform, cpu, gpu or tpu",
     )
-    argp.add_argument("-test-method", type=str, choices=["wald", "score"], help="Wald or score test")
-    argp.add_argument("-window", type=int, default=500000)
-    argp.add_argument("-nperm", type=int, default=1000)
-    argp.add_argument("-max-iter", type=int, default=1000)
+    argp.add_argument("--test-method", type=str, choices=["wald", "score"], help="Wald or score test")
+    argp.add_argument("--window", type=int, default=500000)
+    argp.add_argument("--nperm", type=int, default=1000)
+    argp.add_argument("--max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
-    argp.add_argument("-addpc", type=int, default=2, help="Add expression PCs")
+    argp.add_argument("--addpc", type=int, default=2, help="Add expression PCs")
     argp.add_argument(
-        "-prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
+        "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
     )
     argp.add_argument(
-        "-express-percent", type=float, default=0.0, help="keep genes with gene expression above (>) this threshold"
+        "--express-percent", type=float, default=0.0, help="keep genes with gene expression above (>) this threshold"
     )
-    argp.add_argument("-cond-snp", type=str, default=None, help="conditional SNP id")
+    argp.add_argument("--cond-snp", type=str, default=None, help="conditional SNP id")
     argp.add_argument(
         "--robust",
         action="store_true",
@@ -257,7 +257,7 @@ def main(args):
         default=False,
         help="Verbose for logger",
     )
-    argp.add_argument("-out", type=str, help="out file prefix")
+    argp.add_argument("--out", "-o", type=str, help="out file prefix")
 
     args = argp.parse_args(args)  # a list a strings
 
