@@ -180,8 +180,13 @@ def main(args):
     argp.add_argument("--covar-test", type=str, help="Covariate to test")
     argp.add_argument("--pheno", type=str, help="Pheno path")
     argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
-    argp.add_argument("--genelist", type=str, help="Path to gene list (no header)")
-    argp.add_argument("--offset", type=str, help="Path to log offset (no header)")
+    argp.add_argument("--genelist", type=str, default=None, help="Path to gene list (no header)")
+    argp.add_argument(
+        "--offset",
+        type=str,
+        default=None,
+        help="Path to log offset (no header) in tsv format with two columns: iid and log(library size)",
+    )
     argp.add_argument("--indlist", type=str, help="Path to individual list (no header); default is all")
     argp.add_argument(
         "--mode",
@@ -221,6 +226,7 @@ def main(args):
         default=False,
         help="Test for rare variants using SPA method",
     )
+    argp.add_argument("--autosomal-only", action="store_true", default=False, help="Test for only autosomal chr")
     argp.add_argument(
         "--ld-wt",
         action="store_true",
@@ -261,7 +267,7 @@ def main(args):
 
     args = argp.parse_args(args)  # a list a strings
 
-    jax.config.update("jax_enable_x64", True)
+    jax.config.update("jax_enable_x64", True)  # complaints if using TPU
     jax.config.update("jax_platform_name", args.platform)
 
     log = get_logger(__name__, args.out)
@@ -288,24 +294,28 @@ def main(args):
 
     covar = covar_reader(args.covar, args.add_covar, args.covar_test)
 
-    genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
+    if args.genelist is not None:
+        genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
+    else:
+        genelist = None
 
     if args.indlist is not None:
         indList = pd.read_csv(args.indlist, header=None, sep="\t").iloc[:, 0].to_list()
     else:
         indList = None
 
-    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=True, ind_list=indList)
+    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=args.autosomal_only, ind_list=indList)
 
-    # before filter gene list, calculate library size and set offset
+    # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset is None:
         total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
         offset_eta = jnp.log(total_libsize)
     else:
-        offset_eta = pd.read_csv(args.offset, header=None, sep="\t").iloc[:, 0]
-        offset_eta = jnp.array(offset_eta).reshape((len(offset_eta), 1))
+        offset_eta = pd.read_csv(args.offset, names=['iid', 'eta'], sep="\t", index_col="iid")
+        offset_eta = offset_eta.loc[offset_eta.index.isin(dat.pheno.count.index)].sort_index()
+        offset_eta = jnp.array(offset_eta)
 
-    # filter genes with no expressions at all
+    # filter out genes with no expressions at all
     dat.filter_gene(geneexpr_percent_cutoff=0.0)
 
     # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl

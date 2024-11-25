@@ -119,7 +119,7 @@ def create_readydata(
     pheno: pd.DataFrame,
     covar: pd.DataFrame,
     log=None,
-    autosomal_only: bool = True,
+    autosomal_only: bool = False,
     ind_list: Optional[List] = None,
 ) -> ReadyDataState:
     """Read genotype, phenotype and covariates, including interaction terms

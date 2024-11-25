@@ -17,7 +17,6 @@ from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import map_nominal
-from jaxqtl.map.utils import _ACAT
 
 
 pd.set_option("display.max_columns", 500)  # see cis output
@@ -29,7 +28,8 @@ covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
 pheno_path = "../example/local/NK_new/NK.chr22.bed.gz"
 # genelist_path = "../example/local/NK_new/ENSG00000198125"
 genelist_path = "../example/data/genelist_spatest.tsv"
-
+# offset_path = "../example/local/NK_new/log_libsize.tsv"
+offset_path = None
 log = get_log()
 
 # raw genotype data and impute for genotype data
@@ -60,8 +60,13 @@ dat.add_covar_pheno_PC(k=2, add_covar=None)
 gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 
 # before filter gene list, calculate library size and set offset
-total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-offset_eta = jnp.log(total_libsize)
+if offset_path is None:
+    total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+    offset_eta = jnp.log(total_libsize)
+else:
+    offset_eta = pd.read_csv("../example/local/NK_new/log_libsize.tsv", names=['iid', 'eta'], sep="\t", index_col="iid")
+    offset_eta = offset_eta.loc[offset_eta.index.isin(dat.pheno.count.index)].sort_index()
+    offset_eta = jnp.array(offset_eta)
 
 # dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 dat.filter_gene(gene_list=["ENSG00000273289"])
@@ -109,18 +114,18 @@ def test_cis_waldtest():
 # map_intercept = fit_intercept_only(dat, family=Poisson(), offset_eta=offset_eta, robust_se=False)
 
 # ~4s
-# start = timeit.default_timer()
-# mapcis_out_score_nb = map_cis(
-#     dat,
-#     family=Poisson(),
-#     test=ScoreTest(),
-#     offset_eta=offset_eta,
-#     n_perm=983,
-#     compute_qvalue=False,
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
-# # mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+start = timeit.default_timer()
+mapcis_out_score_nb = map_cis(
+    dat,
+    family=Poisson(),
+    test=ScoreTest(),
+    offset_eta=offset_eta,
+    n_perm=200,
+    compute_qvalue=False,
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
+# mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 
 # out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
@@ -133,18 +138,6 @@ def test_cis_waldtest():
 out_nb = map_nominal(
     dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), mode="nominal", max_iter=600
 )
-
-pvec = jnp.array(out_nb.pval_nominal)
-pvec = pvec[~jnp.isnan(pvec)]
-
-out_cis = out_nb.loc[out_nb.groupby('phenotype_id').pval_nominal.idxmin()]
-acat_p = jnp.array([])
-for gene in out_cis.phenotype_id.unique():
-    pvec = jnp.array(out_nb.loc[out_nb['phenotype_id'] == gene].pval_nominal)
-    pvec = pvec[~jnp.isnan(pvec)]
-    acat_p = jnp.append(acat_p, _ACAT(pvec))
-
-out_cis['pval_acat'] = acat_p
 
 out_lm = map_nominal(dat, family=Gaussian(), offset_eta=0.0, test=ScoreTest(), max_iter=600)
 

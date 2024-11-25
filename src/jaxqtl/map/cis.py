@@ -82,7 +82,7 @@ def map_cis(
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
     robust_se: bool = False,
-    compute_qvalue: bool = True,
+    compute_qvalue: bool = False,
     max_iter: int = 1000,
     verbose: bool = True,
     log=None,
