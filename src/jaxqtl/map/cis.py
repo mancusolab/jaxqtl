@@ -13,7 +13,7 @@ from jaxtyping import Array
 from ..families.distribution import ExponentialFamily
 from ..infer.permutation import BetaPerm, InferBeta, InferBetaGLM
 from ..infer.stderr import ErrVarEstimation, FisherInfoError, HuberError
-from ..infer.utils import CisGLMState, HypothesisTest, ScoreTest
+from ..infer.utils import CisGLMState, CommonTest, HypothesisTest, ScoreTest, WaldTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from ..post.qvalue import add_qvalues
@@ -211,7 +211,22 @@ def map_cis(
                 str(rend),
             )
 
-        result_out = _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df)
+        result_out = _prepare_cis_result(
+            G,
+            chrom,
+            gene_name,
+            key,
+            random_tiebreak,
+            result,
+            start_min,
+            var_df,
+            X,
+            y,
+            family,
+            offset_eta,
+            se_estimator,
+            max_iter,
+        )
         results.append(result_out)
 
     # filter results based on user specification (e.g., report all, report top, etc)
@@ -223,7 +238,22 @@ def map_cis(
     return result_df
 
 
-def _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start_min, var_df):
+def _prepare_cis_result(
+    G,
+    chrom,
+    gene_name,
+    key,
+    random_tiebreak,
+    result,
+    start_min,
+    var_df,
+    X,
+    y,
+    family,
+    offset_eta,
+    se_estimator,
+    max_iter,
+):
     """Get lead SNPs and their information
 
     :param G: genotype array
@@ -247,6 +277,14 @@ def _prepare_cis_result(G, chrom, gene_name, key, random_tiebreak, result, start
     tss_distance = snp_pos - start_min
     # combine lead hit info and gene meta data
     num_var_cis = G.shape[1]
+
+    # fit full eQTL model for lead SNP
+    test = WaldTest()
+    g = G[:, vdx]
+    wald_res = test(X, g.reshape(len(g), 1), y, family, offset_eta, se_estimator, max_iter, CommonTest())
+    row[6] = wald_res.beta.item()
+    row[7] = wald_res.se.item()
+
     result_out = [
         gene_name,
         chrom,
