@@ -174,51 +174,70 @@ def map_cis_nominal_score_sm(
 
 def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr17")
+    argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr1")
     argp.add_argument("--covar", type=str, help="Covariate path")
     argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
     argp.add_argument("--covar-test", type=str, help="Covariate to test")
     argp.add_argument("--pheno", type=str, help="Pheno path")
-    argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="Model")
-    argp.add_argument("--genelist", type=str, default=None, help="Path to gene list (no header)")
+    argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="eQTL model")
+    argp.add_argument(
+        "--genelist",
+        type=str,
+        default=None,
+        help="""Path to gene list (no header);
+                      if not provided, jaxQTL will run for all genes in pheno file""",
+    )
     argp.add_argument(
         "--offset",
         type=str,
         default=None,
-        help="Path to log offset (no header) in tsv format with two columns: iid and log(library size)",
+        help="Path to log offset in tsv format (no header) with two columns: iid and log(library size)",
     )
     argp.add_argument("--indlist", type=str, help="Path to individual list (no header); default is all")
     argp.add_argument(
         "--mode",
         type=str,
         choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
-        help="Cis or nominal mapping",
+        help="""cis: eQTL mapping to identify genes with at least one eQTL (default uses permutation to calibrate pvals);
+                nominal: provides association statistics for all pairs of cis-SNP-gene""",
     )
     argp.add_argument(
         "--platform",
         "-p",
         type=str,
         choices=["cpu", "gpu", "tpu"],
-        help="platform, cpu, gpu or tpu",
+        default="cpu",
+        help="platform: cpu, gpu or tpu",
     )
-    argp.add_argument("--test-method", type=str, choices=["wald", "score"], help="Wald or score test")
-    argp.add_argument("--window", type=int, default=500000)
+    argp.add_argument(
+        "--test-method",
+        type=str,
+        choices=["wald", "score"],
+        help="""Wald or score test;
+                              We recommend score test for cis mapping and wald for nominal mapping """,
+    )
+    argp.add_argument("--window", type=int, default=500000, help="one sided window size (bps) with respect to TSS")
     argp.add_argument("--nperm", type=int, default=1000)
     argp.add_argument("--max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
-    argp.add_argument("--addpc", type=int, default=2, help="Add expression PCs")
+    argp.add_argument(
+        "--addpc", type=int, default=2, help="Add expression PCs; set this to 0 to disable PC calculation"
+    )
     argp.add_argument(
         "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
     )
     argp.add_argument(
-        "--express-percent", type=float, default=0.0, help="keep genes with gene expression above (>) this threshold"
+        "--express-percent",
+        type=float,
+        default=0.0,
+        help="keep genes with gene expression above (>) this threshold; default will exclude genes not expressed at all.",
     )
     argp.add_argument("--cond-snp", type=str, default=None, help="conditional SNP id")
     argp.add_argument(
         "--robust",
         action="store_true",
         default=False,
-        help="Robust SE",
+        help="Robust SE for GLM",
     )
     argp.add_argument(
         "--rare-snp",
