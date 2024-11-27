@@ -117,7 +117,7 @@ def test_cis_waldtest():
 start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
-    family=Poisson(),
+    family=NegativeBinomial(),
     test=ScoreTest(),
     offset_eta=offset_eta,
     n_perm=200,

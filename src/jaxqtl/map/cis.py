@@ -11,9 +11,10 @@ from jax.typing import ArrayLike
 from jaxtyping import Array
 
 from ..families.distribution import ExponentialFamily
+from ..infer.glm import GLM
 from ..infer.permutation import BetaPerm, InferBeta, InferBetaGLM
 from ..infer.stderr import ErrVarEstimation, FisherInfoError, HuberError
-from ..infer.utils import CisGLMState, CommonTest, HypothesisTest, ScoreTest, WaldTest
+from ..infer.utils import CisGLMState, HypothesisTest, ScoreTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from ..post.qvalue import add_qvalues
@@ -279,11 +280,21 @@ def _prepare_cis_result(
     num_var_cis = G.shape[1]
 
     # fit full eQTL model for lead SNP
-    test = WaldTest()
+    glm = GLM(family=family, max_iter=max_iter)
     g = G[:, vdx]
-    wald_res = test(X, g.reshape(len(g), 1), y, family, offset_eta, se_estimator, max_iter, CommonTest())
-    row[6] = wald_res.beta.item()
-    row[7] = wald_res.se.item()
+    M = jnp.hstack((X, g[:, jnp.newaxis]))
+    eta, alpha_n = glm.calc_eta_and_dispersion(M, y, offset_eta)
+    glmstate = glm.fit(
+        M,
+        y,
+        offset_eta=offset_eta,
+        init=eta,
+        alpha_init=alpha_n,
+        se_estimator=se_estimator,
+    )
+
+    row[6] = glmstate.beta[-1].item()
+    row[7] = glmstate.se[-1].item()
 
     result_out = [
         gene_name,
