@@ -78,6 +78,7 @@ def calculate_qval(
 ) -> Tuple[np.ndarray, np.ndarray]:
     """Calculate q value"""
 
+    # TODO: fix shape if remove NA values; need return the same shape as input p
     p = p[~np.isnan(p)]  # remove NA values
     original_shape = p.shape
 
