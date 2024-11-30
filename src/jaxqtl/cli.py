@@ -265,6 +265,12 @@ def main(args):
         help="Add q value",
     )
     argp.add_argument(
+        "--no-offset",
+        action="store_true",
+        default=False,
+        help="remove offset for count-based models",
+    )
+    argp.add_argument(
         "--standardize",
         action="store_true",
         default=False,
@@ -341,7 +347,7 @@ def main(args):
     if args.addpc > 0:
         dat.add_covar_pheno_PC(k=args.addpc, add_covar=args.add_covar)
 
-    if isinstance(family, Gaussian):
+    if isinstance(family, Gaussian) or args.no_offset is True:
         # dat.transform_y(mode='log1p')  # log1p
         # note: use pre-processed file as in tensorqtl
         offset_eta = jnp.zeros_like(offset_eta)
