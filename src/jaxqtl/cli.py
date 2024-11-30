@@ -386,6 +386,7 @@ def main(args):
                 compute_qvalue=args.qvalue,
                 log=log,
                 max_iter=args.max_iter,
+                outname=args.out,
             )
             outdf_cis_score.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -402,6 +403,7 @@ def main(args):
                 compute_qvalue=args.qvalue,
                 log=log,
                 max_iter=args.max_iter,
+                outname=args.out,
             )
             outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 

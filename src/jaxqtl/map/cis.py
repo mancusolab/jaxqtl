@@ -88,6 +88,7 @@ def map_cis(
     max_iter: int = 1000,
     verbose: bool = True,
     log=None,
+    outname=None,
 ) -> pd.DataFrame:
     """Cis eQTL mapping for each gene, report lead variant
 
@@ -229,6 +230,7 @@ def map_cis(
             offset_eta,
             se_estimator,
             max_iter,
+            outname,
         )
         results.append(result_out)
 
@@ -256,6 +258,7 @@ def _prepare_cis_result(
     offset_eta,
     se_estimator,
     max_iter,
+    outname,
 ):
     """Get lead SNPs and their information
 
@@ -297,6 +300,10 @@ def _prepare_cis_result(
 
     row[6] = glmstate.beta[-1].item()
     row[7] = glmstate.se[-1].item()
+
+    out = pd.DataFrame()
+    out['obs'], out['pred'] = y.flatten(), glmstate.mu.flatten()
+    out.to_csv(f"{outname}_{gene_name}_leadsnp_y_pred.tsv.gz", index=False, sep="\t")
 
     result_out = [
         gene_name,
