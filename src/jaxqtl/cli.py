@@ -384,6 +384,7 @@ def main(args):
                 offset_eta=offset_eta,
                 n_perm=args.nperm,
                 compute_qvalue=args.qvalue,
+                robust_se=args.robust,
                 log=log,
                 max_iter=args.max_iter,
             )
@@ -419,6 +420,7 @@ def main(args):
                 window=args.window,
                 offset_eta=offset_eta,
                 log=log,
+                robust_se=args.robust,
                 max_iter=args.max_iter,
                 cond_snp=args.cond_snp,
             )
@@ -472,6 +474,7 @@ def main(args):
                 window=args.window,
                 offset_eta=offset_eta,
                 log=log,
+                robust_se=args.robust,
                 max_iter=args.max_iter,
                 cond_snp=args.cond_snp,
             )
@@ -501,8 +504,10 @@ def main(args):
             log=log,
             mode=args.mode,
             ld_out=args.out,
+            robust_se=args.robust,
             max_iter=args.max_iter,
             ld_wt=args.ld_wt,
+            cond_snp=args.cond_snp,
         )
         log.info("write out LD matrix.")
 
@@ -519,6 +524,7 @@ def main(args):
                 robust_se=args.robust,
                 log=log,
                 max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -532,6 +538,7 @@ def main(args):
                 robust_se=args.robust,
                 log=log,
                 max_iter=args.max_iter,
+                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
 
@@ -547,6 +554,7 @@ def main(args):
                 log=log,
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
+                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -560,6 +568,7 @@ def main(args):
                 log=log,
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
+                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
 

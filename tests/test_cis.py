@@ -69,7 +69,7 @@ else:
     offset_eta = jnp.array(offset_eta)
 
 # dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
-dat.filter_gene(gene_list=["ENSG00000273289"])
+dat.filter_gene(gene_list=["ENSG00000169575"])
 
 # run mapping #
 
@@ -128,7 +128,7 @@ print("Time: ", stop - start)
 # mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 
-# out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest())
+out_nb = map_nominal(dat, family=NegativeBinomial(), offset_eta=offset_eta, test=ScoreTest(), robust_se=True)
 # # out_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 # out_pois = map_nominal(

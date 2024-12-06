@@ -29,7 +29,7 @@ def map_nominal(
     window: int = 500000,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
+    robust_se: bool = False,  # TODO: change this to false by default
     max_iter: int = 1000,
     mode: Optional[str] = None,
     ld_out: str = "./gene",
