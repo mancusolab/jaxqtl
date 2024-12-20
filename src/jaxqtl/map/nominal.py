@@ -121,9 +121,10 @@ def map_nominal(
         if mode == "estimate_ld_only":
             # only available for one gene
             R_wt_df, R_df = _calc_LD(G, X, result.weights, ld_wt)
-            R_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
-            # suffix = "_wt" if ld_wt else ""
-            # R_wt_df.to_csv(ld_out + ".ld" + suffix + ".tsv.gz", sep="\t", index=False, header=False)
+            if ld_wt:
+                R_wt_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
+            else:
+                R_df.to_csv(ld_out + ".ld.wt.tsv.gz", sep="\t", index=False, header=False)
             del R_wt_df, R_df
             continue
 
