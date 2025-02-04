@@ -53,6 +53,7 @@ class SimResState(NamedTuple):
     bulk_express_percent: Array
     bulk_libsize_valid: Array
     h2obs: Array
+    alpha: Array
 
 
 def sim_data(
@@ -81,9 +82,11 @@ def sim_data(
 
     # bootstrap for nobs number of individuals
     sample_covar_nobs = sample_covar.sample(n=nobs, replace=True, random_state=seed)
-    sample_covar_nobs["iid"] = np.arange(1, sample_covar_nobs.shape[0] + 1)
+    sample_covar_nobs.loc[:, 'iid'] = np.arange(1, sample_covar_nobs.shape[0] + 1)
 
-    X = jnp.column_stack((X, jnp.array(sample_covar_nobs[['age', 'sex']])))
+    X_cov = jnp.array(sample_covar_nobs[['age', 'sex']])
+    X_cov = (X_cov - X_cov.mean(axis=0)) / X_cov.std(axis=0)
+    X = jnp.column_stack((X, X_cov))
 
     beta_shape = (p, 1)
     beta = jnp.ones(beta_shape)
@@ -93,50 +96,47 @@ def sim_data(
     beta_covar = jnp.zeros((num_covar, 1))  # fix covariate effect to be 0
     beta = beta.at[1 : p - 1].set(beta_covar)
 
-    # merge for individual cell library size in sampled individuals
-    libsize = libsize.merge(sample_covar_nobs[['individual', 'iid']], 'right', on="individual")
-
     # geno in shape of nx1
     if g is None:
         key, snp_key = rdm.split(key, 2)
         g = rdm.binomial(snp_key, 2, maf, shape=(nobs, 1))  # genotype (0,1,2)
 
     X = jnp.column_stack((X, g))  # include genotype at last column
-    X = (X - X.mean()) / X.std()
-    X = X.at[:, 0].set(jnp.ones((X.shape[0],)))
+
+    key, g_key = rdm.split(key, 2)
+    g_beta = rdm.normal(g_key) * np.sqrt(V_a / m_causal) if V_a > 0 else 0.0
+    beta = beta.at[-1].set(g_beta)  # put genotype as last column
+
+    # sample random effect of each individual
+    key, re_key = rdm.split(key, 2)
+    bi = rdm.normal(re_key, (nobs, 1)) * np.sqrt(V_re) if V_re > 0 else 0
+
+    # merge for individual cell library size in sampled individuals
+    libsize = libsize.merge(sample_covar_nobs[['individual', 'iid']], 'right', on="individual")
 
     sample_covar_nobs.drop(['age', 'sex'], axis=1, inplace=True)
     covar_std = pd.DataFrame({'iid': np.arange(1, sample_covar_nobs.shape[0] + 1), 'age': X[:, 1], 'sex': X[:, 2]})
     sample_covar_nobs = covar_std.merge(sample_covar_nobs, 'right', on="iid")
 
+    # standardize age and sex
     libsize.drop(['age', 'sex'], axis=1, inplace=True)
     libsize = covar_std.merge(libsize, 'right', on="iid")
 
-    key, g_key = rdm.split(key, 2)
-    g_beta = rdm.normal(g_key) * np.sqrt(V_a / m_causal) if V_a > 0 else 0.0
-
-    # rescale to match specified V_a (!don't need this right now)
-    # s2g = jnp.var(g * g_beta)
-    # g_beta = g_beta * jnp.sqrt(V_a / s2g)
-
-    beta = beta.at[-1].set(g_beta)  # put genotype as last column
-    # sample random effect of each individual
-    key, re_key = rdm.split(key, 2)
-    bi = rdm.normal(re_key, (nobs,)) * np.sqrt(V_re) if V_re > 0 else 0
-
     # broad cast individual level eta to cell level
-    eta_df = pd.DataFrame({'eta': (X @ beta).ravel(), 'iid': np.arange(1, sample_covar_nobs.shape[0] + 1), 'bi': bi})
-    eta_df['iid'] = sample_covar_nobs['iid'].values
+    eta_df = pd.DataFrame({'eta': (X @ beta + bi).ravel(), 'iid': np.arange(1, sample_covar_nobs.shape[0] + 1)})
+    eta_df.loc[:, 'iid'] = sample_covar_nobs['iid'].values
     eta_df = eta_df.merge(libsize, 'right', on="iid")
 
     # compute eta_i + bi + log(offset_ij)
-    eta = jnp.array(eta_df[['eta', 'bi', 'log_offset']]).sum(axis=1)
+    # eta_df['log_offset'] = 0 # set offset to zero
+    eta = jnp.array(eta_df[['eta', 'log_offset']]).sum(axis=1)
     mu = family.glink.inverse(eta)
 
     # for each individual mu_i, broadcast to num_cells (Poisson model)
     key, y_key = rdm.split(key, 2)
     y = rdm.poisson(y_key, mu)  # long vector of individual cell
-    y = y.reshape(len(y), 1)
+    y = y.reshape(-1, 1)
+
     h2obs = _calc_h2obs(V_a, V_disp, V_re, baseline_mu)
 
     return SimState(jnp.array(X), jnp.array(y), jnp.array(beta), eta_df, h2obs)
@@ -167,6 +167,7 @@ def run_sim(
     G: Optional[ArrayLike] = None,  # shape of num_sim x n
     sample_covar: Optional[ArrayLike] = None,  # nxp
     num_sim: int = 1000,
+    write_sc: bool = True,
     out_path: Optional[str] = None,  # write out single cell data in saigeqtl format
 ) -> SimResState:
     pval_nb_wald = jnp.array([])
@@ -185,6 +186,7 @@ def run_sim(
     bulk_mean_ct_list = jnp.array([])
     bulk_express_percent_list = jnp.array([])
     bulk_libsize_valid_list = jnp.array([])
+    alpha_list = jnp.array([])
 
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
@@ -211,30 +213,32 @@ def run_sim(
 
             # create pheno for saigeqtl
             df_out = sim_scdat[['iid', 'log_offset', 'age', 'sex']]
-            df_out['gene'] = y.ravel()
+            df_out.loc[:, 'libsize'] = jnp.exp(jnp.array(df_out['log_offset']))
+            df_out.loc[:, 'gene'] = y.ravel()
 
             # convert to pseudo-bulk for jaxqtl and linear model
             # create summary statistics for simulated count
-            df_out['libsize'] = jnp.exp(jnp.array(df_out['log_offset']))
-            df_bulk = df_out.groupby(['iid', 'age', 'sex']).agg({'gene': 'sum', 'libsize': 'sum'})
-            df_bulk.reset_index(inplace=True)
+            df_bulk = df_out.groupby(['iid']).agg({'gene': 'sum', 'libsize': 'sum'})
 
             y_bulk = (jnp.array(df_bulk['gene'])).reshape(-1, 1)
-            bulk_offset = (jnp.array(df_bulk['libsize'])).reshape(-1, 1)
 
             all_constant = (y == y[0]).all() | (y_bulk == y_bulk[0]).all()
             loop_idx += 1
 
         # write tsv in saigeqtl input format (for one gene as one replicate)
-        df_out.to_csv(f"{out_path}.pheno{i+1}.tsv.gz", sep="\t", index=False)
+        if write_sc:
+            df_out = df_out[['iid', 'log_offset', 'age', 'sex']]
+            df_out.to_csv(f"{out_path}.pheno{i+1}.tsv.gz", sep="\t", index=False)
 
         sc_mean_ct = y.ravel().mean()
         sc_express_percent = (y.ravel() > 0).mean()
-        sc_libsize_valid = ((y / jnp.array(df_out['libsize']).reshape(-1, 1)) <= 1.0).mean()
+        sc_libsize = jnp.exp(jnp.array(df_out['log_offset'])).reshape(-1, 1)
+        sc_libsize_valid = ((y / sc_libsize) <= 1.0).mean()
 
         bulk_mean_ct = y_bulk.ravel().mean()
         bulk_express_percent = (y_bulk.ravel() > 0).mean()
-        bulk_libsize_valid = (y_bulk / bulk_offset <= 1.0).mean()
+        bulk_libsize = jnp.array(df_bulk['libsize']).reshape(-1, 1)
+        bulk_libsize_valid = (y_bulk / bulk_libsize <= 1.0).mean()
 
         sc_mean_ct_list = jnp.append(sc_mean_ct_list, sc_mean_ct)
         sc_express_percent_list = jnp.append(sc_express_percent_list, sc_express_percent)
@@ -243,7 +247,7 @@ def run_sim(
         bulk_express_percent_list = jnp.append(bulk_express_percent_list, bulk_express_percent)
         bulk_libsize_valid_list = jnp.append(bulk_libsize_valid_list, bulk_libsize_valid)
 
-        log_offset = jnp.log(bulk_offset)
+        log_offset = jnp.log(bulk_libsize)
         jaxqtl_pois = GLM(family=Poisson())
         jaxqtl_nb = GLM(family=NegativeBinomial())
         jaxqtl_lm = GLM(family=Gaussian())
@@ -289,6 +293,7 @@ def run_sim(
 
         glm_state_nb = jaxqtl_nb.fit(X_cov, y_bulk, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset)
         _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_nb)
+        alpha_list = jnp.append(alpha_list, glm_state_nb.alpha)
 
         pval_nb_score = jnp.append(pval_nb_score, pval)
 
@@ -349,13 +354,15 @@ def run_sim(
         bulk_mean_ct=bulk_mean_ct_list,
         bulk_express_percent=bulk_express_percent_list,
         bulk_libsize_valid=bulk_libsize_valid_list,
-        h2obs=np.repeat(h2obs, num_sim),
+        h2obs=jnp.repeat(h2obs, num_sim),
+        alpha=alpha_list,
     )
 
 
 def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("--geno", type=str, help="Genotype plink prefix, eg. chr17")
+    argp.add_argument("--CT", type=str, help="cell type")
     argp.add_argument("--libsize-path", type=str, help="path to read in library size, with header")
     argp.add_argument("--nobs", type=int, help="Sample size")
     argp.add_argument("--m-causal", type=int, default=1, help="Number of causal variants")
@@ -371,6 +378,12 @@ def main(args):
     argp.add_argument("--fwer", type=float, default=0.05)
     argp.add_argument(
         "--verbose",
+        action="store_true",
+        default=False,
+        help="Verbose for logger",
+    )
+    argp.add_argument(
+        "--write-sc",
         action="store_true",
         default=False,
         help="Verbose for logger",
@@ -429,10 +442,18 @@ def main(args):
         G=G,
         sample_covar=sample_covar,
         num_sim=args.num_sim,
+        write_sc=args.write_sc,
         out_path=args.out_sc,  # write out single cell data in saigeqtl format
     )
 
     d = {
+        'CT': args.CT,
+        'maf': args.maf,
+        'beta0': args.beta0,
+        'Va': args.Va,
+        'Vre': args.Vre,
+        'nobs': args.nobs,
+        'rep': args.num_sim,
         'rej_nb_wald': [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
         'rej_nb_score': [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
         'rej_pois_wald': [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
@@ -446,6 +467,7 @@ def main(args):
         'bulk_mean_ct': [(res.bulk_mean_ct).mean()],
         'bulk_express_percent': [(res.bulk_express_percent).mean()],
         'bulk_libsize_valid': [(res.bulk_libsize_valid).mean()],
+        'alpha': [(res.alpha[~jnp.isnan(res.alpha)].mean())],
     }
 
     df_rej = pd.DataFrame(data=d)
