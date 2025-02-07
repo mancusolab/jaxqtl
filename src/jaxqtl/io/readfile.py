@@ -70,7 +70,7 @@ class ReadyDataState:
         :param add_covar: add covariate o
         """
         count_std = self.pheno.count.copy(deep=True)
-        count_std = (count_std - count_std.mean()) / count_std.std()  # standardize genes
+        count_std = (count_std - count_std.mean(axis=0)) / count_std.std(axis=0)  # standardize genes
 
         pca_pheno = PCA(n_components=k)
         pca_pheno.fit(count_std)
