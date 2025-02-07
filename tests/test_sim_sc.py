@@ -32,7 +32,7 @@ seed = 1
 n = 1000
 V_a = 0.05  # 0 for null
 V_re = 0.2
-beta0 = -15
+beta0 = -17
 maf = 0.2
 
 # sample from observed
