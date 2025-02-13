@@ -45,7 +45,7 @@ class PlinkReader(GenoIO):
         G = 2 - G  # set alt as effect allele
 
         # TODO: add imputation for missing genotype etc...
-        # G = G.fillna(G.mean())  # really slow
+        G = G.fillna(G.mean())  # really slow
 
         G = G.set_index(fam.iid)
         return PlinkState(G, bim, fam)
@@ -78,7 +78,7 @@ class VCFReader(GenoIO):
         bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "cm", "pos", "alt", "ref", "i"])
 
         G = pd.DataFrame(genotype).T
-        # G = G.fillna(G.mean())  # really slow
+        G = G.fillna(G.mean())  # really slow
 
         G = G.set_index(fam.iid)
 
