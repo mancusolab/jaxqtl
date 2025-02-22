@@ -178,6 +178,7 @@ def main(args):
     argp.add_argument("--covar", type=str, help="Covariate path")
     argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
     argp.add_argument("--covar-test", type=str, help="Covariate to test")
+    argp.add_argument("--rm-covar", type=str, help="Covariate to remove")
     argp.add_argument("--pheno", type=str, help="Pheno path")
     argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="eQTL model")
     argp.add_argument(
@@ -317,7 +318,7 @@ def main(args):
     pheno_reader = PheBedReader()
     pheno = pheno_reader(args.pheno)
 
-    covar = covar_reader(args.covar, args.add_covar, args.covar_test)
+    covar = covar_reader(args.covar, args.add_covar, args.covar_test, args.rm_covar)
 
     if args.genelist is not None:
         genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
