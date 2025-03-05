@@ -17,7 +17,7 @@ For preprint, please see:
 
 Zhang, Z., Kim, A., Suboc, N., Mancuso, N., and Gazal, S. (2025).
 Efficient count-based models improve power and robustness for large-scale single-cell eQTL mapping. _medRxiv_
-(https://www.medrxiv.org/content/10.1101/2025.01.18.25320755v1)
+(https://www.medrxiv.org/content/10.1101/2025.01.18.25320755v2)
 
 We are currently working on more detailed documentations.
 Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis.
