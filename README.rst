@@ -37,7 +37,7 @@ jaxqtl
     Add a short description here!
 
 
-A longer description of your project goes here...
+jaxQTL preprint available at: https://www.medrxiv.org/content/10.1101/2025.01.18.25320755v2
 
 
 .. _pyscaffold-notes:
