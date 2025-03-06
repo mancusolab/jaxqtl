@@ -43,7 +43,9 @@ $X_i$ is covariate vector (e.g., age, sex, genotype PCs, expression PCs),
 $l_i$ is the total UMI count sum for individual $i$ across all genes within this cell type, i.e., library size.
 
 To account for overdispersion observed in single-cell count data, jaxQTL modeled the conditional variance as
+
 $$Var(y_i | X_i, g_i, L_i) = \mu_i + \alpha \mu_i^2$$
+
 where $\mu_i = E(y_i | X_i, g_i, l_i)$ and $\alpha$ is the overdispersion parameter in negbinom model.
 When $\alpha=0$, negbinom is equivalent as Poisson model.
 
