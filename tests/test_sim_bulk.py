@@ -15,7 +15,7 @@ from jaxqtl.families.distribution import NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM
 from jaxqtl.infer.solve import CholeskySolve
 from jaxqtl.infer.stderr import FisherInfoError
-from jaxqtl.sim import sim_data
+from jaxqtl.sim_bulk import sim_data
 
 
 config.update("jax_enable_x64", True)

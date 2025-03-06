@@ -4,7 +4,10 @@ import pandas as pd
 
 
 def covar_reader(
-    covar_path: str, add_covar_path: Optional[str] = None, covar_test: Optional[str] = None
+    covar_path: str,
+    add_covar_path: Optional[str] = None,
+    covar_test: Optional[str] = None,
+    rm_covar: Optional[str] = None,
 ) -> pd.DataFrame:
     """Read covariate file
     default is long format:
@@ -45,6 +48,10 @@ def covar_reader(
         col_names.remove(covar_test)
         col_names.append(covar_test)
         covar = covar[col_names]
+
+    if rm_covar is not None:
+        # remove column (especially for sex-specific analysis, drop the sex variable)
+        covar = covar.drop(rm_covar, axis=1)
 
     assert not covar.isnull().values.any(), "Missing values are not allowed in covariate file."
 

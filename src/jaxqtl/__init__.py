@@ -22,4 +22,4 @@ from jax import config
 
 config.update("jax_enable_x64", True)
 
-from . import families, infer, io, log, map, sim  # noqa 401
+from . import families, infer, io, log, map, sim_bulk  # noqa 401
