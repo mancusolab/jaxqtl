@@ -34,16 +34,17 @@ jaxQTL requires pseudo-bulking by sum for each pre-annotated cell type from the 
 For a focal gene in a given cell type,
 jaxQTL can fit a GLM count-based model (Poisson or negative binomial) between gene expression and a SNP variant as:
 
-$$\log(E(y_i | X_i, g_i, L_i)) = g_i \beta_{g} + X_i \beta + \log(L_i) $$,
+$$\log(E(y_i | X_i, g_i, l_i)) = g_i \beta_{g} + X_i \beta + \log(l_i)$$
+
 where $i$ denotes individual $i$,
 $y_i$ is the pseudo-bulking UMI count for a given gene,
 $g_i$ is the genotype of one SNP variant (e.g., allele count of alternative alleles),
 $X_i$ is covariate vector (e.g., age, sex, genotype PCs, expression PCs),
-$L_i$ is the total UMI count sum for individual $i$ across all genes within this cell type, i.e., library size.
+$l_i$ is the total UMI count sum for individual $i$ across all genes within this cell type, i.e., library size.
 
 To account for overdispersion observed in single-cell count data, jaxQTL modeled the conditional variance as
-$$ Var(y_i | X_i, g_i, L_i) = \mu_i + \alpha \mu_i^2$$,
-where $\mu_i = E(y_i | X_i, g_i, L_i)$ and $\alpha$ is the overdispersion parameter in negbinom model.
+$$Var(y_i | X_i, g_i, L_i) = \mu_i + \alpha \mu_i^2$$
+where $\mu_i = E(y_i | X_i, g_i, l_i)$ and $\alpha$ is the overdispersion parameter in negbinom model.
 When $\alpha=0$, negbinom is equivalent as Poisson model.
 
 For eQTL mapping, we focus on estimating the SNP effect size, its standard error under specified model,
@@ -65,8 +66,10 @@ We recommend first create a conda environment and have `pip` installed.
 ```bash
 # download use http address
 git clone https://github.com/mancusolab/jaxqtl.git
-# or use ssh agent
-git clone git@github.com:mancusolab/jaxqtl.git
+
+# create conda environment
+conda create -n jaxqtl python=3.10.9
+conda activate jaxqtl
 
 cd jaxqtl
 pip install -e .

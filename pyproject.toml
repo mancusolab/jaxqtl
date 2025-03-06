@@ -6,7 +6,7 @@ build-backend = "hatchling.build"
 name = "jaxqtl"
 dynamic = ["version"]
 description = "Add a short description here!"
-readme = "README.rst"
+readme = "README.md"
 requires-python = ">=3.9"
 license = "MIT"
 keywords = [
