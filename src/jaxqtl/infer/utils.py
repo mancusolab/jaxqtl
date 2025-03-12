@@ -10,6 +10,7 @@ from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
+# from tests.test_map import start
 from ..families.distribution import ExponentialFamily
 from .glm import GLM, GLMState
 from .stderr import ErrVarEstimation, FisherInfoError
@@ -128,6 +129,8 @@ class HypothesisTest(eqx.Module):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
+        start_idx: int = -2,
+        end_idx: int = -1,
     ) -> CisGLMState:
         """hypothesis test for association between SNP and outcome
 
@@ -140,7 +143,7 @@ class HypothesisTest(eqx.Module):
         :param max_iter: maximum iterations for fitting GLM, default to 1000
         :return: CisGLMState
         """
-        return self.test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
+        return self.test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test, start_idx, end_idx)
 
     @abstractmethod
     def test(
@@ -153,6 +156,8 @@ class HypothesisTest(eqx.Module):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
+        start_idx: int = -2,
+        end_idx: int = -1,
     ) -> CisGLMState:
         pass
 
@@ -168,6 +173,8 @@ class WaldTest(HypothesisTest):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
+        start_idx: int = -2,
+        end_idx: int = -1,
     ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 
@@ -199,6 +206,50 @@ class WaldTest(HypothesisTest):
         return state
 
 
+class WaldTest_multi(HypothesisTest):
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
+        start_idx: int = -2,
+        end_idx: int = -1,
+    ) -> CisGLMState:
+        glm = GLM(family=family, max_iter=max_iter)
+
+        def _func(carry, snp):
+            M = jnp.hstack((X, snp[:, jnp.newaxis]))
+            eta, alpha_n = glm.calc_eta_and_dispersion(M, y, offset_eta)
+            glmstate = glm.fit(
+                M,
+                y,
+                offset_eta=offset_eta,
+                init=eta,
+                alpha_init=alpha_n,
+                se_estimator=se_estimator,
+            )
+
+            return carry, CisGLMState(
+                beta=glmstate.beta[start_idx:end_idx],
+                se=glmstate.se[start_idx:end_idx],
+                p=glmstate.p[start_idx:end_idx],
+                z=glmstate.z[start_idx:end_idx],
+                num_iters=glmstate.num_iters,
+                converged=glmstate.converged,
+                alpha=glmstate.alpha,
+                weights=jnp.array([-9]),  # placeholder
+            )
+
+        _, state = lax.scan(_func, 0.0, G.T)
+
+        return state
+
+
 class ScoreTest(HypothesisTest):
     def test(
         self,
@@ -210,6 +261,8 @@ class ScoreTest(HypothesisTest):
         se_estimator: ErrVarEstimation = FisherInfoError(),
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
+        start_idx: int = -2,
+        end_idx: int = -1,
     ) -> CisGLMState:
         glm = GLM(family=family, max_iter=max_iter)
 

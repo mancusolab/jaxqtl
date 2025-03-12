@@ -6,16 +6,17 @@ import pandas as pd
 import jax
 import jax.numpy.linalg as jnpla
 
-from jax import numpy as jnp
+from jax import lax, numpy as jnp
 from jaxtyping import ArrayLike
 
+# from tests.test_cis import pheno
 from ..families.distribution import ExponentialFamily
 from ..infer.glm import GLM
 from ..infer.stderr import FisherInfoError, HuberError
-from ..infer.utils import CommonTest, HypothesisTest, ScoreTest, ScoreTestSNP, WaldTest
+from ..infer.utils import CommonTest, HypothesisTest, ScoreTest, ScoreTestSNP, WaldTest, WaldTest_multi
 from ..io.readfile import ReadyDataState
 from ..log import get_log
-from .utils import _get_geno_info, _setup_G_y
+from .utils import _get_geno_info, _setup_G_y, GxEState
 
 
 def map_nominal(
@@ -163,13 +164,13 @@ def map_nominal(
     outdf = outdf.drop(["cm"], axis=1)
 
     # add additional columns
-    outdf["af"] = np.NaN
-    outdf["ma_count"] = np.NaN
-    outdf["pval_nominal"] = np.NaN
-    outdf["slope"] = np.NaN
-    outdf["slope_se"] = np.NaN
-    outdf["converged"] = np.NaN
-    outdf["alpha"] = np.NaN
+    outdf["af"] = np.nan
+    outdf["ma_count"] = np.nan
+    outdf["pval_nominal"] = np.nan
+    outdf["slope"] = np.nan
+    outdf["slope_se"] = np.nan
+    outdf["converged"] = np.nan
+    outdf["alpha"] = np.nan
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
@@ -222,7 +223,7 @@ def map_nominal_covar(
     standardize: bool = True,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
+    robust_se: bool = False,
     max_iter: int = 1000,
     prop_cutoff: Optional[float] = None,
 ):
@@ -312,13 +313,179 @@ def map_nominal_covar(
     return result_df
 
 
+def map_nominal_GxE(
+    dat: ReadyDataState,
+    family: ExponentialFamily,
+    test: HypothesisTest = WaldTest_multi(),
+    score_test: ScoreTestSNP = CommonTest(),
+    log=None,
+    append_intercept: bool = True,
+    standardize: bool = True,
+    verbose: bool = True,
+    offset_eta: ArrayLike = 0.0,
+    robust_se: bool = False,
+    max_iter: int = 1000,
+    start_idx: int = -3,
+    end_idx: int = -1,
+    mode: str = "trans",
+    window: int = 500000,
+):
+    """test association between gene expression and other covariates
+
+    :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param test: approach for hypothesis test, default to ScoreTest()
+    :param log: logger for QTL progress
+    :param append_intercept: `True` if want to append intercept, `False` otherwise
+    :param standardize: True` if want to standardize covariates data
+    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
+    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return: data frame of nominal mapping for cisSNPs - gene pairs
+    """
+    if log is None:
+        log = get_log()
+
+    # TODO: we need to do some validation here...
+    X = dat.covar  # assuming the last column is processed as Environmental variable to test
+    n, k = X.shape
+
+    gene_info = dat.pheno_meta
+
+    # append genotype as the last column
+    if standardize:
+        X = X / jnp.std(X, axis=0)
+
+    if append_intercept:
+        X = jnp.hstack((jnp.ones((n, 1)), X))
+
+    var_df_all = pd.DataFrame()
+
+    # slope, slope_se, nominal_p, converged, alpha
+    out_columns = [
+        "E_reduce_slope",
+        "G_reduce_slope",
+        "E_full_slope",
+        "G_full_slope",
+        "GE_full_slope",
+        "E_reduce_slope_se",
+        "G_reduce_slope_se",
+        "E_full_slope_se",
+        "G_full_slope_se",
+        "GE_full_slope_se",
+        "E_reduce_p",
+        "G_reduce_p",
+        "E_full_p",
+        "G_full_p",
+        "GE_full_p",
+        "reduce_converged",
+        "full_converged",
+        "reduce_alpha",
+        "full_alpha",
+    ]
+
+    phenotype_id = []
+    gene_chrom_list = []
+    tss_list = []
+
+    slope = jnp.array([]).reshape(0, 5)
+    slope_se = jnp.array([]).reshape(0, 5)
+    nominal_p = jnp.array([]).reshape(0, 5)
+    converged = jnp.array([]).reshape(0, 2)  # whether full model converged
+    alpha = jnp.array([]).reshape(0, 2)
+
+    se_estimator = HuberError() if robust_se else FisherInfoError()
+
+    for gene in gene_info:
+        gene_name, chrom, start_min, end_max = gene
+        lstart = max(0, start_min - window)  # a placeholder for mode="trans"
+        rend = end_max + window
+
+        # pull cis G (nxM) and y for this gene
+        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
+
+        # skip if no cis SNPs found
+        if G.shape[1] == 0:
+            if verbose:
+                log.info(
+                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
+                    gene_name,
+                    str(chrom),
+                    str(lstart),
+                    str(rend),
+                )
+            continue
+
+        # pull cis G (sample x gene) and y for this gene
+        y = dat.pheno[gene_name]  # __getitem__
+
+        # skip if no cis SNPs found
+        if verbose:
+            log.info("Performing scan for %s", gene_name)
+
+        def _func(carry, snp):
+            M = jnp.hstack((X, snp[:, jnp.newaxis]))
+            GE = M[:, -1] * M[:, -2]
+
+            # result in order: E, G
+            result_red = test(
+                X, snp[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx, end_idx
+            )
+
+            # result in order: E, G, GE
+            result_full = test(
+                M, GE[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx - 1, end_idx
+            )
+
+            # beta effect in order of
+            return carry, GxEState(
+                beta=jnp.hstack((result_red.beta, result_full.beta)).ravel(),
+                se=jnp.hstack((result_red.se, result_full.se)).ravel(),
+                p=jnp.hstack((result_red.p, result_full.p)).ravel(),
+                alpha=jnp.hstack((result_red.alpha, result_full.alpha)).ravel(),
+                converged=jnp.hstack((result_red.converged, result_full.converged)).ravel(),
+            )
+
+        _, state = lax.scan(_func, 0.0, G.T)
+
+        if verbose:
+            log.info("Finished cis-qtl scan for %s", gene_name)
+
+        # combine results
+        paddle_len = state.beta.shape[0]
+
+        # concatenate meta data for gene and snp
+        phenotype_id.extend([gene_name] * paddle_len)
+        gene_chrom_list.extend([chrom] * paddle_len)
+        tss_list.extend([start_min] * paddle_len)  # start_min
+        var_df_all = pd.concat([var_df_all, var_df[['chrom', 'snp', 'pos', 'a0', 'a1']]], ignore_index=True)
+
+        # concatenate numerical results
+        slope = jnp.vstack([slope, state.beta])
+        slope_se = jnp.vstack([slope_se, state.se])
+        nominal_p = jnp.vstack([nominal_p, state.p])
+        converged = jnp.vstack([converged, state.converged])
+        alpha = jnp.vstack([alpha, state.alpha])
+
+    # write result
+    gene_out = pd.DataFrame({"phenotype_id": phenotype_id, "gene_chrom": gene_chrom_list, "tss": tss_list})
+
+    num_result_out = jnp.hstack([slope, slope_se, nominal_p, converged, alpha])
+    num_result_out = pd.DataFrame(num_result_out, columns=out_columns)
+
+    result_df = pd.concat([gene_out, var_df_all, num_result_out], axis=1)
+
+    return result_df
+
+
 def fit_intercept_only(
     dat: ReadyDataState,
     family: ExponentialFamily,
     log=None,
     verbose: bool = True,
     offset_eta: ArrayLike = 0.0,
-    robust_se: bool = True,
+    robust_se: bool = False,
     max_iter: int = 1000,
 ):
     if log is None:

@@ -21,7 +21,7 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log, get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
+from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar, map_nominal_GxE
 from jaxqtl.map.utils import _ACAT, _get_geno_info, _setup_G_y
 
 
@@ -198,7 +198,7 @@ def main(args):
     argp.add_argument(
         "--mode",
         type=str,
-        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
+        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only", "GE"],
         help="""cis: eQTL mapping to identify genes with at least one eQTL (default uses permutation to calibrate pvals);
                 nominal: provides association statistics for all pairs of cis-SNP-gene""",
     )
@@ -542,6 +542,19 @@ def main(args):
                 cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
+
+    elif args.mode == "GE":
+        # Now p values are all based on Z distribution
+        out_df = map_nominal_GxE(
+            dat,
+            family=family,
+            log=log,
+            standardize=args.standardize,
+            offset_eta=offset_eta,
+            robust_se=args.robust,
+            mode="trans",
+        )
+        out_df.to_csv(args.out + ".trans.GE.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "covar":
         if args.test_method == "score":

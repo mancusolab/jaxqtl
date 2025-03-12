@@ -16,6 +16,14 @@ class _GenoInfo(NamedTuple):
     ma_count: Array
 
 
+class GxEState(NamedTuple):
+    beta: Array
+    se: Array
+    p: Array
+    alpha: Array
+    converged: Array
+
+
 def _get_geno_info(G: ArrayLike) -> _GenoInfo:
     n, p = G.shape
     counts = jnp.sum(G, axis=0)  # count REF allele

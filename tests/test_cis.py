@@ -118,7 +118,7 @@ start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
     family=NegativeBinomial(),
-    test=ScoreTest(),
+    test=ScoreTest(),  # ScoreTest()
     offset_eta=offset_eta,
     n_perm=200,
     compute_qvalue=False,
