@@ -474,6 +474,7 @@ def map_nominal_GxE(
     num_result_out = jnp.hstack([slope, slope_se, nominal_p, converged, alpha])
     num_result_out = pd.DataFrame(num_result_out, columns=out_columns)
 
+    var_df_all = var_df_all.rename(columns={"chrom": "snp_chrom"})
     result_df = pd.concat([gene_out, var_df_all, num_result_out], axis=1)
 
     return result_df
