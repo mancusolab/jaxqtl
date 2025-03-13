@@ -119,11 +119,11 @@ class H5AD(PhenoIO):
     @staticmethod
     def write_bed(
         pheno: pd.DataFrame,
+        chr_list: list,
         filter_opt=SingleCellFilter,
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
         celltype_path: str = "../example/data/celltype.tsv",
-        autosomal_only: bool = True,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
 
@@ -141,9 +141,7 @@ class H5AD(PhenoIO):
 
             # load gtf file for locating tss
             gene_map = load_gene_gft_bed(gtf_bed_path)
-
-            if autosomal_only:
-                gene_map = gene_map.loc[gene_map.chr.isin([str(i) for i in range(1, 23)])]
+            gene_map = gene_map.loc[gene_map.chr.isin(chr_list)]
 
             # inner join
             out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on=filter_opt.geneid_col)
