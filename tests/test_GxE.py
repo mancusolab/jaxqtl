@@ -55,7 +55,7 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-dat.filter_gene(gene_list=gene_list[0:2])
+dat.filter_gene(gene_list=gene_list[0:1])
 # dat.filter_gene(gene_list=["ENSG00000189269"])
 
 mapnom_covar = map_nominal_GxE(

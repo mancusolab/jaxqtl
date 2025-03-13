@@ -390,6 +390,8 @@ def map_nominal_GxE(
     tss_list = []
     express_percent = []
     mean_count = []
+    af_list = []
+    ma_count_list = []
 
     slope = jnp.array([]).reshape(0, 5)
     slope_se = jnp.array([]).reshape(0, 5)
@@ -454,6 +456,10 @@ def map_nominal_GxE(
         if verbose:
             log.info("Finished cis-qtl scan for %s", gene_name)
 
+        g_info = _get_geno_info(G)
+        af_list.extend(g_info.af.tolist())
+        ma_count_list.extend(g_info.ma_count.tolist())
+
         # combine results
         paddle_len = state.beta.shape[0]
 
@@ -481,6 +487,8 @@ def map_nominal_GxE(
             "tss": tss_list,
             "express_percent": express_percent,
             "mean_count": mean_count,
+            "af": af_list,
+            "ma_count": ma_count_list,
         }
     )
 
