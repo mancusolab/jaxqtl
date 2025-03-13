@@ -388,6 +388,8 @@ def map_nominal_GxE(
     phenotype_id = []
     gene_chrom_list = []
     tss_list = []
+    express_percent = []
+    mean_count = []
 
     slope = jnp.array([]).reshape(0, 5)
     slope_se = jnp.array([]).reshape(0, 5)
@@ -459,6 +461,9 @@ def map_nominal_GxE(
         phenotype_id.extend([gene_name] * paddle_len)
         gene_chrom_list.extend([chrom] * paddle_len)
         tss_list.extend([start_min] * paddle_len)  # start_min
+        express_percent.extend([(y > 0).mean().item()] * paddle_len)
+        mean_count.extend([y.mean().item()] * paddle_len)
+
         var_df_all = pd.concat([var_df_all, var_df[['chrom', 'snp', 'pos', 'a0', 'a1']]], ignore_index=True)
 
         # concatenate numerical results
@@ -469,7 +474,15 @@ def map_nominal_GxE(
         alpha = jnp.vstack([alpha, state.alpha])
 
     # write result
-    gene_out = pd.DataFrame({"phenotype_id": phenotype_id, "gene_chrom": gene_chrom_list, "tss": tss_list})
+    gene_out = pd.DataFrame(
+        {
+            "phenotype_id": phenotype_id,
+            "gene_chrom": gene_chrom_list,
+            "tss": tss_list,
+            "express_percent": express_percent,
+            "mean_count": mean_count,
+        }
+    )
 
     num_result_out = jnp.hstack([slope, slope_se, nominal_p, converged, alpha])
     num_result_out = pd.DataFrame(num_result_out, columns=out_columns)
