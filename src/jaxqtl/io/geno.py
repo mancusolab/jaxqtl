@@ -45,7 +45,9 @@ class PlinkReader(GenoIO):
         G = 2 - G  # set alt as effect allele
 
         # TODO: add imputation for missing genotype etc...
-        G = G.fillna(G.mean())  # really slow
+        has_na = G.isnull().values.any()
+        if has_na:
+            G = G.fillna(G.mean())  # really slow
 
         G = G.set_index(fam.iid)
         return PlinkState(G, bim, fam)
