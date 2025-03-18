@@ -163,13 +163,13 @@ def map_nominal(
     outdf = outdf.drop(["cm"], axis=1)
 
     # add additional columns
-    outdf["af"] = np.NaN
-    outdf["ma_count"] = np.NaN
-    outdf["pval_nominal"] = np.NaN
-    outdf["slope"] = np.NaN
-    outdf["slope_se"] = np.NaN
-    outdf["converged"] = np.NaN
-    outdf["alpha"] = np.NaN
+    outdf["af"] = np.nan
+    outdf["ma_count"] = np.nan
+    outdf["pval_nominal"] = np.nan
+    outdf["slope"] = np.nan
+    outdf["slope_se"] = np.nan
+    outdf["converged"] = np.nan
+    outdf["alpha"] = np.nan
 
     for idx, _ in gene_mapped_list.iterrows():
         end_row += num_var_cis[idx]
