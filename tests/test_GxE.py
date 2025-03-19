@@ -23,7 +23,7 @@ covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
 addcovar_path = None  # "../example/local/NK_new/prs.tsv"
 covar_test = "sex"  # variable to test for Environment
 
-pheno_path = "../example/local/NK_new/NK.chr22.bed.gz"
+pheno_path = "../example/local/NK_new/NK.bed.gz"
 # genelist_path = "../example/local/NK_new/ENSG00000189269"  # ENSG00000100181
 genelist_path = "../example/data/genelist_spatest.tsv"
 
@@ -46,7 +46,7 @@ dat = create_readydata(geno, bim, pheno, covar, autosomal_only=False)
 
 dat.filter_gene(geneexpr_percent_cutoff=0.0)
 
-dat.add_covar_pheno_PC(k=2)
+# dat.add_covar_pheno_PC(k=2)
 
 # filter phenotype (5 genes)
 gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()

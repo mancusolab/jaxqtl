@@ -61,25 +61,26 @@ gene_list = pd.read_csv(genelist_path, sep="\t")["phenotype_id"].to_list()
 total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
 offset_eta = jnp.log(total_libsize)
 
-dat.add_covar_pheno_PC(2)
+# dat.add_covar_pheno_PC(2)
 
-# dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
-dat.filter_gene(gene_list=["ENSG00000273289"])
+dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
+# dat.filter_gene(gene_list=["ENSG00000273289"])
 
 n_obs = dat.pheno.count.shape[0]
 
 # ENSG00000273289
-# start = timeit.default_timer()
-# mapcis_out_score_nb = map_cis(
-#     dat,
-#     family=NegativeBinomial(),
-#     test=ScoreTest(),
-#     offset_eta=offset_eta,
-#     n_perm=1000,
-#     compute_qvalue=False,
-# )
-# stop = timeit.default_timer()
-# print("Time: ", stop - start)
+start = timeit.default_timer()
+mapcis_out_score_nb = map_nominal(
+    dat,
+    family=NegativeBinomial(),
+    test=WaldTest(),
+    offset_eta=offset_eta,
+    mode="cis",
+    # n_perm=1000,
+    # compute_qvalue=False,
+)
+stop = timeit.default_timer()
+print("Time: ", stop - start)
 # # mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
 
 # mapcis_out_score_lm = map_cis(

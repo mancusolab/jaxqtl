@@ -325,8 +325,7 @@ def map_nominal_GxE(
     offset_eta: ArrayLike = 0.0,
     robust_se: bool = False,
     max_iter: int = 1000,
-    start_idx: int = -3,
-    end_idx: int = -1,
+    start_idx: int = -2,
     mode: str = "trans",
     window: int = 500000,
 ):
@@ -434,12 +433,12 @@ def map_nominal_GxE(
 
             # result in order: E, G
             result_red = test(
-                X, snp[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx, end_idx
+                X, snp[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx
             )
 
             # result in order: E, G, GE
             result_full = test(
-                M, GE[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx - 1, end_idx
+                M, GE[:, jnp.newaxis], y, family, offset_eta, se_estimator, max_iter, score_test, start_idx - 1
             )
 
             # beta effect in order of
