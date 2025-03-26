@@ -27,7 +27,6 @@ class SingleCellFilter:
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
     geneid_col: str = "ensemble_id"
-    remove_empty: bool = True
     layer: Optional[str] = None  # which layer to perform
     min_cells: int = 3
     min_genes: int = 200
@@ -112,7 +111,6 @@ class H5AD(PhenoIO):
             min_counts=filter_opt.bulk_min_count,  # exclude sample < min # summed count from calc
             min_prop=filter_opt.bulk_min_prop,  # selects genes that expressed across > % cells in each sample
             min_smpls=filter_opt.bulk_min_smpls,  # this condition is met across a minimum number of samples
-            remove_empty=filter_opt.remove_empty,  # whether remove empty rows obs or feature columns
         )
 
         # create pd.Dataframe
@@ -128,7 +126,7 @@ class H5AD(PhenoIO):
         filter_opt=SingleCellFilter,
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
-        celltype_path: str = "../example/data/celltype.tsv",
+        celltype_path: Optional[str] = "../example/data/celltype.tsv",
         autosomal_only: bool = True,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
