@@ -149,15 +149,19 @@ class H5AD(PhenoIO):
             # load gtf file for locating tss
             gene_map = load_gene_gft_bed(gtf_bed_path)
 
+            # remove "chr" in prefix if there is any
+            gene_map['chr'] = [s.removeprefix('chr') for s in gene_map['chr']]
+
             if autosomal_only:
                 gene_map = gene_map.loc[gene_map.chr.isin([str(i) for i in range(1, 23)])]
 
             # inner join
             out = pd.merge(gene_map, bed, left_on="ensemble_id", right_on=filter_opt.geneid_col)
             out = out.drop("ensemble_id", axis=1)
-            out = out.rename(columns={"ensembl_id": "phenotype_id", "chr": "#Chr"})
+            out = out.rename(columns={filter_opt.geneid_col: "phenotype_id", "chr": "#Chr"})
 
             cell_type_outname = re.sub("[^0-9a-zA-Z]+", "_", cell_type)
+
             out.to_csv(
                 os.path.join(out_dir, f"{cell_type_outname}.bed.gz"),
                 index=False,
