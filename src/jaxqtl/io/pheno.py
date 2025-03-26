@@ -27,6 +27,8 @@ class SingleCellFilter:
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
     geneid_col: str = "ensemble_id"
+    remove_empty: bool = True
+    layer: Optional[str] = None  # which layer to perform
     min_cells: int = 3
     min_genes: int = 200
     max_genes: int = 2500  # can decide this based on plotting
@@ -88,7 +90,9 @@ class H5AD(PhenoIO):
         # filter cells that have >5% mitochondrial counts
         # here return the actual sparse matrix instead of View for shifted_transformation_nolog()
         # dat = dat[dat.obs[filter_opt.mt_col] < filter_opt.percent_mt, :].copy()
-        dat = dat[dat.obs[filter_opt.mt_col] < filter_opt.percent_mt, :]
+
+        if filter_opt.mt_col in dat.obs.columns:
+            dat = dat[dat.obs[filter_opt.mt_col] < filter_opt.percent_mt, :]
 
         # normalize total
         if norm_fix_L is not None:
@@ -100,6 +104,7 @@ class H5AD(PhenoIO):
         # first compute and then filter
         dat.bulk = dc.get_pseudobulk(
             dat,
+            layer=filter_opt.layer,
             sample_col=filter_opt.id_col,
             groups_col=filter_opt.celltype_col,
             mode=filter_opt.bulk_method,  # take mean across cells for each individual
@@ -107,6 +112,7 @@ class H5AD(PhenoIO):
             min_counts=filter_opt.bulk_min_count,  # exclude sample < min # summed count from calc
             min_prop=filter_opt.bulk_min_prop,  # selects genes that expressed across > % cells in each sample
             min_smpls=filter_opt.bulk_min_smpls,  # this condition is met across a minimum number of samples
+            remove_empty=filter_opt.remove_empty,  # whether remove empty rows obs or feature columns
         )
 
         # create pd.Dataframe
