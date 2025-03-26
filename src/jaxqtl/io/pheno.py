@@ -126,7 +126,7 @@ class H5AD(PhenoIO):
         filter_opt=SingleCellFilter,
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
-        celltype_path: Optional[str] = "../example/data/celltype.tsv",
+        celltype_path: Optional[str] = None,
         autosomal_only: bool = True,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
