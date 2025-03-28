@@ -8,7 +8,7 @@ from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.permutation import InferBetaGLM
-from jaxqtl.infer.utils import WaldTest
+from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -27,8 +27,8 @@ covar_path = "../example/local/NK_new/donor_features.all.6PC.tsv"
 # addcovar_path = "../example/local/NK_new/prs.tsv"
 # covar_test = "score"
 pheno_path = "../example/local/NK_new/NK.bed.gz"  # NK.tmm.bed.gz
-# genelist_path = "../example/local/NK_new/ENSG00000198125"
-genelist_path = "../example/data/genelist_spatest.tsv"
+genelist_path = "../example/local/NK_new/ENSG00000198125"
+# genelist_path = "../example/data/genelist_spatest.tsv"
 
 log = get_log()
 
@@ -64,7 +64,7 @@ offset_eta = jnp.log(total_libsize)
 
 dat.add_covar_pheno_PC(2)
 
-dat.filter_gene(gene_list=[gene_list[4]])  # filter to one gene
+dat.filter_gene(gene_list=[gene_list[0]])  # filter to one gene
 # dat.filter_gene(gene_list=["ENSG00000273289"])
 
 n_obs = dat.pheno.count.shape[0]
@@ -74,10 +74,10 @@ start = timeit.default_timer()
 mapcis_out_score_nb = map_cis(
     dat,
     family=NegativeBinomial(),
-    test=WaldTest(),
+    test=ScoreTest(),
     beta_estimator=InferBetaGLM(),
     offset_eta=offset_eta,
-    n_perm=100,
+    n_perm=1000,
     compute_qvalue=False,
 )
 stop = timeit.default_timer()

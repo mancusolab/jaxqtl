@@ -25,7 +25,7 @@ def covar_reader(
     :param covar_test: covariate to test for association against gene expression
     :return: data frame of covariates
     """
-    if covar_path.endswith((".bed.gz", ".bed")):
+    if covar_path.endswith((".bed.gz", ".bed", ".txt")):
         # wide format
         covar = pd.read_csv(covar_path, sep="\t", index_col=0).T
         covar.columns.name = None  # remove redundant name due to transpose

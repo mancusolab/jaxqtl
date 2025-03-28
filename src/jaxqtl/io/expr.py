@@ -43,7 +43,7 @@ class GeneMetaData:
     def __iter__(self):
         for _, gene in self.gene_map.iterrows():
             gene_name = gene.phenotype_id  # ensemble_id
-            chrom = gene.chr
+            chrom = gene.chr.removeprefix("chr")
             start_min = gene.start
             end_max = gene.end
             yield gene_name, chrom, start_min, end_max
