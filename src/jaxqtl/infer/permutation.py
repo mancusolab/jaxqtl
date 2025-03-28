@@ -2,7 +2,6 @@ from abc import abstractmethod
 from typing import NamedTuple, Optional, Tuple
 
 import numpy as np
-import numpy.random
 import scipy
 
 from scipy.stats import ncx2
@@ -49,16 +48,14 @@ class InferBetaLM(InferBeta):
             pval = 2 * t_cdf(-jnp.fabs(zscore), dof)
             mean = jnp.mean(pval)
             var = jnp.var(pval)
-            return mean * (mean * (1.0 - mean) / var - 1.0)  # - 1.0
+            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
 
         # use normal distribution to compute p (approximate t in lm wald)
         p_perm = 2 * t_cdf(-jnp.fabs(z_stats_perm), dof)
         z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
 
         # learn true dof parameter
-        res = scipy.optimize.minimize(
-            lambda x: np.abs(df_cost(z_stats_perm, x) - 1), dof, method='Nelder-Mead', tol=1e-4
-        )
+        res = scipy.optimize.minimize(lambda x: np.abs(df_cost(z_stats_perm, x)), dof, method='Nelder-Mead', tol=1e-4)
         true_dof = res.x[0]
         opt_status = res.success  # whether optimizer exited successfully
 
@@ -87,16 +84,14 @@ class InferBetaGLM(InferBeta):
             pval = ncx2.sf(zscore**2, 1, nc)
             mean = jnp.mean(pval)
             var = jnp.var(pval)
-            return mean * (mean * (1.0 - mean) / var - 1.0)  # - 1.0
+            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
 
         # use normal distribution to compute p (approximate t in lm wald)
         p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
         z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
 
         # learn non-central parameter
-        res = scipy.optimize.minimize(
-            lambda x: np.abs(df_cost(z_stats_perm, x) - 1), 0.1, method='Nelder-Mead', tol=1e-4
-        )
+        res = scipy.optimize.minimize(lambda x: np.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4)
         true_nc = res.x[0]
         opt_status = res.success  # whether optimizer exited successfully
 

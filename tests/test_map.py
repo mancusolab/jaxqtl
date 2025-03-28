@@ -82,7 +82,7 @@ mapcis_out_score_nb = map_cis(
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
-# mapcis_out_score_nb.to_csv("../example/result/n94_scoretest_NB_res.tsv", sep="\t", index=False)
+mapcis_out_score_nb.to_csv("../example/result/NK_ENSG00000198125_nb_score.tsv.gz", sep="\t", index=False)
 
 # mapcis_out_score_lm = map_cis(
 #     dat,
