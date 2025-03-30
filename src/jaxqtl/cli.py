@@ -248,6 +248,12 @@ def main(args):
     )
     argp.add_argument("--autosomal-only", action="store_true", default=False, help="Test for only autosomal chr")
     argp.add_argument(
+        "--raw-ld",
+        action="store_true",
+        default=False,
+        help="Whether write raw ld matrix",
+    )
+    argp.add_argument(
         "--perm-pheno",
         action="store_true",
         default=False,
@@ -499,6 +505,7 @@ def main(args):
             log=log,
             mode=args.mode,
             ld_out=args.out,
+            write_raw_ld=args.raw_ld,
             robust_se=args.robust,
             max_iter=args.max_iter,
             cond_snp=args.cond_snp,

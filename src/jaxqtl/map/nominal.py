@@ -33,6 +33,7 @@ def map_nominal(
     max_iter: int = 1000,
     mode: Optional[str] = None,
     ld_out: str = "./gene",
+    write_raw_ld: bool = False,
     cond_snp: Optional[str] = None,
 ) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
@@ -124,7 +125,9 @@ def map_nominal(
 
             R_glm_wt_df.to_csv(ld_out + ".ld.glm_wt.tsv.gz", sep="\t", index=False, header=False)
             R_no_glm_wt_df.to_csv(ld_out + ".ld.no_glm_wt.tsv.gz", sep="\t", index=False, header=False)
-            R_raw_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
+
+            if write_raw_ld:
+                R_raw_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
             del R_glm_wt_df, R_no_glm_wt_df, R_raw_df
             continue
 
