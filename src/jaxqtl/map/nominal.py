@@ -33,7 +33,6 @@ def map_nominal(
     max_iter: int = 1000,
     mode: Optional[str] = None,
     ld_out: str = "./gene",
-    ld_wt: bool = True,
     cond_snp: Optional[str] = None,
 ) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
@@ -120,12 +119,13 @@ def map_nominal(
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
             # only available for one gene
-            R_wt_df, R_df = _calc_LD(G, X, result.weights, ld_wt)
-            if ld_wt:
-                R_wt_df.to_csv(ld_out + ".ld.wt.tsv.gz", sep="\t", index=False, header=False)
-            else:
-                R_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
-            del R_wt_df, R_df
+            R_glm_wt_df, R_raw_df = _calc_LD(G, X, result.weights, True)
+            R_no_glm_wt_df, _ = _calc_LD(G, X, result.weights, False)
+
+            R_glm_wt_df.to_csv(ld_out + ".ld.glm_wt.tsv.gz", sep="\t", index=False, header=False)
+            R_no_glm_wt_df.to_csv(ld_out + ".ld.no_glm_wt.tsv.gz", sep="\t", index=False, header=False)
+            R_raw_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
+            del R_glm_wt_df, R_no_glm_wt_df, R_raw_df
             continue
 
         if verbose:

@@ -248,12 +248,6 @@ def main(args):
     )
     argp.add_argument("--autosomal-only", action="store_true", default=False, help="Test for only autosomal chr")
     argp.add_argument(
-        "--ld-wt",
-        action="store_true",
-        default=False,
-        help="Whether add GLM weight to LD matrix",
-    )
-    argp.add_argument(
         "--perm-pheno",
         action="store_true",
         default=False,
@@ -507,7 +501,6 @@ def main(args):
             ld_out=args.out,
             robust_se=args.robust,
             max_iter=args.max_iter,
-            ld_wt=args.ld_wt,
             cond_snp=args.cond_snp,
         )
         log.info("write out LD matrix.")
