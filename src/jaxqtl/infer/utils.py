@@ -199,6 +199,40 @@ class WaldTest(HypothesisTest):
         return state
 
 
+class WaldTest_lm(HypothesisTest):
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        family: ExponentialFamily,
+        offset_eta: ArrayLike,
+        se_estimator: ErrVarEstimation = FisherInfoError(),
+        max_iter: int = 1000,
+        score_test: ScoreTestSNP = CommonTest(),
+    ) -> CisGLMState:
+        glm = GLM(family=family, max_iter=max_iter)
+
+        def _func(carry, snp):
+            M = jnp.hstack((X, snp[:, jnp.newaxis]))
+            glmstate = glm.fit_fast_lm(M, y)
+
+            return carry, CisGLMState(
+                beta=glmstate.beta[-1],
+                se=glmstate.se[-1],
+                p=glmstate.p[-1],
+                z=glmstate.z[-1],
+                num_iters=glmstate.num_iters,
+                converged=glmstate.converged,
+                alpha=glmstate.alpha,
+                weights=jnp.array([-9]),  # placeholder
+            )
+
+        _, state = lax.scan(_func, 0.0, G.T)
+
+        return state
+
+
 class ScoreTest(HypothesisTest):
     def test(
         self,

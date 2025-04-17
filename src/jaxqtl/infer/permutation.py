@@ -175,7 +175,6 @@ class DirectPerm(Permutation):
         """
 
         def _func(key, x):
-            del x
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
             glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], se_estimator, max_iter)

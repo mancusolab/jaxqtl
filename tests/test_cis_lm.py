@@ -8,7 +8,7 @@ from jax import config
 
 from jaxqtl.families.distribution import Gaussian
 from jaxqtl.infer.permutation import InferBetaLM
-from jaxqtl.infer.utils import WaldTest
+from jaxqtl.infer.utils import WaldTest_lm
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -64,7 +64,7 @@ start = timeit.default_timer()
 mapcis_out = map_cis(
     dat,
     family=Gaussian(),
-    test=WaldTest(),
+    test=WaldTest_lm(),
     beta_estimator=InferBetaLM(),
     offset_eta=offset_eta,
     n_perm=1000,
@@ -72,3 +72,5 @@ mapcis_out = map_cis(
 )
 stop = timeit.default_timer()
 print("Time: ", stop - start)
+
+print("done")

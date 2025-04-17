@@ -45,7 +45,6 @@ class FisherInfoError(ErrVarEstimation):
         weight: ArrayLike,
         alpha: ScalarLike = 0.0,
     ) -> Array:
-        del eta, mu, alpha
         infor = (X * weight).T @ X
         asmpt_cov = jnpla.inv(infor)
 

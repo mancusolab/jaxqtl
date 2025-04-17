@@ -3,6 +3,7 @@ from typing import NamedTuple, Tuple
 import equinox as eqx
 
 from jax import Array, numpy as jnp
+from jax.numpy import linalg as jnpla
 from jax.scipy.stats import norm
 from jaxtyping import ArrayLike, ScalarLike
 
@@ -13,7 +14,7 @@ from ..families.distribution import (
     Poisson,
 )
 from ..families.utils import t_cdf
-from .optimize import irls
+from .optimize import irls, irls_lm
 from .solve import CholeskySolve, LinearSolve
 from .stderr import ErrVarEstimation, FisherInfoError
 
@@ -119,6 +120,52 @@ class GLM(eqx.Module):
         stat = beta / beta_se
 
         pval_wald = self.wald_test(stat, df)
+
+        return GLMState(
+            beta,
+            beta_se,
+            stat,
+            pval_wald,
+            eta,
+            mu,
+            weight,
+            n_iter,
+            converged,
+            resid_covar,
+            resid,
+            alpha,
+        )
+
+    def fit_fast_lm(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+    ) -> GLMState:
+        """Fit GLM
+
+        :param X: covariate data matrix (nxp)
+        :param y: outcome vector (nx1)
+        :param offset_eta: offset (nx1)
+        :return: GLMState that contains model fitting result
+        """
+        beta, n_iter, converged, alpha = irls_lm(X, y, self.solver)
+
+        mu = X @ beta
+        eta = mu
+        resid = y - mu  # note: this is the working resid
+
+        phi = self.family.scale(X, y, mu)
+        weight = 1.0 / phi
+
+        infor = (X * weight).T @ X
+        resid_covar = jnpla.inv(infor)
+        beta_se = jnp.sqrt(jnp.diag(resid_covar))
+
+        df = X.shape[0] - X.shape[1]
+        beta = beta.squeeze()  # (p,)
+        stat = beta / beta_se
+
+        pval_wald = t_cdf(-abs(stat), df) * 2
 
         return GLMState(
             beta,

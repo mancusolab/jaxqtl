@@ -14,7 +14,7 @@ from jaxtyping import ArrayLike
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
-from jaxqtl.infer.utils import CommonTest, ScoreTest, WaldTest  # , RareTest
+from jaxqtl.infer.utils import CommonTest, ScoreTest, WaldTest, WaldTest_lm  # , RareTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
@@ -391,20 +391,36 @@ def main(args):
             )
             outdf_cis_score.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
-            outdf_cis_wald = map_cis(
-                dat,
-                family=family,
-                test=WaldTest(),
-                beta_estimator=beta_estimator,
-                standardize=args.standardize,
-                window=args.window,
-                offset_eta=offset_eta,
-                n_perm=args.nperm,
-                robust_se=args.robust,
-                compute_qvalue=args.qvalue,
-                log=log,
-                max_iter=args.max_iter,
-            )
+            if isinstance(family, Gaussian):
+                outdf_cis_wald = map_cis(
+                    dat,
+                    family=family,
+                    test=WaldTest_lm(),
+                    beta_estimator=beta_estimator,
+                    standardize=args.standardize,
+                    window=args.window,
+                    offset_eta=offset_eta,
+                    n_perm=args.nperm,
+                    robust_se=args.robust,
+                    compute_qvalue=args.qvalue,
+                    log=log,
+                    max_iter=args.max_iter,
+                )
+            else:
+                outdf_cis_wald = map_cis(
+                    dat,
+                    family=family,
+                    test=WaldTest(),
+                    beta_estimator=beta_estimator,
+                    standardize=args.standardize,
+                    window=args.window,
+                    offset_eta=offset_eta,
+                    n_perm=args.nperm,
+                    robust_se=args.robust,
+                    compute_qvalue=args.qvalue,
+                    log=log,
+                    max_iter=args.max_iter,
+                )
             outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "cis_acat":

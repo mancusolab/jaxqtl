@@ -73,3 +73,34 @@ def irls(
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
     return IRLSState(beta, num_iters, converged, alpha)
+
+
+@eqx.filter_jit
+def irls_lm(
+    X: ArrayLike,
+    y: ArrayLike,
+    solver: LinearSolve,
+) -> IRLSState:
+    """IRLS to solve GLM
+
+    :param X: covariate data matrix (nxp)
+    :param y: outcome vector (nx1)
+    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
+    :param solver: linear equation solver
+    :param eta: linear component eta
+    :param max_iter: maximum iterations for fitting GLM, default to 1000
+    :param tol: tolerance for stopping, default to 0.001
+    :param step_size: step size to update the parameter at each step, default to 1.0
+    :param offset_eta: offset (nx1)
+    :param alpha_init: initial value for dispersion parameter alpha
+    :return: IRLSState
+    """
+    n, p = X.shape
+
+    weight = jnp.ones((n, 1))
+    beta = solver(X, y, weight)
+    alpha = jnp.array(0)
+    converged = jnp.array(1)
+    num_iters = 1
+
+    return IRLSState(beta, num_iters, converged, alpha)
