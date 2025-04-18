@@ -100,7 +100,7 @@ def irls_lm(
     weight = jnp.ones((n, 1))
     beta = solver(X, y, weight)
     alpha = jnp.array(0)
-    converged = jnp.array(1)
+    converged = jnp.array(True)
     num_iters = 1
 
     return IRLSState(beta, num_iters, converged, alpha)

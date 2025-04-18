@@ -67,7 +67,7 @@ mapcis_out = map_cis(
     test=WaldTest_lm(),
     beta_estimator=InferBetaLM(),
     offset_eta=offset_eta,
-    n_perm=1000,
+    n_perm=100,
     compute_qvalue=False,
 )
 stop = timeit.default_timer()
