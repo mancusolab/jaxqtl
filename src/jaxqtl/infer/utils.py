@@ -3,15 +3,19 @@ from typing import NamedTuple, Tuple
 
 # import giddyup as gu
 import equinox as eqx
+import jax
 import jax.lax as lax
 import jax.numpy as jnp
 
+from jax.numpy import linalg as jnpla
 from jax.numpy.linalg import multi_dot
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
 from ..families.distribution import ExponentialFamily
+from ..families.utils import t_cdf
 from .glm import GLM, GLMState
+from .solve import CholeskySolve, LinearSolve
 from .stderr import ErrVarEstimation, FisherInfoError
 
 
@@ -118,6 +122,8 @@ class CommonTest(ScoreTestSNP):
 
 
 class HypothesisTest(eqx.Module):
+    solver: LinearSolve = CholeskySolve()
+
     def __call__(
         self,
         X: ArrayLike,
@@ -169,7 +175,7 @@ class WaldTest(HypothesisTest):
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
-        glm = GLM(family=family, max_iter=max_iter)
+        glm = GLM(family=family, max_iter=max_iter, solver=self.solver)
 
         def _func(carry, snp):
             M = jnp.hstack((X, snp[:, jnp.newaxis]))
@@ -200,6 +206,7 @@ class WaldTest(HypothesisTest):
 
 
 class WaldTest_lm(HypothesisTest):
+    @eqx.filter_jit
     def test(
         self,
         X: ArrayLike,
@@ -211,26 +218,62 @@ class WaldTest_lm(HypothesisTest):
         max_iter: int = 1000,
         score_test: ScoreTestSNP = CommonTest(),
     ) -> CisGLMState:
-        glm = GLM(family=family, max_iter=max_iter)
+        glm = GLM(family=family, max_iter=max_iter, solver=self.solver)
+        n, p = X.shape
 
-        def _func(carry, snp):
-            M = jnp.hstack((X, snp[:, jnp.newaxis]))
-            glmstate = glm.fit_fast_lm(M, y)
+        # use projecting method
+        glmstate_covar = glm.fit_fast_lm(X, y)
+        y_res = y - glmstate_covar.mu
 
-            return carry, CisGLMState(
-                beta=glmstate.beta[-1],
-                se=glmstate.se[-1],
-                p=glmstate.p[-1],
-                z=glmstate.z[-1],
-                num_iters=glmstate.num_iters,
-                converged=glmstate.converged,
-                alpha=glmstate.alpha,
-                weights=jnp.array([-9]),  # placeholder
-            )
+        P = X @ jnpla.inv(X.T @ X) @ X.T
+        G_res = G - P @ G
 
-        _, state = lax.scan(_func, 0.0, G.T)
+        weight = jnp.ones((n, 1))
+        beta = jax.vmap(lambda g_res: self.solver(g_res[:, jnp.newaxis], y_res, weight), in_axes=1)(G_res)
+        beta = beta.ravel()
+        fitted = G_res * beta
 
-        return state
+        resid = jnp.sum(jnp.square(y_res - fitted), axis=0)
+        df = y_res.shape[0] - p - 1
+        phi = resid / df
+
+        infor = (G_res / phi).T @ G_res
+        beta_se = jnp.sqrt(1 / jnp.diag(infor))
+
+        stat = beta / beta_se
+        pval_wald = t_cdf(-abs(stat), df) * 2
+
+        alpha = jnp.repeat(0, p)
+        converged = jnp.repeat(True, p)
+        num_iters = jnp.ones((p,))
+
+        # def _func(carry, snp):
+        #     M = jnp.hstack((X, snp[:, jnp.newaxis]))
+        #     glmstate = glm.fit_fast_lm(M, y)
+        #
+        #     return carry, CisGLMState(
+        #         beta=glmstate.beta[-1],
+        #         se=glmstate.se[-1],
+        #         p=glmstate.p[-1],
+        #         z=glmstate.z[-1],
+        #         num_iters=glmstate.num_iters,
+        #         converged=glmstate.converged,
+        #         alpha=glmstate.alpha,
+        #         weights=jnp.array([-9]),  # placeholder
+        #     )
+
+        # _, state = lax.scan(_func, 0.0, G.T)
+
+        return CisGLMState(
+            beta=beta,
+            se=beta_se,
+            p=pval_wald,
+            z=stat,
+            num_iters=num_iters,
+            converged=converged,
+            alpha=alpha,
+            weights=jnp.repeat(-9, p),  # placeholder
+        )
 
 
 class ScoreTest(HypothesisTest):
