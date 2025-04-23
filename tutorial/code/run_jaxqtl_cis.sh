@@ -34,7 +34,7 @@ model="NB"
 nperm=1000
 
 # prefix for output file
-out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}"
+out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
 
 jaxqtl \
  --geno ${geno} \
