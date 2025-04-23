@@ -23,7 +23,8 @@ We are currently working on more detailed documentations.
 Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis.
 
 [**Installation**](#Installation)
-| [**Example**](#Example)
+| [**Working example**](#Working example)
+| [**Genome-wide mapping**](#Genome-wide sc-eQTL mapping)
 | [**Notes**](#notes)
 | [**Support**](#support)
 | [**Other Software**](#other-software)
@@ -81,7 +82,7 @@ pip install -e .
 pip install lineax qtl
 ```
 
-## Example
+## Working example
 
 Here we provide a working example for cis-eQTL mapping using down-sampled OneK1K dataset (N=100).
 Now we focus on identifying lead SNP for 10 genes in CD4_NC cell type and obtain
@@ -207,7 +208,8 @@ See output results in `./tutorial/output`. The columns are,
 
 ## Genome-wide sc-eQTL mapping
 
-To efficiently run sc-eQTL mapping genome-wide using count-based models,
+### General advice
+To efficiently run sc-eQTL mapping genome-wide using jaxQTL count-based models especially for large cohort (N>1000),
 we recommend run jaxQTL by chromosome and
 break genes (total ~20,000) into chunks, with chunk size of 200 - 300 genes.
 For our cis-eQTL analysis on OneK1K (max N=982),
@@ -215,11 +217,14 @@ the run time for each chunk of 50 genes is around 1 -2 hrs depending on which ch
 In this way, we can distribute the tasks over multiple nodes in parallel using job scheduler on HPC.
 You may consider increase the chunk size to maximize efficiency on CPU node or even more if using GPU (50 genes takes ~20 mins).
 
+If sample size is small (e.g., N=200), you may consider not splitting by chunks because it's fast enough.
+We recommend trying a few genes and check the log file to estimate the run time.
+
 We provide a shell script example to submit batch jobs on HPC: `./tutoral/code/run_jaxqtl_cis_all.sh`.
 Please see below for detailed instructions:
 
 ### 1. Organize directory structure
-Suppose we are located in the working directory of your project. Here is an example of directory structure:
+Suppose we are located in the working directory of a project. Here is an example of directory structure:
 
 ```{bash}
 .
@@ -273,13 +278,22 @@ CD4_NC	2	chunk_2
 ...
 ```
 
-First put this script `./tutoral/code/` in your `/code` directory.\
+First put this script `./tutoral/code/create_genelist_dir.R` in your `/code` directory.
 Then run `Rscript create_genelist_dir.R`
 
 ### 3. Run jaxQTL on HPC using array jobs
 
-We used slurm job schedule on our HPC. An example sbatch script can be found in `./tutoral/code/` \
+We used slurm job schedule on our HPC. An example sbatch script can be found in `./tutoral/code/run_jaxqtl_cis_all.sh` \
 To submit jobs, use `sbatch run_jaxqtl_cis_all.sh`
+
+### 4. Collect results
+
+After all cis-eQTL mapping are completed, you can prepare results for analysis by:
+1) combine all chunk results from one cell type into one single file
+2) filter by converged GLM model `model_converged > 0` and converged beta approximation `beta_converged > 0`
+3) calculate FDR-controlled pvalues on `pval_beta` using
+[qvalue](https://bioconductor.org/packages/release/bioc/html/qvalue.html) method in R
+4) identify eGenes (genes with at least one eQTL) by qvalue < FDR level, e.g., 0.05
 
 ## Note
 
