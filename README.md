@@ -23,8 +23,7 @@ We are currently working on more detailed documentations.
 Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis.
 
 [**Installation**](#Installation)
-| [**Working example**](#Working example)
-| [**Genome-wide mapping**](#Genome-wide sc-eQTL mapping)
+| [**Example**](#Example)
 | [**Notes**](#notes)
 | [**Support**](#support)
 | [**Other Software**](#other-software)
@@ -82,7 +81,7 @@ pip install -e .
 pip install lineax qtl
 ```
 
-## Working example
+## Example
 
 Here we provide a working example for cis-eQTL mapping using down-sampled OneK1K dataset (N=100).
 Now we focus on identifying lead SNP for 10 genes in CD4_NC cell type and obtain
