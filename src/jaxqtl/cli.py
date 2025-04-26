@@ -600,7 +600,7 @@ def main(args):
 
     elif args.mode == "finemap":
         covar = covar if args.finemap_addcovar is True else None
-        map_finemap(dat, set_L=args.L, out_path=args.out, covar=covar, offset_eta=offset_eta)
+        map_finemap(dat, set_L=args.L, out_path=args.outdir, covar=covar, offset_eta=offset_eta)
 
     elif args.mode == "fitnull":
         pass
