@@ -21,6 +21,7 @@ from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log, get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
+from jaxqtl.map.finemap import map_finemap
 from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
 from jaxqtl.map.utils import _ACAT, _get_geno_info, _setup_G_y
 
@@ -176,6 +177,7 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr1")
     argp.add_argument("--covar", type=str, help="Covariate path")
+    argp.add_argument("--L", type=int, default=10, help="Fine-mapping causal L")
     argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
     argp.add_argument("--covar-test", type=str, help="Covariate to test")
     argp.add_argument("--rm-covar", type=str, help="Covariate to remove")
@@ -198,7 +200,7 @@ def main(args):
     argp.add_argument(
         "--mode",
         type=str,
-        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
+        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only", "finemap"],
         help="""cis: eQTL mapping to identify genes with at least one eQTL (default uses permutation to calibrate pvals);
                 nominal: provides association statistics for all pairs of cis-SNP-gene""",
     )
@@ -267,6 +269,12 @@ def main(args):
     )
     argp.add_argument(
         "--no-offset",
+        action="store_true",
+        default=False,
+        help="remove offset for count-based models",
+    )
+    argp.add_argument(
+        "--finemap-addcovar",
         action="store_true",
         default=False,
         help="remove offset for count-based models",
@@ -588,6 +596,10 @@ def main(args):
                 cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
+
+    elif args.mode == "finemap":
+        covar = covar if args.finemap_addcovar is True else None
+        map_finemap(dat, set_L=args.L, out_path=args.out, covar=covar, offset_eta=offset_eta)
 
     elif args.mode == "fitnull":
         pass
