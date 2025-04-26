@@ -298,6 +298,7 @@ def main(args):
         help="Verbose for logger",
     )
     argp.add_argument("--out", "-o", type=str, help="out file prefix")
+    argp.add_argument("--outdir", type=str, default=None, help="out directory for fine map")
 
     args = argp.parse_args(args)  # a list a strings
 
