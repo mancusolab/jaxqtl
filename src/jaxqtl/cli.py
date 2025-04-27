@@ -599,8 +599,8 @@ def main(args):
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "finemap":
-        covar = covar if args.finemap_addcovar is True else None
-        map_finemap(dat, set_L=args.L, out_path=args.outdir, covar=jnp.array(covar), offset_eta=offset_eta)
+        covar_arr = jnp.array(dat.covar) if args.finemap_addcovar is True else None
+        map_finemap(dat, set_L=args.L, out_path=args.outdir, covar=covar_arr, offset_eta=offset_eta)
 
     elif args.mode == "fitnull":
         pass
