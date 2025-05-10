@@ -33,8 +33,8 @@ def map_nominal(
     max_iter: int = 1000,
     mode: Optional[str] = None,
     ld_out: str = "./gene",
-    write_raw_ld: bool = False,
     cond_snp: Optional[str] = None,
+    ld_type: str = "glm_wt",
 ) -> pd.DataFrame:
     """cis eQTL Mapping for all cis-SNP gene pairs
 
@@ -120,17 +120,8 @@ def map_nominal(
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
             # only available for one gene
-            R_glm_wt_df, R_raw_df = _calc_LD(G, X, result.weights, True)
-            R_glm_wt_df.to_csv(ld_out + ".ld.glm_wt.tsv.gz", sep="\t", index=False, header=False)
-            del R_glm_wt_df
-
-            R_no_glm_wt_df, _ = _calc_LD(G, X, result.weights, False)
-            R_no_glm_wt_df.to_csv(ld_out + ".ld.no_glm_wt.tsv.gz", sep="\t", index=False, header=False)
-
-            if write_raw_ld:
-                R_raw_df.to_csv(ld_out + ".ld.raw.tsv.gz", sep="\t", index=False, header=False)
-            del R_no_glm_wt_df, R_raw_df
-            continue
+            R_df = _calc_LD(G, X, result.weights, ld_type)
+            R_df.to_csv(ld_out + f".ld.{ld_type}.tsv.gz", sep="\t", index=False, header=False)
 
         if verbose:
             log.info(
@@ -189,31 +180,32 @@ def map_nominal(
     return outdf
 
 
-def _calc_LD(G, X, wts, ld_wt):
-    if not ld_wt:
-        # calculate LD matrix without adding GLM weights
-        wts = 1.0
+def _calc_LD(G, X, wts, ld_type):
+    if ld_type == "raw":
+        G = (G - jnp.mean(G, axis=0)) / jnp.std(G, axis=0)
+        GtG = G.T @ G
+        R = GtG / jnp.diag(GtG)
+        R_df = pd.DataFrame.from_records(R)
+    else:
+        if ld_type == "no_glm_wt":
+            # calculate LD matrix without adding GLM weights
+            wts = 1.0
 
-    w_half_X = X * jnp.sqrt(wts)
-    w_X = X * wts
+        w_half_X = X * jnp.sqrt(wts)
+        w_X = X * wts
 
-    # project covariates from G
-    infor_inv = jnpla.inv(w_half_X.T @ w_half_X)
-    G_resid = G - jnpla.multi_dot([X, infor_inv, w_X.T, G])
-    w_G_resid = G_resid * jnp.sqrt(wts)
+        # project covariates from G
+        infor_inv = jnpla.inv(w_half_X.T @ w_half_X)
+        G_resid = G - jnpla.multi_dot([X, infor_inv, w_X.T, G])
+        w_G_resid = G_resid * jnp.sqrt(wts)
 
-    w_G_resid = (w_G_resid - jnp.mean(w_G_resid, axis=0)) / jnp.std(w_G_resid, axis=0)
-    GtWG = (w_G_resid).T @ w_G_resid
-    R_wt = GtWG / jnp.diag(GtWG)
+        w_G_resid = (w_G_resid - jnp.mean(w_G_resid, axis=0)) / jnp.std(w_G_resid, axis=0)
+        GtWG = (w_G_resid).T @ w_G_resid
+        R_wt = GtWG / jnp.diag(GtWG)
 
-    R_wt_df = pd.DataFrame.from_records(R_wt)
+        R_df = pd.DataFrame.from_records(R_wt)
 
-    G = (G - jnp.mean(G, axis=0)) / jnp.std(G, axis=0)
-    GtG = G.T @ G
-    R = GtG / jnp.diag(GtG)
-    R_df = pd.DataFrame.from_records(R)
-
-    return R_wt_df, R_df
+    return R_df
 
 
 def map_nominal_covar(

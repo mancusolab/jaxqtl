@@ -203,6 +203,13 @@ def main(args):
                 nominal: provides association statistics for all pairs of cis-SNP-gene""",
     )
     argp.add_argument(
+        "--ld-type",
+        type=str,
+        choices=["raw", "glm_wt", "no_glm_wt"],
+        default="glm_wt",
+        help="""type of LD matrix""",
+    )
+    argp.add_argument(
         "--platform",
         "-p",
         type=str,
@@ -247,12 +254,6 @@ def main(args):
         help="Test for rare variants using SPA method",
     )
     argp.add_argument("--autosomal-only", action="store_true", default=False, help="Test for only autosomal chr")
-    argp.add_argument(
-        "--raw-ld",
-        action="store_true",
-        default=False,
-        help="Whether write raw ld matrix",
-    )
     argp.add_argument(
         "--perm-pheno",
         action="store_true",
@@ -521,10 +522,10 @@ def main(args):
             log=log,
             mode=args.mode,
             ld_out=args.out,
-            write_raw_ld=args.raw_ld,
             robust_se=args.robust,
             max_iter=args.max_iter,
             cond_snp=args.cond_snp,
+            ld_type=args.ld_type,
         )
         log.info("write out LD matrix.")
 
