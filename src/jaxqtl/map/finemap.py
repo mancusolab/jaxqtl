@@ -10,6 +10,8 @@ from jax import numpy as jnp
 from jax.typing import ArrayLike
 from jaxtyping import Array
 
+from ..families.distribution import NegativeBinomial
+from ..infer.glm import GLM
 from ..infer.utils import CisGLMState
 from ..io.readfile import ReadyDataState
 from ..log import get_log
@@ -70,7 +72,8 @@ def map_finemap(
     step_size: float = 0.05,
     window: int = 500000,
     offset_eta: ArrayLike = 0.0,
-    max_iter: int = 200,
+    max_iter: int = 50,
+    max_select: int = 100,
     verbose: bool = True,
     covar: Optional[ArrayLike] = None,
     log=None,
@@ -160,6 +163,19 @@ def map_finemap(
         ss_b = (0.1 / set_L) * jnp.ones(set_L)
         pi = jnp.ones(P) / P
 
+        # fit covar-only NB model to calculate dispersion
+        jaxqtl_nb = GLM(family=NegativeBinomial())
+        Z = jnp.concatenate([jnp.ones((N, 1)), covar], axis=1)
+        init_eta, disp = jaxqtl_nb.calc_eta_and_dispersion(Z, y[:, jnp.newaxis], offset_eta[:, jnp.newaxis])
+        glm_state = jaxqtl_nb.fit(
+            Z,
+            y[:, jnp.newaxis],
+            init=init_eta,
+            offset_eta=offset_eta[:, jnp.newaxis],
+            alpha_init=disp.squeeze(),
+        )
+        ssu = jnp.log(glm_state.alpha + 1.0)
+
         result = po.infer(
             X=G,
             y=y,
@@ -169,11 +185,12 @@ def map_finemap(
             pi=pi,
             init="prior",
             sigma_sq_b=ss_b,
+            sigma_sq_u=ssu,
             step_size=step_size,
             max_iter=max_iter,
+            max_select=max_select,
             threshold=0.95,
             purity_cutoff=0.5,
-            max_select=100,
             seed=seed,
             optim="rg",
         )

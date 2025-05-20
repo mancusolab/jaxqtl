@@ -62,12 +62,14 @@ offset_eta = jnp.log(total_libsize)
 # ENSG00000075234 has 2 CS, one of size 12 and the other 5
 # ENSG00000099889 has 1 CS with 2 SNP
 # dat.filter_gene(gene_list=["ENSG00000075234", "ENSG00000188677", "ENSG00000099889"])
-dat.filter_gene(gene_list=["ENSG00000075234"])
+dat.filter_gene(gene_list=["ENSG00000099889"])
 
 covar = dat.covar
 
 # ~4s
 start = timeit.default_timer()
-mapcis_out_score_nb = map_finemap(dat, set_L=2, out_path="../example/local/NK_new", covar=covar, offset_eta=offset_eta)
+mapcis_out_score_nb = map_finemap(
+    dat, set_L=5, step_size=0.05, out_path="../example/local/NK_new", covar=covar, offset_eta=offset_eta
+)
 stop = timeit.default_timer()
 print("Time: ", stop - start)

@@ -221,6 +221,8 @@ def main(args):
     )
     argp.add_argument("--window", type=int, default=500000, help="one sided window size (bps) with respect to TSS")
     argp.add_argument("--nperm", type=int, default=1000)
+    argp.add_argument("--posie-step", type=float, default=0.05)
+    argp.add_argument("--posie-iter", type=int, default=50)
     argp.add_argument("--max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
     argp.add_argument(
@@ -600,7 +602,15 @@ def main(args):
 
     elif args.mode == "finemap":
         covar_arr = jnp.array(dat.covar) if args.finemap_addcovar is True else None
-        map_finemap(dat, set_L=args.L, out_path=args.outdir, covar=covar_arr, offset_eta=offset_eta)
+        map_finemap(
+            dat,
+            set_L=args.L,
+            step_size=args.posie_step,
+            max_iter=args.posie_iter,
+            out_path=args.outdir,
+            covar=covar_arr,
+            offset_eta=offset_eta,
+        )
 
     elif args.mode == "fitnull":
         pass
