@@ -225,6 +225,7 @@ def main(args):
     argp.add_argument("--posie-iter", type=int, default=50)
     argp.add_argument("--max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
+    argp.add_argument("--fm-seed", type=int, default=123)
     argp.add_argument(
         "--addpc", type=int, default=2, help="Add expression PCs; set this to 0 to disable PC calculation"
     )
@@ -610,7 +611,7 @@ def main(args):
             out_path=args.outdir,
             covar=covar_arr,
             offset_eta=offset_eta,
-            seed=args.seed,
+            seed=args.fm_seed,
         )
 
     elif args.mode == "fitnull":
