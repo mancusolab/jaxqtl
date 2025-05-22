@@ -610,6 +610,7 @@ def main(args):
             out_path=args.outdir,
             covar=covar_arr,
             offset_eta=offset_eta,
+            seed=args.seed,
         )
 
     elif args.mode == "fitnull":
