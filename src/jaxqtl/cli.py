@@ -223,6 +223,13 @@ def main(args):
     argp.add_argument("--nperm", type=int, default=1000)
     argp.add_argument("--posie-step", type=float, default=0.05)
     argp.add_argument("--posie-iter", type=int, default=50)
+    argp.add_argument(
+        "--posie-init",
+        type=str,
+        choices=["prior", "susie"],
+        default="prior",
+        help="prior or susie init for posie finemap",
+    )
     argp.add_argument("--max-iter", type=int, default=1000)
     argp.add_argument("--perm-seed", type=int, default=1)
     argp.add_argument("--fm-seed", type=int, default=123)
@@ -610,6 +617,7 @@ def main(args):
             max_iter=args.posie_iter,
             out_path=args.outdir,
             covar=covar_arr,
+            init_method=args.posie_init,
             offset_eta=offset_eta,
             seed=args.fm_seed,
         )
