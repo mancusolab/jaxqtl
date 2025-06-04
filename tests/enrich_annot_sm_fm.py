@@ -218,6 +218,9 @@ def map_annot_sm(
             else:
                 continue
 
+        # re-order pip y position
+        pip_y = pip_y.sort_values(by="pos")
+
         # choose outcome
         if pip_cs == "pip":
             y = np.array(pip_y[['pip']])
