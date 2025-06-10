@@ -3,7 +3,6 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-import jax
 import jax.numpy.linalg as jnpla
 
 from jax import lax, numpy as jnp
@@ -154,7 +153,7 @@ def map_nominal(
         num_var_cis.append(var_df.shape[0])
         alpha.append(result.alpha)
 
-        jax.clear_caches()  # clear up caches
+        # jax.clear_caches()  # clear up caches
 
     # write result
     start_row = 0

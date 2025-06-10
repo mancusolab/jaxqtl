@@ -4,7 +4,6 @@ from typing import List, Optional, Tuple
 import numpy as np
 import pandas as pd
 
-import jax
 import jax.random as rdm
 
 from jax import numpy as jnp
@@ -213,7 +212,7 @@ def map_cis(
                 str(rend),
             )
 
-        jax.clear_caches()  # Clear all compilation and staging caches
+        # jax.clear_caches()  # Clear all compilation and staging caches
         result_out = _prepare_cis_result(
             G,
             chrom,
