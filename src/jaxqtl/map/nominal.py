@@ -3,6 +3,7 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
+import jax
 import jax.numpy.linalg as jnpla
 
 from jax import lax, numpy as jnp
@@ -79,6 +80,7 @@ def map_nominal(
     var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
     se_estimator = HuberError() if robust_se else FisherInfoError()
 
+    i = 0
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -153,7 +155,10 @@ def map_nominal(
         num_var_cis.append(var_df.shape[0])
         alpha.append(result.alpha)
 
-        # jax.clear_caches()  # clear up caches
+        # clear caches every 50 genes
+        i += 1
+        if (i + 1) % 50 == 0:
+            jax.clear_caches()  # clear up caches
 
     # write result
     start_row = 0
