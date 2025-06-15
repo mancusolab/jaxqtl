@@ -127,6 +127,7 @@ class H5AD(PhenoIO):
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
         celltype_path: Optional[str] = None,
+        suffix: Optional[str] = None,
         autosomal_only: bool = True,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
@@ -162,8 +163,13 @@ class H5AD(PhenoIO):
 
             cell_type_outname = re.sub("[^0-9a-zA-Z]+", "_", cell_type)
 
+            if suffix is None:
+                outname = os.path.join(out_dir, f"{cell_type_outname}.bed.gz")
+            else:
+                outname = os.path.join(out_dir, f"{cell_type_outname}.{suffix}.bed.gz")
+
             out.to_csv(
-                os.path.join(out_dir, f"{cell_type_outname}.bed.gz"),
+                outname,
                 index=False,
                 sep="\t",
             )
