@@ -161,6 +161,7 @@ def map_cis(
     results = []
     se_estimator = HuberError() if robust_se else FisherInfoError()
 
+    i = 0
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
@@ -214,7 +215,11 @@ def map_cis(
                 str(rend),
             )
 
-        jax.clear_caches()  # Clear all compilation and staging caches
+        # clear caches every 50 genes
+        i += 1
+        if (i + 1) % 50 == 0:
+            jax.clear_caches()  # clear up caches
+
         result_out = _prepare_cis_result(
             G,
             chrom,
