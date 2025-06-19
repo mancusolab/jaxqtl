@@ -45,9 +45,7 @@ def _cis_window_cutter(dat: ReadyDataState, chrom: str, start: int, end: int) ->
     var_info = dat.bim
 
     cis_var_info = var_info.loc[
-        (var_info["chrom"] == str(chrom).lower().removeprefix("chr"))
-        & (var_info["pos"] >= start)
-        & (var_info["pos"] <= end)
+        (var_info["chrom"] == str(chrom)) & (var_info["pos"] >= start) & (var_info["pos"] <= end)
     ]
 
     # subset G to cis variants (nxp)
