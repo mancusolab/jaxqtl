@@ -156,7 +156,11 @@ def create_readydata(
 
     # keep genes in autosomals
     if autosomal_only:
-        pheno = pheno.loc[pheno.chr.isin([str(i) for i in range(1, 23)])]
+        check_chr_suffix = (pheno.chr.str.lower()).str.startswith('chr', na=False)
+        if check_chr_suffix.sum() > 0:
+            pheno = pheno.loc[pheno.chr.isin([f"chr{i}" for i in range(1, 23)])]
+        else:
+            pheno = pheno.loc[pheno.chr.isin([str(i) for i in range(1, 23)])]
 
     # put gene name (index) back to columns
     pos_df = pheno[["chr", "start", "end"]].reset_index()

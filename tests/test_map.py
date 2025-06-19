@@ -77,7 +77,7 @@ mapcis_out_score_nb = map_cis(
     test=ScoreTest(),
     beta_estimator=InferBetaGLM(),
     offset_eta=offset_eta,
-    n_perm=1000,
+    n_perm=100,
     compute_qvalue=False,
 )
 stop = timeit.default_timer()
