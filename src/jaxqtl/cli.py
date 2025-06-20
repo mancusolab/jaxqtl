@@ -295,7 +295,9 @@ def main(args):
     args = argp.parse_args(args)  # a list a strings
 
     jax.config.update("jax_platform_name", args.platform)
-    jax.config.update("jax_enable_x64", True)  # complaints if using TPU
+    if args.platform != "tpu":
+        # TPU not support complex 64, only 16 and 32
+        jax.config.update("jax_enable_x64", True)
 
     log = get_logger(__name__, args.out)
     if args.verbose:
