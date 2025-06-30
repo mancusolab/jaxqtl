@@ -175,7 +175,7 @@ def map_finemap(
             offset_eta=offset_eta[:, jnp.newaxis],
             alpha_init=disp.squeeze(),
         )
-        ssu = jnp.log(glm_state.alpha + 1.0)
+        ssu = jnp.log1p(glm_state.alpha)
 
         result = po.infer(
             X=G,
