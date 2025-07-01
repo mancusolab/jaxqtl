@@ -69,6 +69,7 @@ def map_finemap(
     standardize: bool = True,
     seed: int = 123,
     set_L: int = 10,
+    h2: float = 0.05,
     step_size: float = 0.05,
     window: int = 500000,
     offset_eta: ArrayLike = 0.0,
@@ -161,7 +162,7 @@ def map_finemap(
 
         # set parameters
         set_L = int(jnp.array([set_L, P]).min())
-        ss_b = (0.1 / set_L) * jnp.ones(set_L)
+        ss_b = (h2 / set_L) * jnp.ones(set_L)
         pi = jnp.ones(P) / P
 
         # fit covar-only NB model to calculate dispersion
