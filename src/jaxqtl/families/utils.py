@@ -1,8 +1,9 @@
 import jax
 import jax.numpy as jnp
 
-from jax import ArrayLike, lax
+from jax import lax
 from jax.scipy.special import betainc, expit, gammaincc
+from jax.typing import ArrayLike
 
 
 def _clipped_expit(x):
