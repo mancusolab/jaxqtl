@@ -1,4 +1,5 @@
 import gzip
+import warnings
 
 from abc import ABCMeta, abstractmethod
 from collections import defaultdict
@@ -40,7 +41,8 @@ class PlinkReader(GenoIO):
 
     def __call__(self, bed_path: str) -> PlinkState:
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
-        bim, fam, bed = read_plink(bed_path, verbose=False)
+        with warnings.catch_warnings(action="ignore", category=FutureWarning):
+            bim, fam, bed = read_plink(bed_path, verbose=False)
         G = pd.DataFrame(bed.compute().T)  # nxp
         G = 2 - G  # set alt as effect allele
 

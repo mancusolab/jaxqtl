@@ -151,7 +151,7 @@ class H5AD(PhenoIO):
             gene_map = load_gene_gft_bed(gtf_bed_path)
 
             # remove "chr" in prefix if there is any
-            gene_map['chr'] = [s.removeprefix('chr') for s in gene_map['chr']]
+            gene_map["chr"] = [s.removeprefix("chr") for s in gene_map["chr"]]
 
             if autosomal_only:
                 gene_map = gene_map.loc[gene_map.chr.isin([str(i) for i in range(1, 23)])]

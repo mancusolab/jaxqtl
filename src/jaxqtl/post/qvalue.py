@@ -150,7 +150,7 @@ def add_qvalues(
     qval, pi0 = calculate_qval(np.array(cis_df[pval_col]), log, pi0, lam=qvalue_lambda)
 
     cis_df["qval"] = qval
-    log.info(f"  * Proportion of significant phenotypes (1-pi0): {1-pi0:.2f}")
+    log.info(f"  * Proportion of significant phenotypes (1-pi0): {1 - pi0:.2f}")
     log.info(f"  * QTL phenotypes @ FDR {fdr:.2f}: {(cis_df['qval'] <= fdr).sum()}")
 
     # determine global min(p) significance threshold and calculate nominal p-value threshold for each gene

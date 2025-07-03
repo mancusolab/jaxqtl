@@ -37,6 +37,10 @@ nperm=1000
 # prefix for output file
 out="${out_path}/${celltype}_N${N}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
 
+# viztracer \
+# --tracer_entries 10000000 \
+# -o results.json \
+# -- jaxqtl \
 jaxqtl \
  --geno ${geno} \
  --covar ${covar} \

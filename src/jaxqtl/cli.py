@@ -16,7 +16,7 @@ from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
 from jaxqtl.infer.utils import CommonTest, ScoreTest, WaldTest, WaldTest_lm  # , RareTest
 from jaxqtl.io.covar import covar_reader
-from jaxqtl.io.geno import PlinkReader
+from jaxqtl.io.geno import PlinkReader, VCFReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata, ReadyDataState
 from jaxqtl.log import get_log, get_logger
@@ -174,7 +174,12 @@ def map_cis_nominal_score_sm(
 
 def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr1")
+
+    group = argp.add_mutually_exclusive_group(required=True)
+    group.add_argument("--geno", type=str, help="Prefix to PLINK triplet")
+    group.add_argument("--bfile", type=str, help="Prefix to PLINK triplet")
+    group.add_argument("--vcf", type=str, help="Path to VCF data")
+
     argp.add_argument("--covar", type=str, help="Covariate path")
     argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
     argp.add_argument("--covar-test", type=str, help="Covariate to test")
@@ -317,9 +322,21 @@ def main(args):
         log.info("Please choose either poisson or gaussian.")
 
     # raw genotype data and impute for genotype data
-    geno_reader = PlinkReader()
-    geno, bim, sample_info = geno_reader(args.geno)
+    if args.bfile is not None:
+        geno_reader = PlinkReader()
+        prefix = args.bfile
+    elif args.vcf is not None:
+        geno_reader = VCFReader()
+        prefix = args.vcf
+    elif args.geno is not None:
+        geno_reader = PlinkReader()
+        prefix = args.geno
+        log.warn("`--geno PREFIX` is deprecated and will be removed in a future version. Use `--bfile PREFIX` instead")
+    else:
+        # we really shouldn't get here with mutex above
+        raise ValueError("No valid genotype file specified.")
 
+    geno, bim, sample_info = geno_reader(prefix)
     pheno_reader = PheBedReader()
     pheno = pheno_reader(args.pheno)
 
@@ -342,7 +359,7 @@ def main(args):
         total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
         offset_eta = jnp.log(total_libsize)
     else:
-        offset_eta = pd.read_csv(args.offset, names=['iid', 'eta'], sep="\t", index_col="iid")
+        offset_eta = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
         offset_eta = offset_eta.loc[offset_eta.index.isin(dat.pheno.count.index)].sort_index()
         offset_eta = jnp.array(offset_eta)
 
@@ -448,14 +465,14 @@ def main(args):
             )
 
             out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
-            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
+            out_cis = out_df.loc[out_df.groupby("phenotype_id").pval_nominal.idxmin()]
             acat_p = jnp.array([])
             for gene in out_cis.phenotype_id.unique():
-                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
+                pvec = jnp.array(out_df.loc[out_df["phenotype_id"] == gene].pval_nominal)
                 pvec = pvec[~jnp.isnan(pvec)]
                 acat_p = jnp.append(acat_p, _ACAT(pvec))
 
-            out_cis['pval_acat'] = acat_p
+            out_cis["pval_acat"] = acat_p
             out_cis.to_csv(args.out + ".cis_score_acat.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
             out_df = map_nominal(
@@ -472,14 +489,14 @@ def main(args):
             )
 
             out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
-            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
+            out_cis = out_df.loc[out_df.groupby("phenotype_id").pval_nominal.idxmin()]
             acat_p = jnp.array([])
             for gene in out_cis.phenotype_id.unique():
-                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
+                pvec = jnp.array(out_df.loc[out_df["phenotype_id"] == gene].pval_nominal)
                 pvec = pvec[~jnp.isnan(pvec)]
                 acat_p = jnp.append(acat_p, _ACAT(pvec))
 
-            out_cis['pval_acat'] = acat_p
+            out_cis["pval_acat"] = acat_p
             out_cis.to_csv(args.out + ".cis_wald_acat.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "nominal":

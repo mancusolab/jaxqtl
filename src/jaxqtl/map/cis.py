@@ -1,7 +1,6 @@
 from dataclasses import dataclass
 from typing import List, Optional, Tuple
 
-import numpy as np
 import pandas as pd
 
 import jax
@@ -80,7 +79,7 @@ def map_cis(
     sig_level: float = 0.05,
     fdr_level: float = 0.05,
     pi0: Optional[float] = None,
-    qvalue_lambda: Optional[np.ndarray] = None,
+    qvalue_lambda: Optional[ArrayLike] = None,
     offset_eta: ArrayLike = 0.0,
     n_perm: int = 1000,
     robust_se: bool = False,
@@ -161,8 +160,7 @@ def map_cis(
     results = []
     se_estimator = HuberError() if robust_se else FisherInfoError()
 
-    i = 0
-    for gene in gene_info:
+    for i, gene in enumerate(gene_info):
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
         rend = end_max + window
@@ -216,7 +214,6 @@ def map_cis(
             )
 
         # clear caches every 50 genes
-        i += 1
         if (i + 1) % 50 == 0:
             jax.clear_caches()  # clear up caches
 

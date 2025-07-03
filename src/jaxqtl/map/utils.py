@@ -91,7 +91,7 @@ def _setup_G_y(
 
 
 def _ACAT(pvalues: ArrayLike, weights: Optional[ArrayLike] = None) -> Array:
-    '''acat_test()
+    """acat_test()
     # ref: https://gist.github.com/ryananeff/c66cdf086979b13e855f2c3d0f3e54e1
     Aggregated Cauchy Assocaition Test
     A p-value combination method using the Cauchy distribution.
@@ -109,7 +109,7 @@ def _ACAT(pvalues: ArrayLike, weights: Optional[ArrayLike] = None) -> Array:
     Returns:
         pval: <float>
             The ACAT combined p-value.
-    '''
+    """
     if any(jnp.isnan(pvalues)):
         raise Exception("Cannot have NAs in the p-values.")
     if any([(i > 1) | (i < 0) for i in pvalues]):

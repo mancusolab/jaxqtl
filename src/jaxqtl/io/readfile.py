@@ -73,7 +73,6 @@ class ReadyDataState:
         count_std = (count_std - count_std.mean(axis=0)) / count_std.std(axis=0)  # standardize genes
 
         pca_pheno = PCA(n_components=k)
-        pca_pheno.fit(count_std)
         PCs = pca_pheno.fit_transform(count_std)  # nxk
 
         if add_covar is None:
@@ -156,7 +155,7 @@ def create_readydata(
 
     # keep genes in autosomals
     if autosomal_only:
-        check_chr_suffix = (pheno.chr.str.lower()).str.startswith('chr', na=False)
+        check_chr_suffix = (pheno.chr.str.lower()).str.startswith("chr", na=False)
         if check_chr_suffix.sum() > 0:
             pheno = pheno.loc[pheno.chr.isin([f"chr{i}" for i in range(1, 23)])]
         else:

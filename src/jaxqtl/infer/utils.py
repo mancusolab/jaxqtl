@@ -277,6 +277,7 @@ class WaldTest_lm(HypothesisTest):
 
 
 class ScoreTest(HypothesisTest):
+    @eqx.filter_jit
     def test(
         self,
         X: ArrayLike,

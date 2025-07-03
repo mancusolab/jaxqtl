@@ -221,20 +221,20 @@ def run_sim(
             log_offset = jnp.repeat(jnp.log(libsize), num_cells)  # repeat each element n times [1,2,3] -> [1,1,2,2,3,3]
             y_mat = jnp.column_stack((log_offset.reshape(-1, 1), y.ravel().reshape(-1, 1)))
             df = pd.DataFrame(y_mat).reset_index()
-            df.columns = ['iid', 'log_offset', 'gene' + str(i + 1)]
+            df.columns = ["iid", "log_offset", "gene" + str(i + 1)]
 
             iid_index = jnp.arange(1, nobs + 1)
             df.iid = jnp.repeat(iid_index, num_cells)
 
             if sample_covar_arr is not None:
-                df['sex'] = jnp.repeat(X[:, 1], num_cells)
-                df['age'] = jnp.repeat(X[:, 2], num_cells)
-            df.to_csv(f"{out_path}.pheno{i+1}.tsv.gz", sep="\t", index=False)
+                df["sex"] = jnp.repeat(X[:, 1], num_cells)
+                df["age"] = jnp.repeat(X[:, 2], num_cells)
+            df.to_csv(f"{out_path}.pheno{i + 1}.tsv.gz", sep="\t", index=False)
 
             # convert back to pseudo-bulk for jaxqtl
             y = y.sum(axis=1).reshape(-1, 1)
-            pd.DataFrame({'mean_ct': [y.mean()]}).to_csv(
-                f"{out_path}.pheno{i+1}.mean_pseudo_ct.tsv.gz", sep="\t", index=False
+            pd.DataFrame({"mean_ct": [y.mean()]}).to_csv(
+                f"{out_path}.pheno{i + 1}.mean_pseudo_ct.tsv.gz", sep="\t", index=False
             )
 
         y_mean = jnp.append(y_mean, (y / libsize).mean())
@@ -386,7 +386,7 @@ def main(args):
 
     if args.covar is not None:
         covar_df = pd.read_csv(args.covar, sep="\t")
-        covar = jnp.array(covar_df[['sex', 'age']])
+        covar = jnp.array(covar_df[["sex", "age"]])
         covar = covar / jnp.std(covar, axis=0)
         log.info("Read in covar file.")
     else:
@@ -429,21 +429,21 @@ def main(args):
     )
 
     d = {
-        'rej_nb_wald': [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
-        'rej_nb_wald_robust': [jnp.mean(res.pval_nb_wald_robust[~jnp.isnan(res.pval_nb_wald_robust)] < args.fwer)],
-        'rej_nb_score': [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
-        'rej_pois_wald': [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
-        'rej_pois_wald_robust': [
+        "rej_nb_wald": [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
+        "rej_nb_wald_robust": [jnp.mean(res.pval_nb_wald_robust[~jnp.isnan(res.pval_nb_wald_robust)] < args.fwer)],
+        "rej_nb_score": [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
+        "rej_pois_wald": [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
+        "rej_pois_wald_robust": [
             jnp.mean(res.pval_pois_wald_robust[~jnp.isnan(res.pval_pois_wald_robust)] < args.fwer)
         ],
-        'rej_pois_score': [jnp.mean(res.pval_pois_score[~jnp.isnan(res.pval_pois_score)] < args.fwer)],
-        'rej_lm_wald': [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
-        'rej_lm_wald_robust': [jnp.mean(res.pval_lm_wald_robust[~jnp.isnan(res.pval_lm_wald_robust)] < args.fwer)],
-        'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
-        'y_mean': [(res.y_mean).mean()],
-        'express_percent': [(res.y_express_percent).mean()],
-        'alpha_mean': [(res.alpha_list).mean()],
-        'libsize_valid': [(res.libsize_valid).mean()],
+        "rej_pois_score": [jnp.mean(res.pval_pois_score[~jnp.isnan(res.pval_pois_score)] < args.fwer)],
+        "rej_lm_wald": [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
+        "rej_lm_wald_robust": [jnp.mean(res.pval_lm_wald_robust[~jnp.isnan(res.pval_lm_wald_robust)] < args.fwer)],
+        "rej_lm_score": [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
+        "y_mean": [(res.y_mean).mean()],
+        "express_percent": [(res.y_express_percent).mean()],
+        "alpha_mean": [(res.alpha_list).mean()],
+        "libsize_valid": [(res.libsize_valid).mean()],
     }
 
     df_rej = pd.DataFrame(data=d)

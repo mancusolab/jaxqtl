@@ -42,7 +42,7 @@ dependencies = [
     "jax",
     "jaxtyping",
     "equinox",
-    "jaxopt",
+    "optimistix",
     "numpy",
     "typing_extensions",
     "scanpy",
@@ -101,6 +101,8 @@ skip-string-normalization = true
 [tool.ruff]
 target-version = "py37"
 line-length = 120
+
+[tool.ruff.lint]
 select = ["E", "F", "I001"]
 ignore = [
     # Allow non-abstract empty methods in abstract base classes
@@ -116,7 +118,7 @@ ignore = [
 ]
 ignore-init-module-imports = true
 
-[tool.ruff.isort]
+[tool.ruff.lint.isort]
 known-first-party = ["jaxqtl"]
 combine-as-imports = true
 lines-after-imports = 2
@@ -126,10 +128,10 @@ section-order = ["future", "standard-library", "third-party", "jax-ecosystem", "
 extra-standard-library = ["typing_extensions"]
 order-by-type = false
 
-[tool.ruff.isort.sections]
+[tool.ruff.lint.isort.sections]
 jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "jaxopt"]
 
-[tool.ruff.per-file-ignores]
+[tool.ruff.lint.per-file-ignores]
 # Tests can use magic values, assertions, and relative imports
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 

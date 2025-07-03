@@ -1,10 +1,7 @@
 from abc import abstractmethod
 from typing import NamedTuple, Optional, Tuple
 
-import numpy as np
-import scipy
-
-from scipy.stats import ncx2
+import optimistix as optx
 
 import equinox as eqx
 import jax.numpy.linalg as jnla
@@ -13,11 +10,10 @@ import jax.scipy.stats as jaxstats
 
 from jax import grad, jit, lax, numpy as jnp
 from jax.scipy.special import polygamma
-from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
 from ..families.distribution import ExponentialFamily
-from ..families.utils import t_cdf
+from ..families.utils import ncx2_sf, t_cdf
 from .stderr import ErrVarEstimation, FisherInfoError
 from .utils import HypothesisTest, ScoreTest
 
@@ -41,23 +37,32 @@ class InferBeta(eqx.Module):
         pass
 
 
+def _df_cost_lm(dof, args):
+    (zscore,) = args
+    """minimize abs(1-alpha) as a function of M_eff"""
+    pval = 2 * t_cdf(-jnp.fabs(zscore), dof)
+    pval = jnp.where(zscore != 0, pval, 0)
+    k = jnp.count_nonzero(zscore)
+    mean = jnp.sum(pval) / k
+    var = jnp.sum(pval**2) / k - mean**2
+    return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
+
+
 class InferBetaLM(InferBeta):
     def fit(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: ArrayLike) -> BetaState:
-        def df_cost(zscore, dof):
-            """minimize abs(1-alpha) as a function of M_eff"""
-            pval = 2 * t_cdf(-jnp.fabs(zscore), dof)
-            mean = jnp.mean(pval)
-            var = jnp.var(pval)
-            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
-
         # use normal distribution to compute p (approximate t in lm wald)
         p_perm = 2 * t_cdf(-jnp.fabs(z_stats_perm), dof)
-        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
+        z_stats_perm = jnp.where(jnp.isnan(p_perm), 0.0, z_stats_perm)
 
         # learn true dof parameter
-        res = scipy.optimize.minimize(lambda x: np.abs(df_cost(z_stats_perm, x)), dof, method='Nelder-Mead', tol=1e-4)
-        true_dof = res.x[0]
-        opt_status = res.success  # whether optimizer exited successfully
+        res = optx.least_squares(
+            _df_cost_lm,
+            solver=optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4),
+            y0=dof,
+            args=(z_stats_perm,),
+        )
+        true_dof = res.value
+        opt_status = res.result == optx.RESULTS.successful
 
         # use non-central chi2 to recompute permutation pvals
         p_perm = 2 * t_cdf(-jnp.fabs(z_stats_perm), true_dof)
@@ -77,26 +82,30 @@ class InferBetaLM(InferBeta):
         return BetaState(adj_p=adj_p, beta_res=beta_res, true_nc=true_dof, opt_status=opt_status)
 
 
+def _df_cost(nc, args):
+    (zscore,) = args
+    """minimize abs(1-alpha) as a function of M_eff"""
+    pval = ncx2_sf(zscore**2, 1, nc)
+    mean = jnp.mean(pval)
+    var = jnp.var(pval)
+    return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
+
+
 class InferBetaGLM(InferBeta):
+    @eqx.filter_jit
     def fit(self, z_stats_perm: ArrayLike, obs_z: ArrayLike, dof: Optional[ArrayLike]) -> BetaState:
-        def df_cost(zscore, nc):
-            """minimize abs(1-alpha) as a function of M_eff"""
-            pval = ncx2.sf(zscore**2, 1, nc)
-            mean = jnp.mean(pval)
-            var = jnp.var(pval)
-            return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
-
-        # use normal distribution to compute p (approximate t in lm wald)
-        p_perm = 2 * norm.sf(jnp.fabs(z_stats_perm))
-        z_stats_perm = z_stats_perm[~jnp.isnan(p_perm)]  # remove z stats that will cause NAs
-
         # learn non-central parameter
-        res = scipy.optimize.minimize(lambda x: np.abs(df_cost(z_stats_perm, x)), 0.1, method='Nelder-Mead', tol=1e-4)
-        true_nc = res.x[0]
-        opt_status = res.success  # whether optimizer exited successfully
+        res = optx.least_squares(
+            _df_cost,
+            solver=optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4),
+            y0=0.1,
+            args=(z_stats_perm,),
+        )
+        true_nc = res.value
+        opt_status = res.result == optx.RESULTS.successful
 
         # use non-central chi2 to recompute permutation pvals
-        p_perm = ncx2.sf(z_stats_perm**2, 1, true_nc)
+        p_perm = ncx2_sf(z_stats_perm**2, 1, true_nc)
 
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
         k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
@@ -107,7 +116,7 @@ class InferBetaGLM(InferBeta):
         # infer beta based on p_perm
         beta_res = infer_beta(p_perm, init, max_iter=self.max_iter)
 
-        adj_obs_p = ncx2.sf(obs_z**2, 1, true_nc)
+        adj_obs_p = ncx2_sf(obs_z**2, 1, true_nc)
         adj_p = _calc_adjp_beta(adj_obs_p, beta_res[0:2])
 
         return BetaState(adj_p=adj_p, beta_res=beta_res, true_nc=true_nc, opt_status=opt_status)
@@ -143,6 +152,7 @@ class Permutation(eqx.Module):
 class DirectPerm(Permutation):
     max_perm_direct: int = 10000
 
+    @eqx.filter_jit
     def __call__(
         self,
         X: ArrayLike,
@@ -174,9 +184,11 @@ class DirectPerm(Permutation):
         :return: permutation p values
         """
 
+        idxs = jnp.arange(len(y))
+
         def _func(key, x):
             key, p_key = rdm.split(key)
-            perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
+            perm_idx = rdm.permutation(p_key, idxs)
             glmstate = test(X, G, y[perm_idx], family, offset_eta[perm_idx], se_estimator, max_iter)
             # Note: permute individual rows of G can still preserve LD of variants (columns)
 
@@ -385,15 +397,7 @@ class BetaPerm(DirectPerm):
         p = X.shape[1] + 1  # covariates plus genotype
         dof = n - p  # include intercept
 
+        z_stats_perm = z_stats_perm[~jnp.isnan(z_stats_perm)]
         adj_p, beta_res, true_nc, opt_status = beta_estimator(z_stats_perm, obs_z, dof)
 
         return adj_p, beta_res, true_nc, opt_status
-
-
-# def df_cost(zscore, nc):
-#     """minimize abs(1-alpha) as a function of M_eff"""
-#     # pval = 2 * norm.sf(jnp.fabs(zscore))
-#     pval = ncx2.sf(zscore**2, 1, nc)
-#     mean = jnp.mean(pval)
-#     var = jnp.var(pval)
-#     return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0

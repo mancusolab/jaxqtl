@@ -82,9 +82,9 @@ def sim_data(
 
     # bootstrap for nobs number of individuals
     sample_covar_nobs = sample_covar.sample(n=nobs, replace=True, random_state=seed)
-    sample_covar_nobs.loc[:, 'iid'] = np.arange(1, sample_covar_nobs.shape[0] + 1)
+    sample_covar_nobs.loc[:, "iid"] = np.arange(1, sample_covar_nobs.shape[0] + 1)
 
-    X_cov = jnp.array(sample_covar_nobs[['age', 'sex']])
+    X_cov = jnp.array(sample_covar_nobs[["age", "sex"]])
     X_cov = (X_cov - X_cov.mean(axis=0)) / X_cov.std(axis=0)
     X = jnp.column_stack((X, X_cov))
 
@@ -112,24 +112,24 @@ def sim_data(
     bi = rdm.normal(re_key, (nobs, 1)) * np.sqrt(V_re) if V_re > 0 else 0
 
     # merge for individual cell library size in sampled individuals
-    libsize = libsize.merge(sample_covar_nobs[['individual', 'iid']], 'right', on="individual")
+    libsize = libsize.merge(sample_covar_nobs[["individual", "iid"]], "right", on="individual")
 
-    sample_covar_nobs.drop(['age', 'sex'], axis=1, inplace=True)
-    covar_std = pd.DataFrame({'iid': np.arange(1, sample_covar_nobs.shape[0] + 1), 'age': X[:, 1], 'sex': X[:, 2]})
-    sample_covar_nobs = covar_std.merge(sample_covar_nobs, 'right', on="iid")
+    sample_covar_nobs.drop(["age", "sex"], axis=1, inplace=True)
+    covar_std = pd.DataFrame({"iid": np.arange(1, sample_covar_nobs.shape[0] + 1), "age": X[:, 1], "sex": X[:, 2]})
+    sample_covar_nobs = covar_std.merge(sample_covar_nobs, "right", on="iid")
 
     # standardize age and sex
-    libsize.drop(['age', 'sex'], axis=1, inplace=True)
-    libsize = covar_std.merge(libsize, 'right', on="iid")
+    libsize.drop(["age", "sex"], axis=1, inplace=True)
+    libsize = covar_std.merge(libsize, "right", on="iid")
 
     # broad cast individual level eta to cell level
-    eta_df = pd.DataFrame({'eta': (X @ beta + bi).ravel(), 'iid': np.arange(1, sample_covar_nobs.shape[0] + 1)})
-    eta_df.loc[:, 'iid'] = sample_covar_nobs['iid'].values
-    eta_df = eta_df.merge(libsize, 'right', on="iid")
+    eta_df = pd.DataFrame({"eta": (X @ beta + bi).ravel(), "iid": np.arange(1, sample_covar_nobs.shape[0] + 1)})
+    eta_df.loc[:, "iid"] = sample_covar_nobs["iid"].values
+    eta_df = eta_df.merge(libsize, "right", on="iid")
 
     # compute eta_i + bi + log(offset_ij)
     # eta_df['log_offset'] = 0 # set offset to zero
-    eta = jnp.array(eta_df[['eta', 'log_offset']]).sum(axis=1)
+    eta = jnp.array(eta_df[["eta", "log_offset"]]).sum(axis=1)
     mu = family.glink.inverse(eta)
 
     # for each individual mu_i, broadcast to num_cells (Poisson model)
@@ -212,32 +212,32 @@ def run_sim(
             )
 
             # create pheno for saigeqtl
-            df_out = sim_scdat[['iid', 'log_offset', 'age', 'sex']]
-            df_out.loc[:, 'libsize'] = jnp.exp(jnp.array(df_out['log_offset']))
-            df_out.loc[:, 'gene'] = y.ravel()
+            df_out = sim_scdat[["iid", "log_offset", "age", "sex"]]
+            df_out.loc[:, "libsize"] = jnp.exp(jnp.array(df_out["log_offset"]))
+            df_out.loc[:, "gene"] = y.ravel()
 
             # convert to pseudo-bulk for jaxqtl and linear model
             # create summary statistics for simulated count
-            df_bulk = df_out.groupby(['iid']).agg({'gene': 'sum', 'libsize': 'sum'})
+            df_bulk = df_out.groupby(["iid"]).agg({"gene": "sum", "libsize": "sum"})
 
-            y_bulk = (jnp.array(df_bulk['gene'])).reshape(-1, 1)
+            y_bulk = (jnp.array(df_bulk["gene"])).reshape(-1, 1)
 
             all_constant = (y == y[0]).all() | (y_bulk == y_bulk[0]).all()
             loop_idx += 1
 
         # write tsv in saigeqtl input format (for one gene as one replicate)
         if write_sc:
-            df_out = df_out[['iid', 'log_offset', 'age', 'sex', 'gene']]
-            df_out.to_csv(f"{out_path}.pheno{i+1}.tsv.gz", sep="\t", index=False)
+            df_out = df_out[["iid", "log_offset", "age", "sex", "gene"]]
+            df_out.to_csv(f"{out_path}.pheno{i + 1}.tsv.gz", sep="\t", index=False)
 
         sc_mean_ct = y.ravel().mean()
         sc_express_percent = (y.ravel() > 0).mean()
-        sc_libsize = jnp.exp(jnp.array(df_out['log_offset'])).reshape(-1, 1)
+        sc_libsize = jnp.exp(jnp.array(df_out["log_offset"])).reshape(-1, 1)
         sc_libsize_valid = ((y / sc_libsize) <= 1.0).mean()
 
         bulk_mean_ct = y_bulk.ravel().mean()
         bulk_express_percent = (y_bulk.ravel() > 0).mean()
-        bulk_libsize = jnp.array(df_bulk['libsize']).reshape(-1, 1)
+        bulk_libsize = jnp.array(df_bulk["libsize"]).reshape(-1, 1)
         bulk_libsize_valid = (y_bulk / bulk_libsize <= 1.0).mean()
 
         sc_mean_ct_list = jnp.append(sc_mean_ct_list, sc_mean_ct)
@@ -304,25 +304,25 @@ def run_sim(
 
         # run tensorqtl; G is pxn when reading in from read_plink
         # format for tensorqtl input
-        genotype_df = pd.DataFrame(G, index=bim['snp'].values)  # pxn
+        genotype_df = pd.DataFrame(G, index=bim["snp"].values)  # pxn
         genotype_df.columns = [str(i) for i in range(1, bed.shape[1] + 1)]
         genotype_df.index.name = "snp"
-        variant_df = bim[['snp', 'chrom', 'pos']]
-        variant_df.set_index('snp', inplace=True)
+        variant_df = bim[["snp", "chrom", "pos"]]
+        variant_df.set_index("snp", inplace=True)
 
         phenotype_df = (pd.DataFrame(y_norm)).T
         phenotype_df.columns = [str(i) for i in range(1, bed.shape[1] + 1)]
         genotype_df.index.name = "snp"
-        phenotype_df.set_index(pd.Series(['gene']), inplace=True)
+        phenotype_df.set_index(pd.Series(["gene"]), inplace=True)
         phenotype_df.index.name = "gene_id"
 
-        phenotype_pos_df = pd.DataFrame({'chr': str(1), 'pos': [500]})
-        phenotype_pos_df.set_index(pd.Series(['gene']), inplace=True)
+        phenotype_pos_df = pd.DataFrame({"chr": str(1), "pos": [500]})
+        phenotype_pos_df.set_index(pd.Series(["gene"]), inplace=True)
         phenotype_pos_df.index.name = "gene_id"
-        prefix = f"{out_path}.pheno{i+1}"
+        prefix = f"{out_path}.pheno{i + 1}"
 
         covariates_df = pd.DataFrame(X[:, 1:-1])
-        covariates_df.columns = ['age', 'sex']
+        covariates_df.columns = ["age", "sex"]
         covariates_df.set_index(pd.Series([str(i) for i in range(1, bed.shape[1] + 1)]), inplace=True)
 
         cis.map_nominal(
@@ -332,12 +332,12 @@ def run_sim(
             phenotype_pos_df,
             prefix,
             covariates_df,
-            output_dir='.',
+            output_dir=".",
             window=1000000,
         )
 
         tqtl_res = pd.read_parquet(f"{prefix}.cis_qtl_pairs.1.parquet")
-        pval_tqtl = jnp.append(pval_tqtl, tqtl_res['pval_nominal'][i])
+        pval_tqtl = jnp.append(pval_tqtl, tqtl_res["pval_nominal"][i])
         os.remove(f"{prefix}.cis_qtl_pairs.1.parquet")
 
     return SimResState(
@@ -422,7 +422,7 @@ def main(args):
 
     # read in observed library size
     onek1k = pd.read_csv(args.libsize_path, sep="\t")
-    sample_covar = onek1k.drop_duplicates(subset=['individual', 'age', 'sex'], keep='last').reset_index(drop=True)
+    sample_covar = onek1k.drop_duplicates(subset=["individual", "age", "sex"], keep="last").reset_index(drop=True)
     log.info("sample library size from onek1k.")
 
     res = run_sim(
@@ -447,27 +447,27 @@ def main(args):
     )
 
     d = {
-        'CT': args.CT,
-        'maf': args.maf,
-        'beta0': args.beta0,
-        'Va': args.Va,
-        'Vre': args.Vre,
-        'nobs': args.nobs,
-        'rep': args.num_sim,
-        'rej_nb_wald': [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
-        'rej_nb_score': [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
-        'rej_pois_wald': [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
-        'rej_pois_score': [jnp.mean(res.pval_pois_score[~jnp.isnan(res.pval_pois_score)] < args.fwer)],
-        'rej_lm_wald': [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
-        'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
-        'rej_tqtl': [jnp.mean(res.pval_tqtl[~jnp.isnan(res.pval_tqtl)] < args.fwer)],
-        'sc_mean_ct': [(res.sc_mean_ct).mean()],
-        'sc_express_percent': [(res.sc_express_percent).mean()],
-        'sc_libsize_valid': [(res.sc_libsize_valid).mean()],
-        'bulk_mean_ct': [(res.bulk_mean_ct).mean()],
-        'bulk_express_percent': [(res.bulk_express_percent).mean()],
-        'bulk_libsize_valid': [(res.bulk_libsize_valid).mean()],
-        'alpha': [(res.alpha[~jnp.isnan(res.alpha)].mean())],
+        "CT": args.CT,
+        "maf": args.maf,
+        "beta0": args.beta0,
+        "Va": args.Va,
+        "Vre": args.Vre,
+        "nobs": args.nobs,
+        "rep": args.num_sim,
+        "rej_nb_wald": [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
+        "rej_nb_score": [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
+        "rej_pois_wald": [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
+        "rej_pois_score": [jnp.mean(res.pval_pois_score[~jnp.isnan(res.pval_pois_score)] < args.fwer)],
+        "rej_lm_wald": [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
+        "rej_lm_score": [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
+        "rej_tqtl": [jnp.mean(res.pval_tqtl[~jnp.isnan(res.pval_tqtl)] < args.fwer)],
+        "sc_mean_ct": [(res.sc_mean_ct).mean()],
+        "sc_express_percent": [(res.sc_express_percent).mean()],
+        "sc_libsize_valid": [(res.sc_libsize_valid).mean()],
+        "bulk_mean_ct": [(res.bulk_mean_ct).mean()],
+        "bulk_express_percent": [(res.bulk_express_percent).mean()],
+        "bulk_libsize_valid": [(res.bulk_libsize_valid).mean()],
+        "alpha": [(res.alpha[~jnp.isnan(res.alpha)].mean())],
     }
 
     df_rej = pd.DataFrame(data=d)
