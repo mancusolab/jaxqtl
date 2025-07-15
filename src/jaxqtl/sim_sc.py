@@ -228,7 +228,7 @@ def run_sim(
         # write tsv in saigeqtl input format (for one gene as one replicate)
         if write_sc:
             df_out = df_out[['iid', 'log_offset', 'age', 'sex', 'gene']]
-            df_out.to_csv(f"{out_path}.pheno{i+1}.tsv.gz", sep="\t", index=False)
+            df_out.to_csv(f"{out_path}.pheno{i+1}.tsv", sep="\t", index=False)
 
         sc_mean_ct = y.ravel().mean()
         sc_express_percent = (y.ravel() > 0).mean()
