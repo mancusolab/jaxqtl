@@ -29,7 +29,7 @@ config.update("jax_enable_x64", True)
 # -13 -> 0.12/10%; -12 -> 0.3/20%; -11.5 -> 0.6/40%; -10 -> 2.2/70%; -9 -> 6/90%; -5 -> 300; -3 -> 2k
 
 seed = 1
-n = 1000
+n = 10000
 V_a = 0.05  # 0 for null
 V_re = 0.2
 beta0 = -17
@@ -40,7 +40,7 @@ onek1k = pd.read_csv("../example/local/onek1k_3CT_sc/CD4_NC.features.tsv.gz", se
 sample_covar = onek1k[['individual', 'age', 'sex', 'iid_offset']]
 sample_covar = sample_covar.drop_duplicates(subset=['individual', 'age', 'sex'], keep='last').reset_index(drop=True)
 
-bim, fam, bed = read_plink("../example/local/onek1k_3CT_sc/chr1_0.2", verbose=False)
+bim, fam, bed = read_plink("../example/local/onek1k_3CT_sc/chr1_0.2_n10000", verbose=False)
 G = bed.compute()  # pxn array
 snp = G[0].reshape(-1, 1)
 
