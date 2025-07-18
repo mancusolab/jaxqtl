@@ -1,7 +1,7 @@
-cd ../..
+#!/bin/bash
 
-data_path="./tutorial/input"
-out_path="./tutorial/output"
+data_path="../input"
+out_path="../output"
 
 celltype="CD4_NC"
 
@@ -22,7 +22,7 @@ num_expression_pc=2
 
 pheno="${data_path}/${celltype}.N100.bed.gz"
 geno="${data_path}/chr${chr}" # prefix for plink triplet files
-covar="${data_path}/donor_features.all.6PC.tsv"
+covar="${data_path}/donor_features.tsv"
 
 # choose gene list for eQTL mapping
 genelist="${data_path}/${chunk_file}"
