@@ -21,7 +21,7 @@ window=500000 # default extend 500kb on either side, i.e., [start-window, end+wi
 num_expression_pc=2
 
 pheno="${data_path}/${celltype}.N100.bed.gz"
-geno="${data_path}/chr${chr}" # prefix for plink triplet files
+geno="${data_path}/chr${chr}_N100" # prefix for plink triplet files
 covar="${data_path}/donor_features.tsv"
 
 # choose gene list for eQTL mapping

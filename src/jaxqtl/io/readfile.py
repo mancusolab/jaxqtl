@@ -72,7 +72,7 @@ class ReadyDataState:
         count_std = self.pheno.count.copy(deep=True)
         count_std = (count_std - count_std.mean(axis=0)) / count_std.std(axis=0)  # standardize genes
 
-        pca_pheno = PCA(n_components=k)
+        pca_pheno = PCA(n_components=k, svd_solver="full")
         PCs = pca_pheno.fit_transform(count_std)  # nxk
 
         if add_covar is None:
