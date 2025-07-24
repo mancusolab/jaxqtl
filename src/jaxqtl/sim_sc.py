@@ -16,6 +16,7 @@ import jax
 import jax.numpy as jnp
 import jax.random as rdm
 
+from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
 from jaxqtl.families.distribution import (
@@ -25,9 +26,12 @@ from jaxqtl.families.distribution import (
     Poisson,
 )
 from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.permutation import InferBetaGLM
 from jaxqtl.infer.stderr import FisherInfoError
-from jaxqtl.infer.utils import score_test_snp
+from jaxqtl.infer.utils import CommonTest, score_test_snp, ScoreTest
 from jaxqtl.log import get_logger
+from jaxqtl.map.cis import map_cis_single
+from jaxqtl.map.utils import _ACAT
 
 
 class SimState(NamedTuple):
@@ -54,6 +58,8 @@ class SimResState(NamedTuple):
     bulk_libsize_valid: Array
     h2obs: Array
     alpha: Array
+    pval_nb_pbeta: Array
+    pval_nb_pacat: Array
 
 
 def sim_data(
@@ -150,6 +156,55 @@ def _calc_h2obs(V_a: float, V_disp: float, V_re: float, baseline_mu: float) -> A
     return jnp.array(h2g_obs)
 
 
+def simulate_genotypes(
+    key: jax.Array, ld_matrix: ArrayLike, n_individuals: int, maf_range: tuple = (0.05, 0.5)
+) -> Array:
+    """
+    Simulate genotype matrix (0/1/2) from a given LD matrix and fixed MAF.
+
+    Parameters:
+        key           : jax.random.PRNGKey
+        ld_matrix     : (n_snps, n_snps) LD correlation matrix (symmetric, PSD)
+        n_individuals : number of individuals to simulate
+        maf           : fixed minor allele frequency for all SNPs (e.g., 0.2)
+
+    Returns:
+        genotypes     : (n_individuals, n_snps) matrix with values in {0, 1, 2}
+    """
+
+    n_snps = ld_matrix.shape[0]
+
+    """Ensure LD matrix is PSD by adding a small ridge term."""
+    ld_matrix = 0.5 * (ld_matrix + ld_matrix.T)  # ensure symmetry
+    ld_matrix = ld_matrix + 1e-5 * jnp.eye(ld_matrix.shape[0])
+
+    # Cholesky decomposition of LD matrix
+    L = jnp.linalg.cholesky(ld_matrix)
+
+    # Split PRNGKey for genotype simulation and MAFs
+    key_geno, key_maf = rdm.split(key)
+
+    # Generate latent standard normal variables
+    Z = rdm.normal(key_geno, shape=(n_individuals, n_snps))
+    latent = Z @ L.T  # inject LD structure
+
+    # Generate random MAFs within range
+    min_maf, max_maf = maf_range
+    mafs = rdm.uniform(key_maf, shape=(n_snps,), minval=min_maf, maxval=max_maf)
+
+    # Compute quantile thresholds under HWE
+    t1 = norm.ppf((1 - mafs) ** 2)
+    t2 = norm.ppf(1 - mafs**2)
+
+    # Discretize latent Gaussian values into genotypes
+    def discretize_column(g_col, t1j, t2j):
+        return jnp.where(g_col < t1j, 0, jnp.where(g_col < t2j, 1, 2))
+
+    genotypes = jax.vmap(discretize_column, in_axes=(1, 0, 0), out_axes=1)(latent, t1, t2)
+
+    return genotypes
+
+
 def run_sim(
     onek1k_libsize: pd.DataFrame,
     bim,
@@ -165,13 +220,18 @@ def run_sim(
     m_causal: int = 1,
     baseline_mu: float = 0.0,
     G: Optional[ArrayLike] = None,  # shape of num_sim x n
+    LD_path: Optional[str] = None,
     sample_covar: Optional[ArrayLike] = None,  # nxp
     num_sim: int = 1000,
     write_sc: bool = True,
     out_path: Optional[str] = None,  # write out single cell data in saigeqtl format
+    max_iter: int = 1000,
 ) -> SimResState:
     pval_nb_wald = jnp.array([])
     pval_nb_score = jnp.array([])
+
+    pval_nb_pbeta = jnp.array([])
+    pval_nb_pacat = jnp.array([])
 
     pval_pois_wald = jnp.array([])
     pval_pois_score = jnp.array([])
@@ -187,6 +247,17 @@ def run_sim(
     bulk_express_percent_list = jnp.array([])
     bulk_libsize_valid_list = jnp.array([])
     alpha_list = jnp.array([])
+
+    if LD_path is not None:
+        # run jaxQTL beta permutation method
+        ld_mat = pd.read_csv(LD_path, header=None, sep="\t")
+        ld_mat = jnp.array(ld_mat)
+
+        family = NegativeBinomial()
+
+        cisG_key = rdm.PRNGKey(seed)
+        cisG = simulate_genotypes(key=cisG_key, ld_matrix=ld_mat, n_individuals=nobs, maf_range=(0.05, 0.5))
+        cisG_key, map_key = rdm.split(cisG_key, 2)
 
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
@@ -343,6 +414,30 @@ def run_sim(
         pval_tqtl = jnp.append(pval_tqtl, tqtl_res['pval_nominal'][i])
         os.remove(f"{prefix}.cis_qtl_pairs.1.parquet")
 
+        # calulate gene-level p value, but only for simulation under null (Va=0)
+        if LD_path is not None:
+            # run jaxQTL beta permutation method
+            pbeta_result = map_cis_single(
+                X_cov,
+                cisG,  # shape nxp
+                y_bulk,
+                family=family,
+                key_init=map_key,
+                offset_eta=log_offset,
+                se_estimator=FisherInfoError(),
+                n_perm=1000,
+                test=ScoreTest(),
+                beta_estimator=InferBetaGLM(),
+                max_iter=max_iter,
+            )
+            pval_nb_pbeta = jnp.append(pval_nb_pbeta, pbeta_result.pval_beta)
+
+            # run jaxQTL acat method
+            test = ScoreTest()
+            acat_result = test(X_cov, cisG, y_bulk, family, log_offset, FisherInfoError(), max_iter, CommonTest())
+            acat_p = _ACAT(acat_result.p)
+            pval_nb_pacat = jnp.append(pval_nb_pacat, acat_p)
+
     return SimResState(
         pval_nb_wald=pval_nb_wald,
         pval_nb_score=pval_nb_score,
@@ -359,6 +454,8 @@ def run_sim(
         bulk_libsize_valid=bulk_libsize_valid_list,
         h2obs=jnp.repeat(h2obs, num_sim),
         alpha=alpha_list,
+        pval_nb_pbeta=pval_nb_pbeta,
+        pval_nb_pacat=pval_nb_pacat,
     )
 
 
@@ -379,6 +476,7 @@ def main(args):
     argp.add_argument("--seed", type=int, default=1, help="seed")
     argp.add_argument("--num-sim", type=int, default=1000, help="Number of simulation, equal to #markers in plink file")
     argp.add_argument("--fwer", type=float, default=0.05)
+    argp.add_argument("--LD-path", type=str, help="path to LD matrix file, no header tsv file")
     argp.add_argument(
         "--verbose",
         action="store_true",
@@ -443,13 +541,14 @@ def main(args):
         m_causal=args.m_causal,
         baseline_mu=args.baseline_mu,
         G=G,
+        LD_path=args.LD_path,
         sample_covar=sample_covar,
         num_sim=args.num_sim,
         write_sc=args.write_sc,
         out_path=args.out_sc,  # write out single cell data in saigeqtl format
     )
 
-    d = {
+    d_rej = {
         'CT': args.CT,
         'maf': args.maf,
         'beta0': args.beta0,
@@ -471,9 +570,43 @@ def main(args):
         'bulk_express_percent': [(res.bulk_express_percent).mean()],
         'bulk_libsize_valid': [(res.bulk_libsize_valid).mean()],
         'alpha': [(res.alpha[~jnp.isnan(res.alpha)].mean())],
+        'rej_nb_score_pbeta': [jnp.mean(res.pval_nb_pbeta[~jnp.isnan(res.pval_nb_pbeta)] < args.fwer)],
+        'rej_nb_score_pacat': [jnp.mean(res.pval_nb_pacat[~jnp.isnan(res.pval_nb_pacat)] < args.fwer)],
     }
 
-    df_rej = pd.DataFrame(data=d)
+    if args.LD_path is not None:
+        d_rej = {
+            'CT': args.CT,
+            'maf': args.maf,
+            'beta0': args.beta0,
+            'Va': args.Va,
+            'Vre': args.Vre,
+            'nobs': args.nobs,
+            'rep': args.num_sim,
+            'rej_nb_wald': [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
+            'rej_nb_score': [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
+            'rej_pois_wald': [jnp.mean(res.pval_pois_wald[~jnp.isnan(res.pval_pois_wald)] < args.fwer)],
+            'rej_pois_score': [jnp.mean(res.pval_pois_score[~jnp.isnan(res.pval_pois_score)] < args.fwer)],
+            'rej_lm_wald': [jnp.mean(res.pval_lm_wald[~jnp.isnan(res.pval_lm_wald)] < args.fwer)],
+            'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
+            'rej_tqtl': [jnp.mean(res.pval_tqtl[~jnp.isnan(res.pval_tqtl)] < args.fwer)],
+            'sc_mean_ct': [(res.sc_mean_ct).mean()],
+            'sc_express_percent': [(res.sc_express_percent).mean()],
+            'sc_libsize_valid': [(res.sc_libsize_valid).mean()],
+            'bulk_mean_ct': [(res.bulk_mean_ct).mean()],
+            'bulk_express_percent': [(res.bulk_express_percent).mean()],
+            'bulk_libsize_valid': [(res.bulk_libsize_valid).mean()],
+            'alpha': [(res.alpha[~jnp.isnan(res.alpha)].mean())],
+            'rej_nb_score_pbeta': [jnp.mean(res.pval_nb_pbeta[~jnp.isnan(res.pval_nb_pbeta)] < args.fwer)],
+            'rej_nb_score_pacat': [jnp.mean(res.pval_nb_pacat[~jnp.isnan(res.pval_nb_pacat)] < args.fwer)],
+        }
+
+        # write p value vector
+        d_pval = {'pbeta': res.pval_nb_pbeta, 'pacat': res.pval_nb_pacat}
+        df_pval = pd.DataFrame(data=d_pval)
+        df_pval.to_csv(args.out + ".cisp.tsv", sep="\t", index=False)
+
+    df_rej = pd.DataFrame(data=d_rej)
     df_rej.to_csv(args.out + ".tsv", sep="\t", index=False)
 
     return 0
