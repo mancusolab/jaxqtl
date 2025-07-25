@@ -48,7 +48,8 @@ class SimResState(NamedTuple):
     pval_pois_score: Array
     y_mean: Array
     y_express_percent: Array
-    alpha_list: Array
+    alpha_true: Array
+    alpha_est: Array
     libsize_valid: Array
 
 
@@ -186,16 +187,17 @@ def run_sim(
     y_express_percent = jnp.array([])
     libsize_valid = jnp.array([])
 
-    alpha_list = jnp.array([])
+    alpha_true_vec = jnp.array([])
+    alpha_est_vec = jnp.array([])
 
     for i in range(num_sim):
         snp = None if G is None else G[i].reshape(-1, 1)
         # sample alpha from Array, works with one element
         if len(jnp.array([alpha])) > 1:
             np.random.seed(i + seed)
-            alpha_sample = np.random.choice(alpha, 1)
+            alpha_true = np.random.choice(alpha, 1)
         else:
-            alpha_sample = alpha
+            alpha_true = alpha
 
         X, y, beta, libsize, h2obs = sim_data(
             nobs=nobs,
@@ -203,7 +205,7 @@ def run_sim(
             family=family,
             method=method,
             scale=scale,  # for linear model
-            alpha=alpha_sample,  # for NB model
+            alpha=alpha_true,  # for NB model
             maf=maf,
             beta0=beta0,  # intercept determine baseline counts
             seed=i + seed,  # use simulation index
@@ -240,6 +242,9 @@ def run_sim(
         y_mean = jnp.append(y_mean, (y / libsize).mean())
         y_express_percent = jnp.append(y_express_percent, (y > 0).mean())
         libsize_valid = jnp.append(libsize_valid, (y / libsize <= 1.0).mean())
+
+        # convert bulk int to float
+        y = y.astype(jnp.float64)
 
         log_offset = jnp.log(libsize)
         jaxqtl_pois = GLM(family=Poisson())
@@ -299,13 +304,14 @@ def run_sim(
         _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_nb)
 
         pval_nb_score = jnp.append(pval_nb_score, pval)
+        alpha_est_vec = jnp.append(alpha_est_vec, glm_state_nb.alpha)
 
         glm_state_lm = jaxqtl_lm.fit(X_cov, y, init=init_lm)
         _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_lm)
 
         pval_lm_score = jnp.append(pval_lm_score, pval)
 
-        alpha_list = jnp.append(alpha_list, alpha_sample)
+        alpha_true_vec = jnp.append(alpha_true_vec, alpha_true)
 
     return SimResState(
         pval_nb_wald=pval_nb_wald,
@@ -320,7 +326,8 @@ def run_sim(
         y_mean=y_mean,
         y_express_percent=y_express_percent,
         libsize_valid=libsize_valid,
-        alpha_list=alpha_list,
+        alpha_true=alpha_true_vec,
+        alpha_est=alpha_est_vec,
     )
 
 
@@ -328,6 +335,7 @@ def main(args):
     argp = ap.ArgumentParser(description="")  # create an instance
     argp.add_argument("-geno", type=str, help="Genotype plink prefix, eg. chr17")
     argp.add_argument("-covar", type=str, help="Path to covariates, include age, sex and library size")
+    argp.add_argument("-CT", type=str, help="cell type")
     argp.add_argument("-libsize-path", type=str, help="path to read in library size, with header")
     argp.add_argument("-alpha-path", type=str, help="path to read in dispersion values, with header")
     argp.add_argument("-nobs", type=int, help="Sample size")
@@ -429,6 +437,13 @@ def main(args):
     )
 
     d = {
+        'CT': args.CT,
+        'maf': args.maf,
+        'beta0': args.beta0,
+        'Va': args.Va,
+        'Vre': args.Vre,
+        'nobs': args.nobs,
+        'rep': args.num_sim,
         'rej_nb_wald': [jnp.mean(res.pval_nb_wald[~jnp.isnan(res.pval_nb_wald)] < args.fwer)],
         'rej_nb_wald_robust': [jnp.mean(res.pval_nb_wald_robust[~jnp.isnan(res.pval_nb_wald_robust)] < args.fwer)],
         'rej_nb_score': [jnp.mean(res.pval_nb_score[~jnp.isnan(res.pval_nb_score)] < args.fwer)],
@@ -442,7 +457,9 @@ def main(args):
         'rej_lm_score': [jnp.mean(res.pval_lm_score[~jnp.isnan(res.pval_lm_score)] < args.fwer)],
         'y_mean': [(res.y_mean).mean()],
         'express_percent': [(res.y_express_percent).mean()],
-        'alpha_mean': [(res.alpha_list).mean()],
+        'alpha_true': [(res.alpha_true).mean()],
+        'alpha_est_mean': [(res.alpha_est[~jnp.isnan(res.alpha_est)]).mean()],
+        'alpha_est_sd': [(res.alpha_est[~jnp.isnan(res.alpha_est)]).std()],
         'libsize_valid': [(res.libsize_valid).mean()],
     }
 

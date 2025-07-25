@@ -435,8 +435,11 @@ def run_sim(
             # run jaxQTL acat method
             test = ScoreTest()
             acat_result = test(X_cov, cisG, y_bulk, family, log_offset, FisherInfoError(), max_iter, CommonTest())
-            acat_p = _ACAT(acat_result.p)
+            pvec = acat_result.p
+            acat_p = jnp.where(jnp.all(jnp.isnan(pvec)), jnp.nan, _ACAT(pvec[~jnp.isnan(pvec)]))  # check NaN
             pval_nb_pacat = jnp.append(pval_nb_pacat, acat_p)
+
+            jax.clear_caches()
 
     return SimResState(
         pval_nb_wald=pval_nb_wald,
