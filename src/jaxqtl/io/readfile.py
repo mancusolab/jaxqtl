@@ -168,6 +168,12 @@ def create_readydata(
     # transpose to sample x genes
     pheno = pheno.T
     pheno.columns.name = None  # remove column name due to tranpose
+
+    # change sample id to string
+    pheno.index = pheno.index.astype(str)
+    geno.index = geno.index.astype(str)
+    covar.index = covar.index.astype(str)
+
     if ind_list is not None:
         sample_id_subset = ind_list
     else:

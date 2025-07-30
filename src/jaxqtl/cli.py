@@ -332,6 +332,7 @@ def main(args):
 
     if args.indlist is not None:
         indList = pd.read_csv(args.indlist, header=None, sep="\t").iloc[:, 0].to_list()
+        indList = [str(x) for x in indList]  # convert to strings
     else:
         indList = None
 
