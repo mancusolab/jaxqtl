@@ -43,10 +43,12 @@ def map_nominal(
     :param log: logger for QTL progress
     :param append_intercept: `True` if want to append intercept, `False` otherwise
     :param standardize: True` if want to standardize covariates data
-    :param window: window size (bp) of one side for cis scope, default to 500000, meaning in total 1Mb from left to right
+    :param window: window size (bp) of one side for cis scope, default to 500000,
+        meaning in total 1Mb from left to right
     :param verbose: `True` if report QTL mapping progress in log file, default to `True`
     :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here)
+        default to `False`
     :param max_iter: maximum iterations for fitting GLM, default to 500
     :return: data frame of nominal mapping for cisSNPs - gene pairs
     """
@@ -229,7 +231,8 @@ def map_nominal_covar(
     :param standardize: True` if want to standardize covariates data
     :param verbose: `True` if report QTL mapping progress in log file, default to `True`
     :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
+    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here)
+        default to `False`
     :param max_iter: maximum iterations for fitting GLM, default to 500
     :return: data frame of nominal mapping for cisSNPs - gene pairs
     """
@@ -342,16 +345,12 @@ def fit_intercept_only(
         if verbose:
             log.info("Performing scan for %s", gene_name)
 
-        glm = GLM(family=family, max_iter=max_iter)
+        glm = GLM(family=family, max_iter=max_iter, std_err=se_estimator)
 
-        eta, alpha_n = glm.calc_eta_and_dispersion(X, y, offset_eta)
         glmstate = glm.fit(
             X,
             y,
-            offset_eta=offset_eta,
-            init=eta,
-            alpha_init=alpha_n,
-            se_estimator=se_estimator,
+            offset=offset_eta,
         )
 
         if verbose:

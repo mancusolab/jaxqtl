@@ -16,7 +16,7 @@ class LinearSolve(eqx.Module):
     """
 
     @abstractmethod
-    def __call__(
+    def wgt_lstsq(
         self,
         X: ArrayLike,
         r: ArrayLike,
@@ -30,9 +30,22 @@ class LinearSolve(eqx.Module):
         """
         pass
 
+    @abstractmethod
+    def lstsq(
+        self,
+        X: ArrayLike,
+        r: ArrayLike,
+    ) -> Array:
+        """Linear equation solver
+
+        :param X: covariate data matrix (nxp)
+        :param r: residuals
+        """
+        pass
+
 
 class QRSolve(LinearSolve):
-    def __call__(
+    def wgt_lstsq(
         self,
         X: ArrayLike,
         r: ArrayLike,
@@ -46,9 +59,17 @@ class QRSolve(LinearSolve):
 
         return jspla.solve_triangular(R, Q.T @ w_half_r)
 
+    def lstsq(
+        self,
+        X: ArrayLike,
+        r: ArrayLike,
+    ) -> Array:
+        Q, R = jnpla.qr(X)
+        return jspla.solve_triangular(R, Q.T @ r)
+
 
 class CholeskySolve(LinearSolve):
-    def __call__(
+    def wgt_lstsq(
         self,
         X: ArrayLike,
         r: ArrayLike,
@@ -61,9 +82,20 @@ class CholeskySolve(LinearSolve):
 
         return jspla.cho_solve(factor, XtWy)
 
+    def lstsq(
+        self,
+        X: ArrayLike,
+        r: ArrayLike,
+    ) -> Array:
+        XtX = X.T @ X
+        Xty = X.T @ r
+        factor = jspla.cho_factor(XtX, lower=True)
+
+        return jspla.cho_solve(factor, Xty)
+
 
 class CGSolve(LinearSolve):
-    def __call__(
+    def wgt_lstsq(
         self,
         X: ArrayLike,
         r: ArrayLike,
@@ -89,5 +121,22 @@ class CGSolve(LinearSolve):
         operator = lx.MatrixLinearOperator(w_half_X)
         b = w_half * r
         sol = lx.linear_solve(operator, b.squeeze(), solver=ncg_solver)
+
+        return sol.value.reshape((len(sol.value), 1))
+
+    def lstsq(
+        self,
+        X: ArrayLike,
+        r: ArrayLike,
+    ) -> Array:
+        """not converged for some cases in real data;
+        Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol),
+        Now switch lineax
+        """
+        # Method 2 (faster): CG solve using normal equation which solve A^t A x = A^t b
+        # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
+        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        operator = lx.MatrixLinearOperator(X)
+        sol = lx.linear_solve(operator, r.squeeze(), solver=ncg_solver)
 
         return sol.value.reshape((len(sol.value), 1))

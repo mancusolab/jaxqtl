@@ -88,7 +88,7 @@ def test_sim_NB():
     alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
     glm_state = jaxqtl_nb.fit(
-        X, y, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset, se_estimator=FisherInfoError()
+        X, y, init=init_nb, alpha_init=alpha_n, offset=log_offset, se_estimator=FisherInfoError()
     )
 
     print(f"jaxqtl alpha: {glm_state.alpha}")

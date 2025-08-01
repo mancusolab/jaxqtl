@@ -84,7 +84,8 @@ class ReadyDataState:
     def filter_gene(self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None):
         """Filter genes
 
-        :param geneexpr_percent_cutoff: cutoff for proportion of gene expression, i.e., 0.01 means filter genes that are expressed in 0.01 x 100% individuals
+        :param geneexpr_percent_cutoff: cutoff for proportion of gene expression, i.e.,
+            0.01 means filter genes that are expressed in 0.01 x 100% individuals
         :param gene_list: a list of genes to keep for eQTL mapping
         """
         if gene_list is not None:
@@ -96,9 +97,9 @@ class ReadyDataState:
             # subset by column name
             self.pheno.count = self.pheno.count[gene_list_insample]
 
-            assert set(self.pheno_meta.gene_map.phenotype_id) == set(
-                self.pheno.count.columns
-            ), "gene map does not agree with pheno count matrix after gene list selection"
+            assert set(self.pheno_meta.gene_map.phenotype_id) == set(self.pheno.count.columns), (
+                "gene map does not agree with pheno count matrix after gene list selection"
+            )
 
         # filter genes not expressed across samples
         total_n = len(self.pheno.count.index.unique())  # number of individuals
@@ -107,9 +108,9 @@ class ReadyDataState:
         self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
             self.pheno_meta.gene_map.phenotype_id.isin(self.pheno.count.columns)
         ]
-        assert set(self.pheno_meta.gene_map.phenotype_id) == set(
-            self.pheno.count.columns
-        ), "gene map does not agree with pheno count matrix after gene expression percent filtering"
+        assert set(self.pheno_meta.gene_map.phenotype_id) == set(self.pheno.count.columns), (
+            "gene map does not agree with pheno count matrix after gene expression percent filtering"
+        )
 
 
 def create_readydata(

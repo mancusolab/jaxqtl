@@ -38,7 +38,7 @@ def get_logger(name, path=None):
         console.setFormatter(formatter)
 
         if path is not None:
-            disk_log_stream = open("{}.log".format(path), "w")
+            disk_log_stream = open(f"{path}.log", "w")
             disk_handler = logging.StreamHandler(disk_log_stream)
             logger.addHandler(disk_handler)
             disk_handler.setFormatter(formatter)

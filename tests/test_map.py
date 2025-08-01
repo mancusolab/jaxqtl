@@ -7,7 +7,7 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.permutation import InferBetaGLM
+from jaxqtl.infer.permutations import InferBetaGLM
 from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader

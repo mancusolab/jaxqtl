@@ -254,9 +254,7 @@ def run_sim(
 
         # fit poisson wald test
         init_pois = jaxqtl_pois.family.init_eta(y_bulk)
-        glm_state_pois = jaxqtl_pois.fit(
-            X, y_bulk, init=init_pois, offset_eta=log_offset, se_estimator=FisherInfoError()
-        )
+        glm_state_pois = jaxqtl_pois.fit(X, y_bulk, init=init_pois, offset=log_offset, se_estimator=FisherInfoError())
 
         pval_pois_wald = jnp.append(pval_pois_wald, glm_state_pois.p[-1])
 
@@ -265,7 +263,7 @@ def run_sim(
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
         glm_state_nb = jaxqtl_nb.fit(
-            X, y_bulk, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset, se_estimator=FisherInfoError()
+            X, y_bulk, init=init_nb, alpha_init=alpha_n, offset=log_offset, se_estimator=FisherInfoError()
         )
 
         pval_nb_wald = jnp.append(pval_nb_wald, glm_state_nb.p[-1])
@@ -283,7 +281,7 @@ def run_sim(
         X_cov = X[:, 0:-1]
         g = X[:, -1].reshape(-1, 1)
 
-        glm_null_pois = jaxqtl_pois.fit(X_cov, y_bulk, init=init_pois, offset_eta=log_offset)
+        glm_null_pois = jaxqtl_pois.fit(X_cov, y_bulk, init=init_pois, offset=log_offset)
         _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_null_pois)
 
         pval_pois_score = jnp.append(pval_pois_score, pval)
@@ -291,7 +289,7 @@ def run_sim(
         init_nb, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(X_cov, y_bulk, log_offset)
         alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
-        glm_state_nb = jaxqtl_nb.fit(X_cov, y_bulk, init=init_nb, alpha_init=alpha_n, offset_eta=log_offset)
+        glm_state_nb = jaxqtl_nb.fit(X_cov, y_bulk, init=init_nb, alpha_init=alpha_n, offset=log_offset)
         _, pval, _, _ = score_test_snp(G=g, X=X_cov, glm_null_res=glm_state_nb)
         alpha_list = jnp.append(alpha_list, glm_state_nb.alpha)
 

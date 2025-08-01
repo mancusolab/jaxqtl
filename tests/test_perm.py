@@ -4,8 +4,7 @@ import jax.numpy as jnp
 
 from jax import config, random
 
-from jaxqtl.infer.permutation import infer_beta
-
+from jaxqtl.infer.optimize import infer_beta
 
 config.update("jax_enable_x64", True)
 

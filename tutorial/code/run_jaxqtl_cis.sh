@@ -13,7 +13,7 @@ chunk_file="genelist_10"
 test_method="score"
 
 # choose cis or nominal scan
-mode="cis" # nominal, cis
+mode="cis_acat" # nominal, cis
 window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
 N=982
 
@@ -21,8 +21,13 @@ N=982
 # to disable this, set this to 0
 num_expression_pc=2
 
+<<<<<<< Updated upstream
 pheno="${data_path}/${celltype}.N${N}.bed.gz"
 geno="${data_path}/chr${chr}_N${N}" # prefix for plink triplet files
+=======
+pheno="${data_path}/${celltype}.N100.bed.gz"
+geno="${data_path}/chr${chr}_N100" # prefix for plink triplet files
+>>>>>>> Stashed changes
 covar="${data_path}/donor_features.tsv"
 
 # choose gene list for eQTL mapping

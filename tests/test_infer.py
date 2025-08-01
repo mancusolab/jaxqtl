@@ -214,7 +214,7 @@ def test_robust_SE_Poisson():
         M,
         y,
         init=init_pois,
-        offset_eta=library_size,
+        offset=library_size,
         se_estimator=HuberError(),
     )
 
@@ -271,7 +271,7 @@ def test_NB():
         M,
         y,
         init=init_eta,
-        offset_eta=library_size,
+        offset=library_size,
         alpha_init=alpha_n.squeeze(),
     )
 
@@ -308,7 +308,7 @@ def test_NB_robust():
         M,
         y,
         init=init_eta,
-        offset_eta=library_size,
+        offset=library_size,
         alpha_init=alpha_n.squeeze(),
         se_estimator=HuberError(),
     )
@@ -368,19 +368,19 @@ def test_poisson_scoretest():
     # print(sm_res.summary())
     chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
     Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
 
     Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset_eta=jnp.log(jnp.array(offset)))
+    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
 
     Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
@@ -443,7 +443,7 @@ def test_nb_scoretest():
         step_size=stepsize,
     )
     eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M_cov, y, library_size)
-    glm_state = jaxqtl_nb.fit(M_cov, y, init=eta, offset_eta=library_size, alpha_init=alpha_n)
+    glm_state = jaxqtl_nb.fit(M_cov, y, init=eta, offset=library_size, alpha_init=alpha_n)
 
     Z, pval, _, _ = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
 

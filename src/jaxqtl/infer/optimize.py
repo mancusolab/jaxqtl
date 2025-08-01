@@ -1,9 +1,13 @@
 from typing import NamedTuple, Tuple
 
 import equinox as eqx
+import jax.numpy as jnp
 
-from jax import Array, lax, numpy as jnp
-from jaxtyping import ArrayLike, ScalarLike
+from jax import grad, lax
+from jax.numpy import linalg as jnla
+from jax.scipy import stats as jaxstats
+from jax.scipy.special import polygamma
+from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ..families.distribution import ExponentialFamily
 from .solve import LinearSolve
@@ -20,13 +24,13 @@ class IRLSState(NamedTuple):
 def irls(
     X: ArrayLike,
     y: ArrayLike,
+    offset: ArrayLike,
+    eta: ArrayLike,
     family: ExponentialFamily,
     solver: LinearSolve,
-    eta: ArrayLike,
     max_iter: int = 1000,
     tol: float = 1e-3,
     step_size: float = 1.0,
-    offset_eta: ArrayLike = 0.0,
     alpha_init: ScalarLike = 0.0,
 ) -> IRLSState:
     """IRLS to solve GLM
@@ -39,7 +43,7 @@ def irls(
     :param max_iter: maximum iterations for fitting GLM, default to 1000
     :param tol: tolerance for stopping, default to 0.001
     :param step_size: step size to update the parameter at each step, default to 1.0
-    :param offset_eta: offset (nx1)
+    :param offset: offset (nx1)
     :param alpha_init: initial value for dispersion parameter alpha
     :return: IRLSState
     """
@@ -49,11 +53,11 @@ def irls(
         likelihood_o, diff, num_iter, beta_o, eta_o, alpha_o = val
 
         mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta_o, alpha_o)
-        r = eta_o + g_deriv_k * (y - mu_k) * step_size - offset_eta
+        r = eta_o + g_deriv_k * (y - mu_k) * step_size - offset
 
-        beta = solver(X, r, weight)
+        beta = solver.wgt_lstsq(X, r, weight)
 
-        eta_n = X @ beta + offset_eta
+        eta_n = X @ beta + offset
 
         alpha_n = family.update_dispersion(X, y, eta_n, alpha_o, step_size)
         likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)
@@ -67,7 +71,7 @@ def irls(
         return cond_l
 
     init_beta = jnp.zeros((p, 1))
-    init_tuple = (10000.0, 10000.0, 0, init_beta, eta + offset_eta, alpha_init)
+    init_tuple = (10000.0, 10000.0, 0, init_beta, eta + offset, alpha_init)
 
     likelihood_n, diff, num_iters, beta, eta, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
@@ -76,7 +80,7 @@ def irls(
 
 
 @eqx.filter_jit
-def irls_lm(
+def lstsq(
     X: ArrayLike,
     y: ArrayLike,
     solver: LinearSolve,
@@ -95,12 +99,106 @@ def irls_lm(
     :param alpha_init: initial value for dispersion parameter alpha
     :return: IRLSState
     """
-    n, p = X.shape
-
-    weight = jnp.ones((n, 1))
-    beta = solver(X, y, weight)
+    beta = solver.lstsq(X, y)
     alpha = jnp.array(0)
     converged = jnp.array(True)
     num_iters = 1
 
     return IRLSState(beta, num_iters, converged, alpha)
+
+
+class BetaParams(NamedTuple):
+    k: float
+    n: float
+    converged: bool
+
+
+@eqx.filter_jit
+def infer_beta(
+    p_perm: ArrayLike,
+    init: ArrayLike,
+    step_size=0.1,
+    tol=1e-3,
+    max_iter=500,
+) -> BetaParams:
+    """Infer shape and scale parameter for beta distribution
+    given p values from R permutations (strongest signals),
+    use newton's method to estimate beta distribution parameters:
+    p ~ Beta(k, n)
+
+    :param p_perm: permutation minimum p values
+    :param init: initial value for shape and scale
+    :param step_size: step size to update parameters at each step, default to 0.1
+    :param tol: tolerance for stopping, default to 0.001
+    :param max_iter: maximum iterations for fitting GLM, default to 500
+    :return:
+    """
+
+    def loglik(params, p: ArrayLike) -> Array:
+        return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
+
+    def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> Tuple[Array, Array]:
+        k, n = params
+
+        # reuse terms
+        pg_1k = polygamma(1, k)
+        pg_1n = polygamma(1, n)
+        pg_1kn = polygamma(1, k + n)
+
+        pg_2k = polygamma(2, k)
+        pg_2n = polygamma(2, n)
+        pg_2kn = polygamma(2, k + n)
+
+        # fisher information matrix
+        i_kn = -pg_1kn
+        i_k = pg_1k + i_kn
+        i_n = pg_1n + i_kn
+
+        info_mat = -len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
+
+        # first sub-matrix of the unscaled 2nd-order Christoffell symbol
+        i_kkn = pg_1n * pg_2kn
+        i_k = -pg_1n * pg_2k + i_kkn + pg_1kn * pg_2k
+        i_knn = i_kkn - pg_1kn * pg_2n
+
+        # second sub-matrix of the unscaled 2nd-order Christoffell symbol
+        i_nnk = pg_1k * pg_2kn
+        i_nkk = i_nnk - pg_1kn * pg_2k
+        i_n = -pg_1k * pg_2n + i_nnk + pg_1kn * pg_2n
+
+        # scale for the 2nd-order Christoffel symbol
+        scale = -pg_1k * pg_1n + (pg_1k + pg_1n) * pg_1kn
+
+        # combine into single tensor
+        sec_gamma = 0.5 * jnp.array([[[i_k, i_kkn], [i_kkn, i_knn]], [[i_nkk, i_nnk], [i_nnk, i_n]]]) / scale
+
+        return info_mat, sec_gamma
+
+    score_fn = grad(loglik)
+
+    def body_fun(val: Tuple):
+        old_lik, diff, num_iter, old_param = val
+        # first order approx to RGD => NGD
+        # direction = NatGrad
+        info_mat, gamma = info_and_christoffel(old_param, p_perm)
+        direction = jnla.solve(info_mat, score_fn(old_param, p_perm))
+
+        # take second order approx to RGD
+        adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
+        new_param = old_param - step_size * direction - 0.5 * step_size**2 * adjustment
+
+        new_lik = loglik(new_param, p_perm)
+        diff = old_lik - new_lik
+
+        return new_lik, diff, num_iter + 1, new_param
+
+    def cond_fun(val: Tuple):
+        old_lik, diff, num_iter, old_param = val
+        cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
+        return cond_l
+
+    init_tuple = (10000.0, 1000.0, 0, init)
+    lik, diff, num_iters, params = lax.while_loop(cond_fun, body_fun, init_tuple)
+    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(float)
+
+    return BetaParams(params[0], params[1], converged)

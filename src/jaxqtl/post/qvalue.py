@@ -54,7 +54,7 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
         # pi0 = np.append(pi0Smooth, 1).min()
 
         if verbose:
-            log.info("qvalues pi0=%.3f, estimated proportion of null features " % pi0)
+            log.info(f"qvalues pi0={pi0}, estimated proportion of null features ")
 
     if pi0 <= 0:
         pi0 = 1.0
@@ -63,7 +63,7 @@ def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.nda
             "Check that you have valid p-values or use a different range of lambda."
         )
 
-    assert 0.0 <= pi0 <= 1.0, "pi0 is not between 0 and 1: %f" % pi0
+    assert 0.0 <= pi0 <= 1.0, f"pi0 is not between 0 and 1: {pi0}"
 
     return pi0
 

@@ -1,7 +1,7 @@
 import os
 import re
 
-from abc import ABCMeta, abstractmethod
+from abc import abstractmethod
 from dataclasses import dataclass
 from typing import Any, Optional
 
@@ -40,7 +40,7 @@ class SingleCellFilter:
     bulk_min_count: int = 0
 
 
-class PhenoIO(eqx.Module, metaclass=ABCMeta):
+class PhenoIO(eqx.Module):
     """Read genotype or count data from different file format"""
 
     @abstractmethod

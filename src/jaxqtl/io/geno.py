@@ -104,7 +104,7 @@ def gtf_to_tss_bed(annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id
     if annotation_gtf.endswith(".gz"):
         opener = gzip.open(annotation_gtf, "rt")
     else:
-        opener = open(annotation_gtf, "r")
+        opener = open(annotation_gtf)
 
     with opener as gtf:
         for row in gtf:

@@ -103,19 +103,8 @@ target-version = "py37"
 line-length = 120
 
 [tool.ruff.lint]
-select = ["E", "F", "I001"]
-ignore = [
-    # Allow non-abstract empty methods in abstract base classes
-    "B027",
-    # Allow boolean positional values in function calls, like `dict.get(... True)`
-    "FBT003",
-    # Ignore checks for possible passwords
-    "S105", "S106", "S107",
-    # Ignore complexity
-    "C901", "PLR0911", "PLR0912", "PLR0913", "PLR0915",
-    # Ignore lines too long
-    "E501"
-]
+select = ["E", "F", "I001", "UP"]
+ignore = ["E402", "E721", "E731", "E741", "F722", "UP038"]
 ignore-init-module-imports = true
 
 [tool.ruff.lint.isort]
