@@ -568,7 +568,6 @@ def main(args):
                 log=log,
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
-                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_score.tsv.gz", sep="\t", index=False)
         elif args.test_method == "wald":
@@ -582,7 +581,6 @@ def main(args):
                 log=log,
                 max_iter=args.max_iter,
                 prop_cutoff=args.prop_cutoff,
-                cond_snp=args.cond_snp,
             )
             out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
 
