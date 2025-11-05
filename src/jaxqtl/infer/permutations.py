@@ -62,13 +62,13 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
     max_perm_direct: int = 1000
     max_iter_beta: int = 1000
 
-    use_tdist: bool = eqx.field(static=True)
+    use_tdist: bool = eqx.field(static=True, default=False)
 
     def _run_permutations(
         self,
         X: ArrayLike,
-        y: ArrayLike,
         G: ArrayLike,
+        y: ArrayLike,
         offset: ArrayLike,
         glm: AbstractLinearModel,
         test: HypothesisTest,
@@ -77,7 +77,7 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         def _func(key, x):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            glmstate = test(X, G, y[perm_idx], offset[perm_idx], glm)
+            glmstate = test(X, G, y[perm_idx], offset[perm_idx])
             # Note: permute individual rows of G can still preserve LD of variants (columns)
 
             return key, jnp.nanmax(jnp.abs(glmstate.z))  # jnp.nanmin(glmstate.p)
@@ -85,6 +85,7 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         key, z_stats = lax.scan(_func, key, xs=None, length=self.max_perm_direct)
 
         return z_stats
+
 
     def perm(
         self,

@@ -82,6 +82,6 @@ def _setup_G_y(
     else:
         G, var_df = _cis_window_cutter(dat, chrom, start, end)
 
-    y = dat.pheno[gene_name]  # __getitem__
+    y = jnp.asarray(dat.pheno[gene_name], dtype=float)
 
-    return G, jnp.array(y), var_df
+    return G, y, var_df

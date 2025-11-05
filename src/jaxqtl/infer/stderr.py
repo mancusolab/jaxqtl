@@ -1,6 +1,7 @@
 from abc import abstractmethod
 
 import equinox as eqx
+import jax.numpy as jnp
 
 from jax import Array
 from jax.numpy import linalg as jnpla
@@ -45,7 +46,7 @@ class FisherInfoError(ErrVarEstimation):
         weight: ArrayLike,
         alpha: ScalarLike = 0.0,
     ) -> Array:
-        infor = (X * weight).T @ X
+        infor = (X * weight[:, jnp.newaxis]).T @ X
         asmpt_cov = jnpla.inv(infor)
 
         return asmpt_cov

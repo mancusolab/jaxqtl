@@ -43,6 +43,18 @@ class _AbstractInit(eqx.Module):
     solver: eqx.AbstractVar[LinearSolve]
     std_err: eqx.AbstractVar[ErrVarEstimation]
 
+    def __call__(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        offset_eta: ArrayLike,
+        max_iter: int = 100,
+        tol: float = 1e-3,
+        step_size: float = 1e-2,
+    ):
+        return self.init(X, y, offset_eta, max_iter, tol=tol, step_size=step_size)
+
+        pass
     @abstractmethod
     def init(
         self,
@@ -79,7 +91,7 @@ class _NBInit(_AbstractInit):
         init_val = self.family.init_eta(y)
 
         jaxqtl_pois = GLM(family=Poisson(), solver=self.solver, std_err=self.std_err)
-        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_val, offset=offset_eta)
+        glm_state_pois = jaxqtl_pois.fit(X, y, offset=offset_eta)
 
         # fit covariate-only model (null)
         alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)

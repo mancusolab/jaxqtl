@@ -53,7 +53,7 @@ class QRSolve(LinearSolve):
     ) -> Array:
         w_half = jnp.sqrt(weights)
         w_half_r = w_half * r
-        w_half_X = w_half * X
+        w_half_X = X * w_half[:, jnp.newaxis]
 
         Q, R = jnpla.qr(w_half_X)
 
@@ -75,7 +75,7 @@ class CholeskySolve(LinearSolve):
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
-        Xw = X * weights
+        Xw = X * weights[:, jnp.newaxis]
         XtWX = Xw.T @ X
         XtWy = Xw.T @ r
         factor = jspla.cho_factor(XtWX, lower=True)
@@ -106,7 +106,7 @@ class CGSolve(LinearSolve):
         Now switch lineax
         """
         w_half = jnp.sqrt(weights)
-        w_half_X = X * w_half
+        w_half_X = X * w_half[:, jnp.newaxis]
 
         # Method 1: CG solve
         # cg_solver = lx.CG(atol=1e-5, rtol=1e-5)
@@ -120,9 +120,9 @@ class CGSolve(LinearSolve):
         ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
         operator = lx.MatrixLinearOperator(w_half_X)
         b = w_half * r
-        sol = lx.linear_solve(operator, b.squeeze(), solver=ncg_solver)
+        sol = lx.linear_solve(operator, b, solver=ncg_solver)
 
-        return sol.value.reshape((len(sol.value), 1))
+        return sol.value
 
     def lstsq(
         self,
@@ -137,6 +137,6 @@ class CGSolve(LinearSolve):
         # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
         ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
         operator = lx.MatrixLinearOperator(X)
-        sol = lx.linear_solve(operator, r.squeeze(), solver=ncg_solver)
+        sol = lx.linear_solve(operator, r, solver=ncg_solver)
 
-        return sol.value.reshape((len(sol.value), 1))
+        return sol.value

@@ -11,7 +11,7 @@ from jaxtyping import ArrayLike
 from ..families.distribution import ExponentialFamily
 from ..infer.glm import GLM
 from ..infer.stderr import FisherInfoError, HuberError
-from ..infer.utils import CommonTest, HypothesisTest, ScoreTest, ScoreTestSNP, WaldTest
+from ..infer.utils import HypothesisTest, ScoreTest, WaldTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from .utils import _get_geno_info, _setup_G_y
@@ -20,8 +20,7 @@ from .utils import _get_geno_info, _setup_G_y
 def map_nominal(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    test: HypothesisTest = ScoreTest(),
-    score_test: ScoreTestSNP = CommonTest(),
+    test: HypothesisTest,
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -114,9 +113,9 @@ def map_nominal(
             cond_snp_idx = dat.bim.i[dat.bim.snp == cond_snp].values
             cond_snp_vec = dat.geno[:, cond_snp_idx]
             X_add_cov = jnp.append(X, cond_snp_vec, axis=1)
-            result = test(X_add_cov, G, y, family, offset_eta, se_estimator, max_iter, score_test)
+            result = test(X_add_cov, G, y, offset_eta)
         else:
-            result = test(X, G, y, family, offset_eta, se_estimator, max_iter, score_test)
+            result = test(X, G, y, offset_eta)
 
         # calculate in-sample LD for cis-SNPs (weighted by GLM null model output, i.e., Gt W G)
         if mode == "estimate_ld_only":
@@ -210,8 +209,7 @@ def _calc_LD(G, X, wts, ld_type):
 def map_nominal_covar(
     dat: ReadyDataState,
     family: ExponentialFamily,
-    test: HypothesisTest = WaldTest(),
-    score_test: ScoreTestSNP = CommonTest(),
+    test: HypothesisTest,
     log=None,
     append_intercept: bool = True,
     standardize: bool = True,
@@ -286,7 +284,7 @@ def map_nominal_covar(
         if verbose:
             log.info("Performing scan for %s", gene_name)
 
-        result = test(X, cov, y, family, offset_eta, se_estimator, max_iter, score_test)
+        result = test(X, cov, y, offset_eta)
 
         if verbose:
             log.info("Finished cis-qtl scan for %s", gene_name)

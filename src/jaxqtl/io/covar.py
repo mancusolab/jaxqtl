@@ -5,7 +5,6 @@ import pandas as pd
 
 def covar_reader(
     covar_path: str,
-    add_covar_path: Optional[str] = None,
     covar_test: Optional[str] = None,
     rm_covar: Optional[str] = None,
 ) -> pd.DataFrame:
@@ -21,7 +20,6 @@ def covar_reader(
     Note: no missing values allowed
 
     :param covar_path: covariate path, allow bed format and tsv format
-    :param add_covar_path: path for additional covariates to add, allow only tsv format
     :param covar_test: covariate to test for association against gene expression
     :return: data frame of covariates
     """
@@ -36,11 +34,6 @@ def covar_reader(
         covar.index.names = ["iid"]
     else:
         raise ValueError("Unsupported covariate file type.")
-
-    if add_covar_path is not None:
-        add_covar = pd.read_csv(add_covar_path, sep="\t", index_col=0)
-        add_covar.index.names = ["iid"]
-        covar = covar.join(add_covar, how="left")  # join on index
 
     if covar_test is not None:
         # put covar_test in the last column

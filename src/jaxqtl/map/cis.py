@@ -102,7 +102,7 @@ def map_cis(
             log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         key, g_key = rdm.split(key, 2)
-        test_result, perm_result = map_cis_single(X, G, y, offset, glm, perm_test, g_key, sig_level, test)
+        test_result, perm_result = map_cis_single(X, G, y, offset, glm, perm_test, test, g_key, sig_level)
 
         if verbose:
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
@@ -143,9 +143,9 @@ def map_cis_single(
     offset_eta: ArrayLike,
     glm: GLM,
     perm: AbstractPermutation,
+    test: HypothesisTest,
     key: rdm.PRNGKey,
     sig_level: float = 0.05,
-    test: HypothesisTest = ScoreTest(),
 ) -> tuple[TestResult, PermutationResult]:
     """Fit GLM for SNP-gene pairs and report results
 
@@ -163,18 +163,18 @@ def map_cis_single(
     :param test: approach for hypothesis test, default to ScoreTest()
     :return: cis mapping results for a single gene
     """
-    test_result = test(X, G, y, offset_eta, glm)
+    test_result = test(X, G, y, offset_eta)
 
     perm_result = perm(
         X,
-        y,
         G,
+        y,
         offset_eta,
         test_result,
         glm,
+        test,
         key,
         sig_level,
-        test,
     )
     return test_result, perm_result
 
@@ -322,6 +322,7 @@ class CisResults:
         if isinstance(test, ScoreTest):
             g = G[:, vdx]
             M = jnp.hstack((X, g[:, jnp.newaxis]))
+            import pdb; pdb.set_trace()
             glmstate = glm.fit(M, y, offset)
             row["effect"] = float(glmstate.beta[-1])
             row["effect_se"] = float(glmstate.se[-1])

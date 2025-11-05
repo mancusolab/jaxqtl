@@ -70,7 +70,7 @@ def irls(
         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
         return cond_l
 
-    init_beta = jnp.zeros((p, 1))
+    init_beta = jnp.zeros(p)
     init_tuple = (10000.0, 10000.0, 0, init_beta, eta + offset, alpha_init)
 
     likelihood_n, diff, num_iters, beta, eta, alpha = lax.while_loop(cond_fun, body_fun, init_tuple)

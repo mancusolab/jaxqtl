@@ -195,11 +195,12 @@ def _create_common_subp(subp, name, help):
     )
 
     common_p.add_argument(
+        "-p",
         "--platform",
         type=str,
         choices=["cpu", "gpu", "tpu"],
         default="cpu",
-        help="platform: cpu, gpu or tpu",
+        help="Machine platform: cpu, gpu or tpu",
     )
     common_p.add_argument(
         "--verbose",
@@ -215,11 +216,14 @@ def main(args):
     argp = ap.ArgumentParser(
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
-
     subp = argp.add_subparsers(dest="cmd", required=True, help="Subcommands for linear-dag")
 
     # build association scan parser from 'common' parser
-    cis_p = _create_common_subp(subp, "cis", help="Perform cis-eQTL scans and report the lead hit per tested gene")
+    cis_p = _create_common_subp(
+        subp,
+        "cis",
+        help="Perform cis-eQTL scans and report the lead hit per tested gene",
+    )
     cis_p.set_defaults(func=_cis_scan)
 
     nominal_p = _create_common_subp(
@@ -249,7 +253,7 @@ def main(args):
 
     # launch w/e task was selected
     if hasattr(args, "func"):
-        args.func(args)
+        args.func(args, log)
     else:
         argp.print_help()
 
@@ -321,8 +325,10 @@ def _common_setup(args, log):
         family = NegativeBinomial()
     elif args.model == "gaussian":
         family = Gaussian()
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
 
-    if args.robust:
+    if args.robust_se:
         se_estimator = HuberError()
     else:
         se_estimator = FisherInfoError()
@@ -333,6 +339,8 @@ def _common_setup(args, log):
         solver = CGSolve()
     elif args.solver == "qr":
         solver = QRSolve()
+    else:
+        raise ValueError(f"Unknown solver: {args.solver}")
 
     if not isinstance(family, Gaussian):
         glm = GLM(
@@ -367,27 +375,28 @@ def _common_setup(args, log):
     geno, bim, sample_info = geno_reader(prefix)
     pheno_reader = PheBedReader()
     pheno = pheno_reader(args.pheno)
-    covar = covar_reader(args.covar, args.add_covar, args.covar_test, args.rm_covar)
-    if args.genelist is not None:
-        genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
+    covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
+    if args.gene_list is not None:
+        genelist = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
     else:
         genelist = None
+
     if args.keep is not None:
-        indList = pd.read_csv(args.indlist, header=None, sep="\t").iloc[:, 0].to_list()
+        indList = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
     else:
         indList = None
-    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=args.autosomal_only, ind_list=indList)
+    dat = create_readydata(geno, bim, sample_info, pheno, covar, autosomal_only=args.autosome, ind_list=indList)
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset is None:
-        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
+        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))
         offset = jnp.log(total_libsize)
     else:
         offset = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
         offset = offset.loc[offset.index.isin(dat.pheno.count.index)].sort_index()
         offset = jnp.array(offset)
 
-    if isinstance(family, Gaussian) or args.no_offset is True:
+    if isinstance(family, Gaussian) or not args.offset:
         # dat.transform_y(mode='log1p')  # log1p
         # note: use pre-processed file as in tensorqtl
         offset = jnp.zeros_like(offset)
@@ -398,7 +407,8 @@ def _common_setup(args, log):
     if args.acat:
         perm_test = ACAT()
     else:
-        perm_test = BetaPermutation(args.nperm)
+        use_tdist = not isinstance(family, Gaussian)
+        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
     # permute gene expression for type I error calibration
     if args.perm_pheno:
@@ -410,10 +420,12 @@ def _common_setup(args, log):
         log.info("No gene exist.")
         sys.exit()
     # for lm wald test, use t distribution during permutation
-    if args.test_method == "score":
+    if args.test == "score":
         test = ScoreTest(model=glm)
-    elif args.test_method == "wald":
+    elif args.test == "wald":
         test = WaldTest(model=glm, max_iter=args.max_iter, tol=args.tol, step_size=args.step_size)
+    else:
+        raise ValueError("Unknown test method: {args.test_method}")
 
     return dat, family, glm, offset, test, perm_test
 

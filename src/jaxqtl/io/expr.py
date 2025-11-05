@@ -16,9 +16,7 @@ class ExpressionData:
 
     def __getitem__(self, gene_name: str) -> Array:
         """Get count data for one gene"""
-        nobs = self.count.shape[0]
-        onegene = self.count[gene_name]
-        return jnp.float64(onegene).reshape((nobs, 1))
+        return self.count[gene_name]
 
 
 class GeneMetaData:

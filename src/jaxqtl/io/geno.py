@@ -5,17 +5,39 @@ from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from typing import NamedTuple
 
+import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from cyvcf2 import VCF
 from pandas_plink import read_plink
+from jaxtyping import Array
 
 import equinox as eqx
 
 
-class PlinkState(NamedTuple):
-    genotype: pd.DataFrame
+def _impute_geno(geno, bim, fam):
+    # to make sure that the bim index is continuous
+    bim = bim.reset_index(drop=True)
+    # if we observe SNPs have nan value for all participants (although not likely), drop them
+    (del_idx,) = jnp.where(jnp.all(jnp.isnan(geno), axis=0))
+    # this is the first time we modify the bim and geno
+    # it's okay just to directly drop them
+    bim = bim.drop(del_idx).reset_index(drop=True)
+    geno = jnp.delete(geno, del_idx, 1)
+
+    # if we observe SNPs that partially have nan value, impute them with column mean
+    col_mean = jnp.nanmean(geno, axis=0)
+    # it gives the dimension index of the nan value
+    imp_idx = jnp.where(jnp.isnan(geno))
+    if len(imp_idx[1]) != 0:
+        # based on the column index of imp_idx, we used jnp.take to get the (multiple) value
+        geno = geno.at[imp_idx].set(jnp.take(col_mean, imp_idx[1]))
+    return geno, bim, fam
+
+
+class GenoState(NamedTuple):
+    genotype: Array
     bim: pd.DataFrame
     fam: pd.DataFrame
 
@@ -24,7 +46,7 @@ class GenoIO(eqx.Module, metaclass=ABCMeta):
     """Read genotype or count data from different file format"""
 
     @abstractmethod
-    def __call__(self, path: str) -> PlinkState:
+    def __call__(self, path: str) -> GenoState:
         pass
 
 
@@ -39,24 +61,18 @@ class PlinkReader(GenoIO):
     bed: zero-based
     """
 
-    def __call__(self, bed_path: str) -> PlinkState:
+    def __call__(self, bed_path: str) -> GenoState:
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         with warnings.catch_warnings(action="ignore", category=FutureWarning):
             bim, fam, bed = read_plink(bed_path, verbose=False)
-        G = pd.DataFrame(bed.compute().T)  # nxp
-        G = 2 - G  # set alt as effect allele
-
-        # TODO: add imputation for missing genotype etc...
-        has_na = G.isnull().values.any()
-        if has_na:
-            G = G.fillna(G.mean())  # really slow
-
-        G = G.set_index(fam.iid)
-        return PlinkState(G, bim, fam)
+        fam = fam.set_index("iid", drop=False)
+        G = jnp.asarray(bed.compute().T)  # nxp
+        G, bim, fam = _impute_geno(G, bim, fam)
+        return GenoState(G, bim, fam)
 
 
 class VCFReader(GenoIO):
-    def __call__(self, vcf_path: str) -> PlinkState:
+    def __call__(self, vcf_path: str) -> GenoState:
         """read genotype from VCF file
         Note: slower than PlinkReader()
         Recommend converting VCF file to bed file first using command:
@@ -67,6 +83,7 @@ class VCFReader(GenoIO):
         # read VCF files
         vcf = VCF(vcf_path, gts012=True)  # can add samples=[]
         fam = pd.DataFrame(vcf.samples).rename(columns={0: "iid"})  # individuals
+        fam.set_index("iid", drop=False)
 
         genotype = []
         bim_list = []
@@ -81,12 +98,10 @@ class VCFReader(GenoIO):
         #  chrom        snp       cm     pos a0 a1  i
         bim = pd.DataFrame(bim_list, columns=["chrom", "snp", "cm", "pos", "alt", "ref", "i"])
 
-        G = pd.DataFrame(genotype).T
-        G = G.fillna(G.mean())  # really slow
+        G = jnp.asarray(genotype).T
+        G, bim, fam = _impute_geno(G, bim, fam)
 
-        G = G.set_index(fam.iid)
-
-        return PlinkState(G, bim, fam)
+        return GenoState(G, bim, fam)
 
 
 # A function to convert gtf to tss bed

@@ -38,12 +38,12 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
     :return: Score test statistics, p value, score, (expected) variance of score
     """
     y_resid = glm_null_res.resid
-    wgt = glm_null_res.glm_wt[:, jnp.newaxis]
-    x_W = X * wgt
+    wgt = glm_null_res.glm_wt
+    x_W = X * wgt[:, jnp.newaxis]
     sqrt_wgt = jnp.sqrt(wgt)
 
     g_resid = G - multi_dot([X, glm_null_res.infor_inv, x_W.T, G])
-    w_g_resid = g_resid * sqrt_wgt
+    w_g_resid = g_resid * sqrt_wgt[:, jnp.newaxis]
     g_var = jnp.sum(w_g_resid**2, axis=0)
 
     g_score = w_g_resid.T @ (sqrt_wgt * y_resid)

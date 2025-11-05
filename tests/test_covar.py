@@ -37,7 +37,7 @@ geno_reader = PlinkReader()
 geno, bim, sample_info = geno_reader(geno_path)
 
 log.info("Load covariates.")
-covar = covar_reader(covar_path, addcovar_path, covar_test)
+covar = covar_reader(covar_path, covar_test)
 annot = pd.read_csv(annot_path, sep="\t")
 pip = pd.read_csv(pip_path, sep="\t")
 pip = jnp.array(pip['pip']).reshape(-1, 1)

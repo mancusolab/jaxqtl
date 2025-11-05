@@ -10,7 +10,7 @@ from sklearn.decomposition import PCA
 
 import jax.numpy as jnp
 
-from jax import Array
+from jaxtyping import Array, ArrayLike
 
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
 from jaxqtl.log import get_log
@@ -114,8 +114,9 @@ class ReadyDataState:
 
 
 def create_readydata(
-    geno: pd.DataFrame,
+    geno: ArrayLike,
     bim: pd.DataFrame,
+    fam: pd.DataFrame,
     pheno: pd.DataFrame,
     covar: pd.DataFrame,
     log=None,
@@ -150,9 +151,9 @@ def create_readydata(
         log = get_log()
 
     # check missing value in genotype df (N x M), fill each column with mean
-    check_na = geno.isnull().sum().sum()
-    if check_na > 0:
-        geno = geno.fillna(geno.mean())  # really slow
+    #check_na = geno.isnull().sum().sum()
+    #if check_na > 0:
+    #    geno = geno.fillna(geno.mean())  # really slow
 
     # keep genes in autosomals
     if autosomal_only:
@@ -175,28 +176,23 @@ def create_readydata(
         sample_id_subset = pheno.index.to_list()
 
     # find complete data of individuals
-    sample_id = set.intersection(
-        set(pheno.index.to_list()),
-        set(geno.index.to_list()),
-        set(covar.index.to_list()),
-        set(sample_id_subset),
-    )
-    sample_id = list(sample_id)
-
+    sample_idx = pheno.index.intersection(covar.index).intersection(fam.index).intersection(pd.Index(sample_id_subset))
     # subset and order genotype, covariates and pheno
-    pheno = pheno.loc[pheno.index.isin(sample_id)].sort_index()
-    geno = geno.loc[geno.index.isin(sample_id)].sort_index()
-    covar = covar.loc[covar.index.isin(sample_id)].sort_index()
+    sample_idx = sample_idx.sort_values()
+    iid_indexer = fam.index.get_indexer(sample_idx)
+    pheno = pheno.loc[sample_idx]
+    covar = covar.loc[sample_idx]
+    fam = fam.loc[sample_idx]
+    geno = geno[iid_indexer, :]
 
     # ensure sample order in genotype and covar are same as count
-    assert (geno.index == pheno.index).all(), "samples are not sorted in genotype and count matrix"
-
+    assert (fam.index == pheno.index).all(), "samples are not sorted in genotype and count matrix"
     assert (covar.index == pheno.index).all(), "samples are not sorted in covariate and count matrix"
 
     log.info("Finished loading raw data.")
 
     return ReadyDataState(
-        geno=jnp.float64(geno),
+        geno=geno,
         bim=bim,
         pheno=ExpressionData(pheno),
         pheno_meta=GeneMetaData(pos_df),
