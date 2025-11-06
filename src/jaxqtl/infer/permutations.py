@@ -9,10 +9,9 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 
 from jax import lax, numpy as jnp
-from jaxtyping import Array, ArrayLike, Scalar
+from jaxtyping import Array, ArrayLike, PRNGKeyArray, Scalar
 
 from ..families.utils import ncx2_sf, t_cdf
-from .glm import AbstractLinearModel
 from .optimize import BetaParams, infer_beta
 from .utils import HypothesisTest, TestResult
 
@@ -37,11 +36,11 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        glm: AbstractLinearModel,
         test: HypothesisTest,
-        key: rdm.PRNGKey,
+        key: PRNGKeyArray,
         sig_level: float = 0.05,
-    ) -> tuple[Array, Aux]: ...
+    ) -> tuple[Array, Aux]:
+        ...
 
     def __call__(
         self,
@@ -50,12 +49,11 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        glm: AbstractLinearModel,
         test: HypothesisTest,
-        key: rdm.PRNGKey,
+        key: PRNGKeyArray,
         sig_level: float = 0.05,
-    ) -> Array:
-        self.perm(X, G, y, offset, result, glm, test, key, sig_level)
+    ) -> tuple[Array, Aux]:
+        return self.perm(X, G, y, offset, result, test, key, sig_level)
 
 
 class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
@@ -70,9 +68,8 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         G: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike,
-        glm: AbstractLinearModel,
         test: HypothesisTest,
-        key: rdm.PRNGKey,
+        key: PRNGKeyArray,
     ):
         def _func(key, x):
             key, p_key = rdm.split(key)
@@ -86,7 +83,6 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         return z_stats
 
-
     def perm(
         self,
         X: ArrayLike,
@@ -94,9 +90,8 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        glm: AbstractLinearModel,
         test: HypothesisTest,
-        key: rdm.PRNGKey,
+        key: PRNGKeyArray,
         sig_level: float = 0.05,
     ) -> tuple[Array, tuple[BetaParams, float, bool]]:
         """Perform permutation to estimate beta distribution parameters
@@ -106,39 +101,44 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
             k, n estimates
             adjusted p value for lead SNP
         """
-        z_stats_perm = self._run_permutations(X, G, y, offset, glm, test, key)
+        z_stats_perm = self._run_permutations(X, G, y, offset, test, key)
 
         n = X.shape[0]
         p = X.shape[1] + 1  # covariates plus genotype
         dof = n - p  # include intercept
-        zsq = z_stats_perm**2
         if self.use_tdist:
-            sf = lambda stat, x: t_cdf(stat, dof)
+            prep = lambda stat: -jnp.abs(stat)
+            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, prep(z_stats_perm))
+            sf = lambda stat, x: t_cdf(stat, x)
+            solver = optx.NelderMead(rtol=1e-4, atol=1e-4)  # we can't diff through betainc atm...
             init = float(dof)
         else:
+            prep = lambda stat: stat**2
+            stats = jnp.where(jnp.isnan(z_stats_perm), 1.0, prep(z_stats_perm))
             sf = lambda stat, x: ncx2_sf(stat, 1, x)
+            solver = optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4)
             init = 0.1
 
         def _df_cost(nc, args):
-            (zsq,) = args
+            (stats,) = args
             """minimize abs(1-alpha) as a function of M_eff"""
-            pval = sf(zsq, nc)
-            mean = jnp.mean(pval)
-            var = jnp.var(pval)
+            pval = sf(stats, nc)
+            mean = jnp.nanmean(pval)
+            var = jnp.nanvar(pval)
             return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
 
         # learn non-central parameter
         res = optx.least_squares(
             _df_cost,
-            solver=optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4),
+            solver=solver,
             y0=init,
-            args=(zsq,),
+            args=(stats,),
         )
         estimate = res.value
         opt_status = res.result == optx.RESULTS.successful
 
-        # use non-central chi2 to recompute permutation pvals
-        p_perm = sf(estimate)
+        # compute updated permutation p-values based on NC param due to LD
+        p_perm = sf(stats, estimate)
 
         # init using method-of-moments
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
@@ -147,10 +147,10 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         # infer beta parameters numerically
         init = jnp.array([k_init, n_init])
-        beta_result = infer_beta(p_perm, init, max_iter=self.max_iter)
+        beta_result = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
 
         # compute final permutation pvalues from Beta(k, n) approximation
-        adj_obs_p = sf(jnp.nanmax(result.z) ** 2, estimate)
+        adj_obs_p = sf(prep(result.z), estimate)
         adj_p = jaxstats.beta.cdf(adj_obs_p, beta_result.k, beta_result.n)
 
         return adj_p, (beta_result, estimate, opt_status)
@@ -164,9 +164,8 @@ class ACAT(AbstractPermutation[None]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        glm: AbstractLinearModel,
         test: HypothesisTest,
-        key: rdm.PRNGKey,
+        key: PRNGKeyArray,
         sig_level: float = 0.05,
     ) -> tuple[Array, None]:
         obs_p = result.p
@@ -193,25 +192,3 @@ class ACAT(AbstractPermutation[None]):
         )
 
         return pvalue, None
-
-
-def _acat(pvalues: ArrayLike) -> Array:
-    """
-    # ref: https://gist.github.com/ryananeff/c66cdf086979b13e855f2c3d0f3e54e1
-    Aggregated Cauchy Assocaition Test
-    A p-value combination method using the Cauchy distribution.
-
-    Inspired by: https://github.com/yaowuliu/ACAT/blob/master/R/ACAT.R
-
-    Author: Ryan Neff
-
-    Inputs:
-        pvalues: <list or numpy array>
-            The p-values you want to combine.
-        weights: <list or numpy array>, default=None
-            The weights for each of the p-values. If None, equal weights are used.
-
-    Returns:
-        pval: <float>
-            The ACAT combined p-value.
-    """

@@ -13,7 +13,6 @@ import jax.numpy as jnp
 from jaxtyping import Array, ArrayLike
 
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
-from jaxqtl.log import get_log
 
 
 @dataclass
@@ -97,9 +96,9 @@ class ReadyDataState:
             # subset by column name
             self.pheno.count = self.pheno.count[gene_list_insample]
 
-            assert set(self.pheno_meta.gene_map.phenotype_id) == set(self.pheno.count.columns), (
-                "gene map does not agree with pheno count matrix after gene list selection"
-            )
+            assert set(self.pheno_meta.gene_map.phenotype_id) == set(
+                self.pheno.count.columns
+            ), "gene map does not agree with pheno count matrix after gene list selection"
 
         # filter genes not expressed across samples
         total_n = len(self.pheno.count.index.unique())  # number of individuals
@@ -108,9 +107,9 @@ class ReadyDataState:
         self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
             self.pheno_meta.gene_map.phenotype_id.isin(self.pheno.count.columns)
         ]
-        assert set(self.pheno_meta.gene_map.phenotype_id) == set(self.pheno.count.columns), (
-            "gene map does not agree with pheno count matrix after gene expression percent filtering"
-        )
+        assert set(self.pheno_meta.gene_map.phenotype_id) == set(
+            self.pheno.count.columns
+        ), "gene map does not agree with pheno count matrix after gene expression percent filtering"
 
 
 def create_readydata(
@@ -119,7 +118,6 @@ def create_readydata(
     fam: pd.DataFrame,
     pheno: pd.DataFrame,
     covar: pd.DataFrame,
-    log=None,
     autosomal_only: bool = False,
     ind_list: Optional[List] = None,
 ) -> ReadyDataState:
@@ -147,13 +145,6 @@ def create_readydata(
     :param ind_list: path to a file to include only specified individuals
     :return: ReadyDataState
     """
-    if log is None:
-        log = get_log()
-
-    # check missing value in genotype df (N x M), fill each column with mean
-    #check_na = geno.isnull().sum().sum()
-    #if check_na > 0:
-    #    geno = geno.fillna(geno.mean())  # really slow
 
     # keep genes in autosomals
     if autosomal_only:
@@ -188,8 +179,6 @@ def create_readydata(
     # ensure sample order in genotype and covar are same as count
     assert (fam.index == pheno.index).all(), "samples are not sorted in genotype and count matrix"
     assert (covar.index == pheno.index).all(), "samples are not sorted in covariate and count matrix"
-
-    log.info("Finished loading raw data.")
 
     return ReadyDataState(
         geno=geno,

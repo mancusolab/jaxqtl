@@ -74,7 +74,7 @@ def sim_data(
     p = 2  # if covar not specified, then only intercept + genotype
     X = jnp.ones((nobs, 1))  # intercept
 
-    key = rdm.PRNGKey(seed)
+    key = rdm.key(seed)
 
     # append sample level covariates to benchmark with saigeqtl
     if sample_covar_arr is not None:
@@ -248,7 +248,7 @@ def run_sim(
 
         # fit poisson wald test
         init_pois = jaxqtl_pois.family.init_eta(y)
-        glm_state_pois = jaxqtl_pois.fit(X, y, init=init_pois, offset=log_offset, se_estimator=FisherInfoError())
+        glm_state_pois = jaxqtl_pois.fit(X, y, log_offset)
 
         pval_pois_wald = jnp.append(pval_pois_wald, glm_state_pois.p[-1])
 

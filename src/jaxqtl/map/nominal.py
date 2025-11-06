@@ -11,7 +11,7 @@ from jaxtyping import ArrayLike
 from ..families.distribution import ExponentialFamily
 from ..infer.glm import GLM
 from ..infer.stderr import FisherInfoError, HuberError
-from ..infer.utils import HypothesisTest, ScoreTest, WaldTest
+from ..infer.utils import HypothesisTest
 from ..io.readfile import ReadyDataState
 from ..log import get_log
 from .utils import _get_geno_info, _setup_G_y
@@ -77,7 +77,6 @@ def map_nominal(
     alpha = []
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
-    se_estimator = HuberError() if robust_se else FisherInfoError()
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
@@ -260,7 +259,6 @@ def map_nominal_covar(
     nominal_p = []
     converged = []
     alpha = []
-    se_estimator = HuberError() if robust_se else FisherInfoError()
 
     for gene in gene_info:
         gene_name, chrom, _, _ = gene

@@ -2,11 +2,12 @@ from typing import List, Optional, Tuple
 
 import pandas as pd
 
+import equinox as eqx
 import jax
 import jax.random as rdm
 
 from jax import numpy as jnp
-from jax.typing import ArrayLike
+from jaxtyping import ArrayLike, PRNGKeyArray
 
 from ..infer.glm import GLM
 from ..infer.permutations import AbstractPermutation, PermutationResult
@@ -81,7 +82,7 @@ def map_cis(
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
-    key = rdm.PRNGKey(seed)
+    key = rdm.key(seed)
 
     results = CisResults()
     for i, gene in enumerate(gene_info):
@@ -102,7 +103,7 @@ def map_cis(
             log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         key, g_key = rdm.split(key, 2)
-        test_result, perm_result = map_cis_single(X, G, y, offset, glm, perm_test, test, g_key, sig_level)
+        test_result, perm_result = map_cis_single(X, G, y, offset, perm_test, test, g_key, sig_level)
 
         if verbose:
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
@@ -124,7 +125,6 @@ def map_cis(
             gene_name,
             start_min,
             var_df,
-            max_iter,
             key,
         )
 
@@ -136,12 +136,12 @@ def map_cis(
     return result_df
 
 
+@eqx.filter_jit
 def map_cis_single(
     X: ArrayLike,
     G: ArrayLike,
     y: ArrayLike,
     offset_eta: ArrayLike,
-    glm: GLM,
     perm: AbstractPermutation,
     test: HypothesisTest,
     key: rdm.PRNGKey,
@@ -171,7 +171,6 @@ def map_cis_single(
         y,
         offset_eta,
         test_result,
-        glm,
         test,
         key,
         sig_level,
@@ -203,7 +202,8 @@ class CisResults:
         "num_var",
         "variant_id",
         "a1",
-        "a0pos",
+        "a0",
+        "pos",
         "tss_distance",
         "ma_count",
         "af",
@@ -224,7 +224,7 @@ class CisResults:
     def __init__(self):
         self.results = {cname: [] for cname in self.out_columns}
 
-    def _get_lead(self, result: TestResult, perm_result: PermutationResult, key: rdm.PRNGKey) -> Tuple[List, int]:
+    def _get_lead(self, result: TestResult, perm_result: PermutationResult, key: PRNGKeyArray) -> Tuple[List, int]:
         """Get lead SNP result for each gene
 
         :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=True
@@ -233,8 +233,12 @@ class CisResults:
         :return: lead SNP results and lead SNP index
         """
         # randomly break tie
-        ties_ind = jnp.nanargmin(result.p)
-        vdx = rdm.choice(key, ties_ind, replace=False)
+        minp = jnp.nanmin(result.p)
+        ties_ind = jnp.argwhere(result.p == minp).squeeze()  # why does this add extra axis?
+        if ties_ind.ndim > 0:
+            vdx = rdm.choice(key, ties_ind, replace=False)
+        else:
+            vdx = ties_ind
 
         adj_pvalue, aux = perm_result
 
@@ -249,11 +253,11 @@ class CisResults:
             method = "BETA"
         else:
             beta_k = float("nan")
-            beta_n = (float("nan"),)
-            beta_converged = (True,)
-            opt_status = (True,)
-            nc_estimate = (float("nan"),)
-            method = ("ACAT",)
+            beta_n = float("nan")
+            beta_converged = True
+            opt_status = True
+            nc_estimate = float("nan")
+            method = "ACAT"
 
         result = {
             "beta_shape1": beta_k,
@@ -264,7 +268,7 @@ class CisResults:
             "effect": float(result.beta[vdx]),
             "effect_se": float(result.se[vdx]),
             "pval_nominal": float(result.p[vdx]),
-            "pval_adj": float(adj_pvalue),
+            "pval_adj": float(adj_pvalue[vdx]),
             "adj_method": method,
             "alpha": float(result.alpha[vdx]),
             "model_converged": bool(result.converged[vdx]),
@@ -307,6 +311,7 @@ class CisResults:
         row, vdx = self._get_lead(test_result, perm_result, key)
 
         # pull SNP info at lead hit index
+        vdx = int(vdx)
         af = g_info.af[vdx]
         ma_count = g_info.ma_count[vdx]
         snp_id = variant_df.iloc[vdx].snp
@@ -322,7 +327,6 @@ class CisResults:
         if isinstance(test, ScoreTest):
             g = G[:, vdx]
             M = jnp.hstack((X, g[:, jnp.newaxis]))
-            import pdb; pdb.set_trace()
             glmstate = glm.fit(M, y, offset)
             row["effect"] = float(glmstate.beta[-1])
             row["effect_se"] = float(glmstate.se[-1])
@@ -332,7 +336,7 @@ class CisResults:
         for idx, cname in enumerate(self.out_columns[: len(meta)]):
             self.results[cname].append(meta[idx])
 
-        for cname, value in row:
+        for cname, value in row.items():
             self.results[cname].append(value)
 
         return

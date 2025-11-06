@@ -55,6 +55,7 @@ class _AbstractInit(eqx.Module):
         return self.init(X, y, offset_eta, max_iter, tol=tol, step_size=step_size)
 
         pass
+
     @abstractmethod
     def init(
         self,
@@ -88,7 +89,6 @@ class _NBInit(_AbstractInit):
         step_size: float = 1e-2,
     ):
         n, p = X.shape
-        init_val = self.family.init_eta(y)
 
         jaxqtl_pois = GLM(family=Poisson(), solver=self.solver, std_err=self.std_err)
         glm_state_pois = jaxqtl_pois.fit(X, y, offset=offset_eta)
@@ -166,7 +166,6 @@ class LinearModel(AbstractLinearModel):
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
 
         df = X.shape[0] - X.shape[1]
-        beta = beta.squeeze()  # (p,)
         stat = beta / beta_se
 
         pval_wald = t_cdf(-abs(stat), df) * 2

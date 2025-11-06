@@ -19,7 +19,7 @@ class TestResult(NamedTuple):
     beta: Array
     se: Array
     p: Array
-    z: Array  # !! add z
+    z: Array
     num_iters: Array
     converged: Array
     alpha: Array

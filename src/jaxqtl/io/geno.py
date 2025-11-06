@@ -5,15 +5,16 @@ from abc import ABCMeta, abstractmethod
 from collections import defaultdict
 from typing import NamedTuple
 
-import jax.numpy as jnp
 import numpy as np
 import pandas as pd
 
 from cyvcf2 import VCF
 from pandas_plink import read_plink
-from jaxtyping import Array
 
 import equinox as eqx
+import jax.numpy as jnp
+
+from jaxtyping import Array
 
 
 def _impute_geno(geno, bim, fam):

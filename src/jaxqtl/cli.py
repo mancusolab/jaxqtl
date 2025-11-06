@@ -212,57 +212,27 @@ def _create_common_subp(subp, name, help):
     return common_p
 
 
-def main(args):
-    argp = ap.ArgumentParser(
-        formatter_class=ap.ArgumentDefaultsHelpFormatter,
-    )
-    subp = argp.add_subparsers(dest="cmd", required=True, help="Subcommands for linear-dag")
-
-    # build association scan parser from 'common' parser
-    cis_p = _create_common_subp(
-        subp,
-        "cis",
-        help="Perform cis-eQTL scans and report the lead hit per tested gene",
-    )
-    cis_p.set_defaults(func=_cis_scan)
-
-    nominal_p = _create_common_subp(
-        subp,
-        "nominal",
-        help="Perform cis-eQTL scans and report all association stats per tested gene.",
-    )
-    nominal_p.set_defaults(func=_cis_scan)
-
-    nominal_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
-    nominal_p.set_defaults(func=_nominal_scan)
-
-    args = argp.parse_args(args)
-
-    jax.config.update("jax_platform_name", args.platform)
-    if args.platform == "tpu":
-        # TPU not support complex 64, only 16 and 32
-        jax.config.update("jax_enable_x64", False)
-    else:
-        jax.config.update("jax_enable_x64", True)
-
-    log = get_logger(__name__, args.out)
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-    else:
-        log.setLevel(logging.INFO)
-
-    # launch w/e task was selected
-    if hasattr(args, "func"):
-        args.func(args, log)
-    else:
-        argp.print_help()
-
-    return 0
-
-
 def _cis_scan(args, log):
     dat, family, glm, offset, test, perm_test = _common_setup(args, log)
 
+    """
+    glm: GLM,
+    test: HypothesisTest,
+    perm_test: AbstractPermutation,
+    append_intercept: bool = True,
+    standardize: bool = True,
+    seed: int = 123,
+    window: int = 500000,
+    random_tiebreak: bool = False,
+    sig_level: float = 0.05,
+    fdr_level: float = 0.05,
+    pi0: Optional[float] = None,
+    qvalue_lambda: Optional[ArrayLike] = None,
+    offset: ArrayLike = 0.0,
+    compute_qvalue: bool = False,
+    verbose: bool = True,
+    log=None,
+    """
     outdf_cis_score = map_cis(
         dat,
         glm=glm,
@@ -273,6 +243,7 @@ def _cis_scan(args, log):
         offset=offset,
         compute_qvalue=args.qvalue,
         log=log,
+        seed=args.seed,
     )
     test_str = "score" if isinstance(test, ScoreTest) else "wald"
     outdf_cis_score.to_csv(args.out + f".cis.{test_str}.tsv.gz", sep="\t", index=False)
@@ -372,20 +343,26 @@ def _common_setup(args, log):
         # we really shouldn't get here with mutex above
         raise ValueError("No valid genotype file specified.")
 
+    if args.keep is not None:
+        log.info("Reading list of samples to keep")
+        inds_to_keep = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
+        log.info(f"Found {len(inds_to_keep)} samples to keep")
+    else:
+        inds_to_keep = None
+
+    log.info("Reading genotype, phenotype, and covariate data")
+    # todo: we should pass in the list of samples here to restrict before reading in all geno data
     geno, bim, sample_info = geno_reader(prefix)
     pheno_reader = PheBedReader()
     pheno = pheno_reader(args.pheno)
     covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
     if args.gene_list is not None:
-        genelist = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
+        gene_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
     else:
-        genelist = None
+        gene_list = None
 
-    if args.keep is not None:
-        indList = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
-    else:
-        indList = None
-    dat = create_readydata(geno, bim, sample_info, pheno, covar, autosomal_only=args.autosome, ind_list=indList)
+    dat = create_readydata(geno, bim, sample_info, pheno, covar, autosomal_only=args.autosome, ind_list=inds_to_keep)
+    log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset is None:
@@ -397,17 +374,15 @@ def _common_setup(args, log):
         offset = jnp.array(offset)
 
     if isinstance(family, Gaussian) or not args.offset:
-        # dat.transform_y(mode='log1p')  # log1p
-        # note: use pre-processed file as in tensorqtl
         offset = jnp.zeros_like(offset)
 
     # filter gene list
-    dat.filter_gene(gene_list=genelist, geneexpr_percent_cutoff=args.express_percent)
+    dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
     if args.acat:
         perm_test = ACAT()
     else:
-        use_tdist = not isinstance(family, Gaussian)
+        use_tdist = isinstance(family, Gaussian)
         perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
     # permute gene expression for type I error calibration
@@ -428,6 +403,59 @@ def _common_setup(args, log):
         raise ValueError("Unknown test method: {args.test_method}")
 
     return dat, family, glm, offset, test, perm_test
+
+
+def main(args):
+    argp = ap.ArgumentParser(
+        formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    subp = argp.add_subparsers(dest="cmd", required=True, help="Subcommands for linear-dag")
+
+    # build association scan parser from 'common' parser
+    cis_p = _create_common_subp(
+        subp,
+        "cis",
+        help="Perform cis-eQTL scans and report the lead hit per tested gene",
+    )
+    cis_p.set_defaults(func=_cis_scan)
+
+    nominal_p = _create_common_subp(
+        subp,
+        "nominal",
+        help="Perform cis-eQTL scans and report all association stats per tested gene.",
+    )
+    nominal_p.set_defaults(func=_cis_scan)
+
+    nominal_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
+    nominal_p.set_defaults(func=_nominal_scan)
+
+    args = argp.parse_args(args)
+
+    jax.config.update("jax_platform_name", args.platform)
+    if args.platform == "tpu":
+        # TPU not support complex 64, only 16 and 32
+        jax.config.update("jax_enable_x64", False)
+    else:
+        jax.config.update("jax_enable_x64", True)
+
+    log = get_logger(__name__, args.out)
+    if args.verbose:
+        log.setLevel(logging.DEBUG)
+    else:
+        log.setLevel(logging.INFO)
+
+    # strange bug with TPU error cropping up on local machines...
+    jax_logger = logging.getLogger("jax._src.xla_bridge")
+    jax_logger.propagate = False
+
+    # launch w/e task was selected
+    if hasattr(args, "func"):
+        args.func(args, log)
+
+    else:
+        argp.print_help()
+
+    return 0
 
 
 def run_cli():
