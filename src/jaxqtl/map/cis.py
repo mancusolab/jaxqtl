@@ -27,7 +27,6 @@ def map_cis(
     standardize: bool = True,
     seed: int = 123,
     window: int = 500000,
-    random_tiebreak: bool = False,
     sig_level: float = 0.05,
     fdr_level: float = 0.05,
     pi0: Optional[float] = None,

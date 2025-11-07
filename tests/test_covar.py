@@ -11,7 +11,6 @@ from jaxqtl.io.geno import PlinkReader
 from jaxqtl.io.pheno import PheBedReader
 from jaxqtl.io.readfile import create_readydata
 from jaxqtl.log import get_log
-from jaxqtl.map.nominal import map_nominal_covar
 
 
 pd.set_option("display.max_columns", 500)  # see cis output
@@ -65,5 +64,3 @@ offset_eta = jnp.log(total_libsize)
 
 # dat.filter_gene(gene_list=gene_list)
 dat.filter_gene(gene_list=["ENSG00000189269"])
-
-mapnom_covar = map_nominal_covar(dat, family=NegativeBinomial(), test=WaldTest(), offset_eta=offset_eta, robust_se=True)

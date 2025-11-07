@@ -3,7 +3,6 @@ import logging
 import re
 import sys
 
-import numpy as np
 import pandas as pd
 
 import jax
@@ -264,13 +263,10 @@ def _nominal_scan(args, log):
     out_df = map_nominal(
         dat,
         test=test,
-        family=family,
         standardize=args.standardize,
         log=log,
         window=args.window,
         offset_eta=offset,
-        robust_se=args.robust,
-        max_iter=args.max_iter,
         cond_snp=args.cond_snp,
     )
     test_str = "score" if isinstance(test, ScoreTest) else "wald"
