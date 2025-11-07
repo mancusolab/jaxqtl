@@ -335,19 +335,19 @@ def _common_setup(args, log):
             step_size=args.step_size,
         )
 
-    if args.acat:
-        perm_test = ACAT()
-    else:
-        use_tdist = isinstance(family, Gaussian)
-        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
-
-    # for lm wald test, use t distribution during permutation
     if args.test == "score":
         test = ScoreTest(model=glm, std_err=se_estimator)
     elif args.test == "wald":
         test = WaldTest(model=glm, std_err=se_estimator)
     else:
         raise ValueError("Unknown test method: {args.test_method}")
+
+    if args.acat:
+        perm_test = ACAT()
+    else:
+        # for lm wald test, use t distribution during permutation
+        use_tdist = isinstance(family, Gaussian)
+        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
     # raw genotype data and impute for genotype data
     if args.bfile is not None:
@@ -389,20 +389,19 @@ def _common_setup(args, log):
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
-    if args.offset is None:
+    if args.set_offset_from_libsize:
         total_libsize = jnp.array(dat.pheno.count.sum(axis=1))
         offset = jnp.log(total_libsize)
-    else:
+    elif args.offset:
+        # todo: use args.offset_name if passed in; otherwise take first column after iid
         offset = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
         offset = offset.loc[offset.index.isin(dat.pheno.count.index)].sort_index()
         offset = jnp.array(offset)
-
-    if isinstance(family, Gaussian) or not args.offset:
-        offset = jnp.zeros_like(offset)
+    else:
+        offset = 0.
 
     # filter gene list
     dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
-
 
     return dat, family, glm, offset, test, perm_test
 
