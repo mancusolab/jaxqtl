@@ -74,8 +74,6 @@ def map_cis(
     X = dat.covar
     n, k = X.shape
 
-    gene_info = dat.pheno_meta
-
     if standardize:
         X = X / jnp.std(X, axis=0)
 
@@ -85,7 +83,7 @@ def map_cis(
     key = rdm.key(seed)
 
     results = CisResults()
-    for i, gene in enumerate(gene_info):
+    for i, gene in enumerate(dat):
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)
         rend = end_max + window

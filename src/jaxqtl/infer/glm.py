@@ -41,27 +41,24 @@ class _AbstractInit(eqx.Module):
 
     family: eqx.AbstractVar[ExponentialFamily]
     solver: eqx.AbstractVar[LinearSolve]
-    std_err: eqx.AbstractVar[ErrVarEstimation]
 
     def __call__(
         self,
         X: ArrayLike,
         y: ArrayLike,
-        offset_eta: ArrayLike,
+        offset: ArrayLike,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
     ):
-        return self.init(X, y, offset_eta, max_iter, tol=tol, step_size=step_size)
-
-        pass
+        return self.init(X, y, offset, max_iter, tol=tol, step_size=step_size)
 
     @abstractmethod
     def init(
         self,
         X: ArrayLike,
         y: ArrayLike,
-        offset_eta: ArrayLike,
+        offset: ArrayLike,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
@@ -72,7 +69,6 @@ class _AbstractInit(eqx.Module):
 class _NBInit(_AbstractInit):
     family: ExponentialFamily
     solver: LinearSolve
-    std_err: ErrVarEstimation
 
     def __post_init__(self):
         if not isinstance(self.family, NegativeBinomial):
@@ -83,15 +79,15 @@ class _NBInit(_AbstractInit):
         self,
         X: ArrayLike,
         y: ArrayLike,
-        offset_eta: ArrayLike,
+        offset: ArrayLike,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
     ):
         n, p = X.shape
 
-        jaxqtl_pois = GLM(family=Poisson(), solver=self.solver, std_err=self.std_err)
-        glm_state_pois = jaxqtl_pois.fit(X, y, offset=offset_eta)
+        jaxqtl_pois = GLM(family=Poisson(), solver=self.solver)
+        glm_state_pois = jaxqtl_pois.fit(X, y, offset=offset)
 
         # fit covariate-only model (null)
         alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
@@ -107,13 +103,12 @@ class _NBInit(_AbstractInit):
 class _SimpleInit(_AbstractInit):
     family: ExponentialFamily
     solver: LinearSolve
-    std_err: ErrVarEstimation
 
     def init(
         self,
         X: ArrayLike,
         y: ArrayLike,
-        offset_eta: ArrayLike,
+        offset: ArrayLike,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
@@ -125,7 +120,6 @@ class _SimpleInit(_AbstractInit):
 class AbstractLinearModel(eqx.Module):
     family: eqx.AbstractVar[ExponentialFamily]
     solver: eqx.AbstractVar[LinearSolve]
-    std_err: eqx.AbstractVar[ErrVarEstimation]
 
     @abstractmethod
     def fit(
@@ -133,6 +127,7 @@ class AbstractLinearModel(eqx.Module):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
+        std_err: ErrVarEstimation = FisherInfoError(),
     ):
         pass
 
@@ -140,7 +135,6 @@ class AbstractLinearModel(eqx.Module):
 class LinearModel(AbstractLinearModel):
     family: ExponentialFamily = Gaussian()
     solver: LinearSolve = CholeskySolve()
-    std_err: ErrVarEstimation = FisherInfoError()
 
     def __post_init__(self):
         if not isinstance(self.family, Gaussian):
@@ -152,6 +146,7 @@ class LinearModel(AbstractLinearModel):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
+        std_err: ErrVarEstimation = FisherInfoError(),
     ):
         beta, n_iter, converged, alpha = lstsq(X, y - offset, self.solver)
 
@@ -162,7 +157,7 @@ class LinearModel(AbstractLinearModel):
         phi = self.family.scale(X, y, mu)
         weight = 1.0 / phi
 
-        resid_covar = self.std_err(self.family, X, y, eta, mu, weight, alpha)
+        resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
 
         df = X.shape[0] - X.shape[1]
@@ -191,7 +186,6 @@ class GLM(eqx.Module):
 
     family: ExponentialFamily = Gaussian()
     solver: LinearSolve = CholeskySolve()
-    std_err: ErrVarEstimation = FisherInfoError()
 
     max_iter: int = 1000
     tol: float = 1e-3
@@ -203,9 +197,9 @@ class GLM(eqx.Module):
         if isinstance(self.family, NegativeBinomial):
             # this is kind of architectually annoying. NB family shouldn't know about the GLM
             # and we need to init NB using Poisson GLM, so this is our hack/workaround for now.
-            self._init = _NBInit(self.family, self.solver, self.std_err)
+            self._init = _NBInit(self.family, self.solver)
         else:
-            self._init = _SimpleInit(self.family, self.solver, self.std_err)
+            self._init = _SimpleInit(self.family, self.solver)
 
         return
 
@@ -214,23 +208,19 @@ class GLM(eqx.Module):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
-        max_iter: int = 1000,
-        tol: float = 1e-3,
-        step_size: float = 1.0,
+        std_err: ErrVarEstimation = FisherInfoError(),
     ) -> GLMState:
         """Fit GLM
 
         :param X: covariate data matrix (nxp)
         :param y: outcome vector (nx1)
         :param offset: offset (nx1)
-        :param init: initial value for betas
-        :param alpha_init: initial value for alpha in NB model, default to 0s
         :param se_estimator: estimator for standard error, default to fisher information
         :return: GLMState that contains model fitting result
         """
 
         # initialize eta and alpha
-        init, alpha_init = self._init(X, y, offset, max_iter, tol, step_size)
+        init, alpha_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
         beta, n_iter, converged, alpha = irls(
             X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, alpha_init
         )
@@ -238,7 +228,7 @@ class GLM(eqx.Module):
         mu = self.family.glink.inverse(eta)
         resid = (y - mu) * self.family.glink.deriv(mu)  # note: this is the working resid
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
-        resid_covar = self.std_err(self.family, X, y, eta, mu, weight, alpha)
+        resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
         beta = beta
         stat = beta / beta_se

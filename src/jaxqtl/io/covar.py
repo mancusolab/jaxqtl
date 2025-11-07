@@ -36,16 +36,14 @@ def covar_reader(
         raise ValueError("Unsupported covariate file type.")
 
     if covar_test is not None:
-        # put covar_test in the last column
-        col_names = covar.columns.to_list()
-        col_names.remove(covar_test)
-        col_names.append(covar_test)
-        covar = covar[col_names]
+        covar = covar[covar_test]
 
+    # remove covariates (especially for sex-specific analysis, drop the sex variable)
     if rm_covar is not None:
-        # remove column (especially for sex-specific analysis, drop the sex variable)
         covar = covar.drop(rm_covar, axis=1)
 
-    assert not covar.isnull().values.any(), "Missing values are not allowed in covariate file."
+    # todo: should we allow imputation?
+    if covar.isnull().values.any():
+        raise ValueError("Missing values are not allowed in covariate file.")
 
     return covar

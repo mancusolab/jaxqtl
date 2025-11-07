@@ -13,6 +13,7 @@ from jaxtyping import Array, ArrayLike
 
 from ..families.distribution import Gaussian
 from .glm import AbstractLinearModel, GLMState
+from .stderr import ErrVarEstimation, FisherInfoError
 
 
 class TestResult(NamedTuple):
@@ -23,7 +24,6 @@ class TestResult(NamedTuple):
     num_iters: Array
     converged: Array
     alpha: Array
-    weights: Array
 
 
 def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[Array, Array, Array, Array]:
@@ -56,6 +56,7 @@ def score_test_snp(G: ArrayLike, X: ArrayLike, glm_null_res: GLMState) -> Tuple[
 
 class HypothesisTest(eqx.Module):
     model: AbstractLinearModel
+    std_err: ErrVarEstimation = FisherInfoError()
 
     def __call__(
         self,
@@ -104,14 +105,14 @@ class WaldTest(HypothesisTest):
             n, p = X.shape
 
             # fit model to covariates then compute residuals for y and G
-            result = self.model.fit(X, y)
+            result = self.model.fit(X, y, offset, self.std_err)
             y_resid = result.resid
             x_W = X * result.glm_wtw
             G_resid = G - multi_dot([X, result.infor_inv, x_W.T, G])
 
             # fit residualized model, one snp at-a-time; but we can do this all in one go
             # using vmap
-            result = jax.vmap(lambda g_res: self.model.fit(g_res[:, jnp.newaxis], y_resid), in_axes=1)(G_resid)
+            result = jax.vmap(lambda g_res: self.model.fit(g_res[:, jnp.newaxis], y_resid, std_err=self.std_err), in_axes=1)(G_resid)
 
             state = TestResult(
                 beta=result.beta,
@@ -121,13 +122,12 @@ class WaldTest(HypothesisTest):
                 num_iters=result.num_iters,
                 converged=result.converged,
                 alpha=result.alpha,
-                weights=jnp.repeat(-9, p),  # placeholder
             )
         else:
 
             def _func(carry, snp):
                 M = jnp.hstack((X, snp[:, jnp.newaxis]))
-                glmstate = self.model.fit(M, y, offset_eta=offset)
+                glmstate = self.model.fit(M, y, offset, self.std_err)
 
                 return carry, TestResult(
                     beta=glmstate.beta[-1],
@@ -137,7 +137,6 @@ class WaldTest(HypothesisTest):
                     num_iters=glmstate.num_iters,
                     converged=glmstate.converged,
                     alpha=glmstate.alpha,
-                    weights=jnp.array([-9]),  # placeholder
                 )
 
             _, state = lax.scan(_func, 0.0, G.T)
@@ -154,7 +153,7 @@ class ScoreTest(HypothesisTest):
         offset: ArrayLike,
     ) -> TestResult:
         # Note: linear model might start with bad init
-        glmstate_cov_only = self.model.fit(X, y, offset)
+        glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
 
         zscore, pval, score, score_var = score_test_snp(G, X, glmstate_cov_only)
         beta = score / score_var
@@ -168,5 +167,4 @@ class ScoreTest(HypothesisTest):
             num_iters=glmstate_cov_only.num_iters,
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
-            weights=glmstate_cov_only.glm_wt,
         )

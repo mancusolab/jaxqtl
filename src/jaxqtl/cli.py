@@ -215,6 +215,10 @@ def _create_common_subp(subp, name, help):
 def _cis_scan(args, log):
     dat, family, glm, offset, test, perm_test = _common_setup(args, log)
 
+    if dat.pheno_meta.gene_map.shape[0] < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
+
     """
     glm: GLM,
     test: HypothesisTest,
@@ -252,7 +256,10 @@ def _cis_scan(args, log):
 
 
 def _nominal_scan(args, log):
-    dat, family, glm, offset, test = _common_setup(args, log)
+    dat, family, glm, offset, test, perm_test = _common_setup(args, log)
+    if dat.pheno_meta.gene_map.shape[0] < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
 
     out_df = map_nominal(
         dat,
@@ -266,13 +273,14 @@ def _nominal_scan(args, log):
         max_iter=args.max_iter,
         cond_snp=args.cond_snp,
     )
-    write_parqet(outdf=out_df, method="wald", out_path=args.out)
+    test_str = "score" if isinstance(test, ScoreTest) else "wald"
+    write_parqet(outdf=out_df, method=test_str, out_path=args.out)
 
     return 0
 
 
 def _trans_scan(args, log):
-    dat, family, glm, offset, test = _common_setup(args, log)
+    dat, family, glm, offset, test, perm_test = _common_setup(args, log)
     out_df = map_nominal(
         dat,
         family=family,
@@ -313,21 +321,34 @@ def _common_setup(args, log):
     else:
         raise ValueError(f"Unknown solver: {args.solver}")
 
-    if not isinstance(family, Gaussian):
+    if isinstance(family, Gaussian):
+        glm = LinearModel(
+            family=family,
+            solver=solver,
+        )
+    else:
         glm = GLM(
             family=family,
             solver=solver,
-            std_err=se_estimator,
             max_iter=args.max_iter,
             tol=args.tol,
             step_size=args.step_size,
         )
+
+    if args.acat:
+        perm_test = ACAT()
     else:
-        glm = LinearModel(
-            family=family,
-            solver=solver,
-            std_err=se_estimator,
-        )
+        use_tdist = isinstance(family, Gaussian)
+        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
+
+    # for lm wald test, use t distribution during permutation
+    if args.test == "score":
+        test = ScoreTest(model=glm, std_err=se_estimator)
+    elif args.test == "wald":
+        test = WaldTest(model=glm, std_err=se_estimator)
+    else:
+        raise ValueError("Unknown test method: {args.test_method}")
+
     # raw genotype data and impute for genotype data
     if args.bfile is not None:
         geno_reader = PlinkReader()
@@ -344,7 +365,7 @@ def _common_setup(args, log):
         raise ValueError("No valid genotype file specified.")
 
     if args.keep is not None:
-        log.info("Reading list of samples to keep")
+        log.info("Reading list of samples to keep for analyses.")
         inds_to_keep = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
         log.info(f"Found {len(inds_to_keep)} samples to keep")
     else:
@@ -353,13 +374,16 @@ def _common_setup(args, log):
     log.info("Reading genotype, phenotype, and covariate data")
     # todo: we should pass in the list of samples here to restrict before reading in all geno data
     geno, bim, sample_info = geno_reader(prefix)
-    pheno_reader = PheBedReader()
-    pheno = pheno_reader(args.pheno)
-    covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
+
     if args.gene_list is not None:
         gene_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
     else:
         gene_list = None
+
+    # todo: same as above, but for gene_list
+    pheno_reader = PheBedReader()
+    pheno = pheno_reader(args.pheno)
+    covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
 
     dat = create_readydata(geno, bim, sample_info, pheno, covar, autosomal_only=args.autosome, ind_list=inds_to_keep)
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
@@ -379,28 +403,6 @@ def _common_setup(args, log):
     # filter gene list
     dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
-    if args.acat:
-        perm_test = ACAT()
-    else:
-        use_tdist = isinstance(family, Gaussian)
-        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
-
-    # permute gene expression for type I error calibration
-    if args.perm_pheno:
-        np.random.seed(args.perm_seed)
-        perm_idx = np.random.permutation(np.arange(0, len(dat.pheno.count)))
-        dat.pheno.count = dat.pheno.count.iloc[perm_idx]
-        offset = offset[perm_idx]
-    if dat.pheno_meta.gene_map.shape[0] < 1:
-        log.info("No gene exist.")
-        sys.exit()
-    # for lm wald test, use t distribution during permutation
-    if args.test == "score":
-        test = ScoreTest(model=glm)
-    elif args.test == "wald":
-        test = WaldTest(model=glm, max_iter=args.max_iter, tol=args.tol, step_size=args.step_size)
-    else:
-        raise ValueError("Unknown test method: {args.test_method}")
 
     return dat, family, glm, offset, test, perm_test
 

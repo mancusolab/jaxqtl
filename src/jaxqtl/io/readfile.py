@@ -23,6 +23,12 @@ class ReadyDataState:
     pheno_meta: GeneMetaData
     covar: Array  # sample x covariates
 
+    def __iter__(self):
+        for item in self.pheno_meta:
+            yield item
+
+        return
+
     def filter_geno(self, maf_threshold: float = 0.0, *chrom):
         """Filter genotype data
 
@@ -168,6 +174,7 @@ def create_readydata(
 
     # find complete data of individuals
     sample_idx = pheno.index.intersection(covar.index).intersection(fam.index).intersection(pd.Index(sample_id_subset))
+
     # subset and order genotype, covariates and pheno
     sample_idx = sample_idx.sort_values()
     iid_indexer = fam.index.get_indexer(sample_idx)

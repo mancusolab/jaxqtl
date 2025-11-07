@@ -68,6 +68,7 @@ class HuberError(ErrVarEstimation):
         """
         phi = family.scale(X, y, mu)  # note: this scaler will cancel out in robust_cov
         gprime = family.glink.deriv(mu)
+
         # calculate observed hessian
         W = 1 / phi * (family._hlink_score(eta, alpha) / gprime - family._hlink_hess(eta, alpha) * (y - mu))
         hess_inv = jnpla.inv(-(X * W).T @ X)
