@@ -116,7 +116,7 @@ def _create_common_subp(subp, name, help):
         help="Compute Robust/Huber standard errors for GLM rather than Fisher Information",
     )
     common_p.add_argument(
-        "--qvalue",
+        "--q-value",
         action="store_true",
         default=False,
         help="Include q-values for downstream FDR correction",

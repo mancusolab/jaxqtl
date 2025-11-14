@@ -221,6 +221,7 @@ def _process_cis_result(cis_data, test_result, perm_result, key):
         beta_converged = beta_params.converged
         opt_status = bool(opt_status)
         nc_estimate = float(nc_estimate)
+        lead_adj_pvalue = float(adj_pvalue[vdx])
         method = "BETA"
     else:
         beta_k = float("nan")
@@ -228,6 +229,7 @@ def _process_cis_result(cis_data, test_result, perm_result, key):
         beta_converged = True
         opt_status = True
         nc_estimate = float("nan")
+        lead_adj_pvalue = float(adj_pvalue)
         method = "ACAT"
 
     snp = cis_data.get_snp_info(int(vdx))
@@ -250,7 +252,7 @@ def _process_cis_result(cis_data, test_result, perm_result, key):
         "effect": float(test_result.beta[vdx]),
         "effect_se": float(test_result.se[vdx]),
         "pval_nominal": float(test_result.p[vdx]),
-        "pval_adj": float(adj_pvalue[vdx]),
+        "pval_adj": lead_adj_pvalue,
         "adj_method": method,
         "alpha": float(test_result.alpha[vdx]),
         "model_converged": bool(test_result.converged[vdx]),
