@@ -3,15 +3,12 @@ from typing import Optional
 import numpy as np
 import pandas as pd
 
-import jax.numpy.linalg as jnpla
-
 from jax import numpy as jnp
 from jaxtyping import ArrayLike
 
 from ..infer.utils import HypothesisTest
-from ..io.readfile import ReadyDataState
+from jaxqtl.io.data import ReadyDataState
 from ..log import get_log
-from .utils import _get_geno_info, _setup_G_y
 
 
 def map_nominal(
@@ -70,58 +67,32 @@ def map_nominal(
     gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
     var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
 
-    for gene in gene_info:
-        gene_name, chrom, start_min, end_max = gene
-        lstart = max(0, start_min - window)
-        rend = end_max + window
-
-        # pull cis G (nxM) and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
+    for i, cis_data in dat.iter_cis(window):
+        gene_name = cis_data.gene_name
+        chrom = cis_data.chrom
+        lstart = cis_data.start
+        rend = cis_data.end
 
         # skip if no cis SNPs found
-        if G.shape[1] == 0:
+        if cis_data.num_snps == 0:
             if verbose:
-                log.info(
-                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
-                    gene_name,
-                    str(chrom),
-                    str(lstart),
-                    str(rend),
-                )
+                log.warning(f"No cis-SNPs found for {gene_name} over region {chrom}:{lstart}-{rend}. Skipping.")
             continue
 
         if verbose:
-            log.info(
-                "Performing cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
+            log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
-        # add conditional SNP
-        if cond_snp is not None:
-            cond_snp_idx = dat.bim.i[dat.bim.snp == cond_snp].values
-            cond_snp_vec = dat.geno[:, cond_snp_idx]
-            X_add_cov = jnp.append(X, cond_snp_vec, axis=1)
-            result = test(X_add_cov, G, y, offset_eta)
-        else:
-            result = test(X, G, y, offset_eta)
+        result = test(cis_data.X, cis_data.G, cis_data.y, cis_data.offset_eta)
 
         if verbose:
-            log.info(
-                "Finished cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
+            log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
+
+        """
         g_info = _get_geno_info(G)
         var_df["phenotype_id"] = gene_name
         var_df["tss"] = start_min
         var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
         gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
-
         # combine results
         af.append(g_info.af)
         ma_count.append(g_info.ma_count)
@@ -132,6 +103,7 @@ def map_nominal(
         converged.append(result.converged)  # whether full model converged
         num_var_cis.append(var_df.shape[0])
         alpha.append(result.alpha)
+        """
 
     # write result
     start_row = 0

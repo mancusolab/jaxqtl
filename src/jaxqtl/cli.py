@@ -17,7 +17,7 @@ from jaxqtl.infer.utils import ScoreTest, WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader, VCFReader
 from jaxqtl.io.pheno import PheBedReader
-from jaxqtl.io.readfile import create_readydata
+from jaxqtl.io.data import create_readydata
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
 from jaxqtl.map.nominal import map_nominal
@@ -212,75 +212,56 @@ def _create_common_subp(subp, name, help):
 
 
 def _cis_scan(args, log):
-    dat, family, glm, offset, test, perm_test = _common_setup(args, log)
+    dat, family, glm, test, perm_test = _common_setup(args, log)
 
     if dat.pheno_meta.gene_map.shape[0] < 1:
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
-    """
-    glm: GLM,
-    test: HypothesisTest,
-    perm_test: AbstractPermutation,
-    append_intercept: bool = True,
-    standardize: bool = True,
-    seed: int = 123,
-    window: int = 500000,
-    random_tiebreak: bool = False,
-    sig_level: float = 0.05,
-    fdr_level: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: Optional[ArrayLike] = None,
-    offset: ArrayLike = 0.0,
-    compute_qvalue: bool = False,
-    verbose: bool = True,
-    log=None,
-    """
-    outdf_cis_score = map_cis(
+    df_cis = map_cis(
         dat,
-        glm=glm,
         test=test,
         perm_test=perm_test,
-        standardize=args.standardize,
+        mode="cis",
         window=args.window,
-        offset=offset,
-        compute_qvalue=args.qvalue,
         log=log,
         seed=args.seed,
     )
+    log.info("Finished cis-scan. Writing results.")
     test_str = "score" if isinstance(test, ScoreTest) else "wald"
-    outdf_cis_score.to_csv(args.out + f".cis.{test_str}.tsv.gz", sep="\t", index=False)
+    df_cis.to_csv(args.out + f".cis.{test_str}.tsv.gz", sep="\t", index=False)
+    log.info("Finished! Thank you!")
 
     return 0
 
 
 def _nominal_scan(args, log):
-    dat, family, glm, offset, test, perm_test = _common_setup(args, log)
+    dat, family, glm, test, perm_test = _common_setup(args, log)
     if dat.pheno_meta.gene_map.shape[0] < 1:
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
-    out_df = map_nominal(
+    df_nominal = map_cis(
         dat,
         test=test,
-        standardize=args.standardize,
-        log=log,
+        perm_test=perm_test,
+        mode="nominal",
         window=args.window,
-        offset_eta=offset,
-        cond_snp=args.cond_snp,
+        log=log,
+        seed=args.seed,
     )
+
     test_str = "score" if isinstance(test, ScoreTest) else "wald"
-    write_parqet(outdf=out_df, method=test_str, out_path=args.out)
+    write_parqet(outdf=df_nominal, method=test_str, out_path=args.out)
 
     return 0
 
 
 def _trans_scan(args, log):
-    dat, family, glm, offset, test, perm_test = _common_setup(args, log)
+    dat, family, glm, test, perm_test = _common_setup(args, log)
     out_df = map_nominal(
         dat,
         family=family,
-        offset_eta=offset,
         test=test,
         mode="trans",
         standardize=args.standardize,
@@ -381,25 +362,20 @@ def _common_setup(args, log):
     pheno = pheno_reader(args.pheno)
     covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
 
-    dat = create_readydata(geno, bim, sample_info, pheno, covar, autosomal_only=args.autosome, ind_list=inds_to_keep)
-    log.info("Finished reading and aligning genotype, phenotype, covariate data.")
-
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
-    if args.set_offset_from_libsize:
-        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))
-        offset = jnp.log(total_libsize)
-    elif args.offset:
-        # todo: use args.offset_name if passed in; otherwise take first column after iid
+    if args.offset:
         offset = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
-        offset = offset.loc[offset.index.isin(dat.pheno.count.index)].sort_index()
-        offset = jnp.array(offset)
-    else:
-        offset = 0.
+
+    dat = create_readydata(geno, bim, sample_info, pheno, covar, args.offset,
+                           args.set_offset_from_libsize, autosomal_only=args.autosome, ind_list=inds_to_keep)
 
     # filter gene list
     dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
-    return dat, family, glm, offset, test, perm_test
+    log.info("Finished reading and aligning genotype, phenotype, covariate data.")
+
+
+    return dat, family, glm, test, perm_test
 
 
 def main(args):

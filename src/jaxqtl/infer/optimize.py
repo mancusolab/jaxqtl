@@ -114,7 +114,7 @@ class BetaParams(NamedTuple):
 
 
 @eqx.filter_jit
-def infer_beta(
+def infer_beta_params(
     p_perm: ArrayLike,
     init: ArrayLike,
     step_size=0.1,
@@ -138,6 +138,12 @@ def infer_beta(
         return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
 
     def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> Tuple[Array, Array]:
+        """
+        We compute the FIM under the Beta(k, n) distribution as well as the Christoffel symbols of the 2nd kind.
+        We use the christoffel symbols to perform a 2nd-order natural gradient approach which keeps us on the positive
+        manifold. Fancy-shmancy way to do this rather than staying in log space, but here we leverage the underlying
+        geometry of the distribution rather than log<->exp for R<->R+.
+        """
         k, n = params
 
         # reuse terms

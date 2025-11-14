@@ -7,7 +7,7 @@ from jaxqtl.infer.utils import WaldTest
 from jaxqtl.io.covar import covar_reader
 from jaxqtl.io.geno import PlinkReader  # , VCFReader
 from jaxqtl.io.pheno import PheBedReader
-from jaxqtl.io.readfile import create_readydata
+from jaxqtl.io.data import create_readydata
 from jaxqtl.log import get_log
 from jaxqtl.map.nominal import map_nominal
 

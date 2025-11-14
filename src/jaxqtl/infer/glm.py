@@ -35,8 +35,8 @@ class GLMState(NamedTuple):
 
 
 class _AbstractInit(eqx.Module):
-    """Annoying, but lets split out how to FIT the glm here. This is an optimization step to really determine at
-    runtime whether we're fitting IRLS for the GLM or a faster/simpler fit for a LM
+    """Annoying, but let's split out how to init the glm here. Most of the time this isn't needed, but NegBin
+    really benefits from first initializing a Poisson family to calculate/estimate dispersion ahead of time.
     """
 
     family: eqx.AbstractVar[ExponentialFamily]
@@ -86,8 +86,8 @@ class _NBInit(_AbstractInit):
     ):
         n, p = X.shape
 
-        jaxqtl_pois = GLM(family=Poisson(), solver=self.solver)
-        glm_state_pois = jaxqtl_pois.fit(X, y, offset=offset)
+        jaxqtl_pois = GLM(family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size)
+        glm_state_pois = jaxqtl_pois.fit(X, y, offset)
 
         # fit covariate-only model (null)
         alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
@@ -118,6 +118,9 @@ class _SimpleInit(_AbstractInit):
 
 
 class AbstractLinearModel(eqx.Module):
+    """
+    Abstract class to represent a linear model (eg, linear or glm).
+    """
     family: eqx.AbstractVar[ExponentialFamily]
     solver: eqx.AbstractVar[LinearSolve]
 
@@ -133,6 +136,10 @@ class AbstractLinearModel(eqx.Module):
 
 
 class LinearModel(AbstractLinearModel):
+    """
+    Linear model class. While this is generalized in the GLM, this simpler implementation helps speed things up a bit
+    when running linear regression is needed, compared with 1 step in the IRLS/GLM loop.
+    """
     family: ExponentialFamily = Gaussian()
     solver: LinearSolve = CholeskySolve()
 
@@ -182,7 +189,9 @@ class LinearModel(AbstractLinearModel):
 
 
 class GLM(eqx.Module):
-    """ """
+    """
+    Generalized Linear Model class. This encapsulates the core logic for representing a GLM (ie family and solver).
+    """
 
     family: ExponentialFamily = Gaussian()
     solver: LinearSolve = CholeskySolve()
@@ -215,7 +224,7 @@ class GLM(eqx.Module):
         :param X: covariate data matrix (nxp)
         :param y: outcome vector (nx1)
         :param offset: offset (nx1)
-        :param se_estimator: estimator for standard error, default to fisher information
+        :param std_err: estimator for standard error, default to fisher information
         :return: GLMState that contains model fitting result
         """
 
@@ -230,7 +239,6 @@ class GLM(eqx.Module):
         _, _, weight = self.family.calc_weight(X, y, eta, alpha)
         resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
-        beta = beta
         stat = beta / beta_se
 
         pval_wald = 2 * norm.sf(jnp.abs(stat))

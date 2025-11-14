@@ -1,18 +1,73 @@
 from dataclasses import dataclass
 from typing import List, Optional
 
-import numpy as np
-import pandas as pd
-import qtl.io
-import qtl.norm
-
-from sklearn.decomposition import PCA
-
+import equinox as eqx
 import jax.numpy as jnp
 
+import numpy as np
+import pandas as pd
+import qtl.norm
+
 from jaxtyping import Array, ArrayLike
+from sklearn.decomposition import PCA
 
 from jaxqtl.io.expr import ExpressionData, GeneMetaData
+
+
+class SNPInfo(eqx.Module):
+    id: str
+    pos: int
+    a1: str
+    a0: str
+    tss_distance: int
+    af: float
+    ma_count: int
+
+
+class CisData(eqx.Module):
+    # individual-level info
+    X: Array
+    G: Array
+    y: Array
+    offset: Array
+
+    # (gene/feature)-level info
+    gene_name: str
+    chrom: str
+    gene_start: int
+    gene_end: int
+
+    # variant-level info
+    cis_info: pd.DataFrame
+
+    # analysis-level info; ie our window around gene start/end
+    start: int
+    end: int
+
+    @property
+    def num_snps(self) -> int:
+        num_snp = 0 if self.G is None else self.G.shape[1]
+        return num_snp
+
+    def get_af_summary(self) -> tuple[Array, Array]:
+        n, p = self.G.shape
+        counts = jnp.sum(self.G, axis=0)  # count REF allele
+        af = counts / (2.0 * n)
+        flag = af <= 0.5
+        ma_counts = jnp.where(flag, counts, 2 * n - counts)
+
+        return af, ma_counts
+
+    def get_snp_info(self, idx: int) -> SNPInfo:
+        af, ma_count = self.get_af_summary()
+        af = af[idx]
+        ma_count = ma_count[idx]
+        snp_id = self.cis_info.iloc[idx].snp
+        snp_pos = self.cis_info.iloc[idx].pos
+        a1 = self.cis_info.iloc[idx].a1
+        a0 = self.cis_info.iloc[idx].a0
+        tss_distance = snp_pos - self.gene_start
+        return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
 
 
 @dataclass
@@ -22,10 +77,37 @@ class ReadyDataState:
     pheno: ExpressionData
     pheno_meta: GeneMetaData
     covar: Array  # sample x covariates
+    offset: ArrayLike
 
     def __iter__(self):
         for item in self.pheno_meta:
             yield item
+
+        return
+
+    def iter_cis(self, window: int):
+        for gene in self.pheno_meta:
+            gene_name, chrom, gene_start, gene_end = gene
+            start = max(0, gene_start - window)
+            end = gene_end + window
+
+            # query cis-variant info
+            var_info = self.bim
+            cis_var_info = var_info.loc[
+                (var_info["chrom"] == str(chrom)) & (var_info["pos"] >= start) & (var_info["pos"] <= end)
+                ]
+
+            # subset geno cis variants (n, p) and drop monomorphic sites
+            G = self.geno[:, cis_var_info.i.to_numpy()]
+            snp_var = jnp.var(G, axis=0)
+            keep = ~jnp.isnan(snp_var) & (snp_var > 0)
+            G = G[:, keep]
+            cis_var_info = cis_var_info.loc[np.asarray(keep)]
+
+            # note: if no variants taken, then G has shape (n,0), cis_var_info has shape (0, 7); both 2-dim
+            y = jnp.asarray(self.pheno[gene_name], dtype=float)
+
+            yield CisData(self.covar, G, y, self.offset, gene_name, str(chrom), gene_start, gene_end, cis_var_info, start, end)
 
         return
 
@@ -124,6 +206,8 @@ def create_readydata(
     fam: pd.DataFrame,
     pheno: pd.DataFrame,
     covar: pd.DataFrame,
+    offset: Optional[pd.DataFrame] = None,
+    offset_from_libsize: Optional[bool] = None,
     autosomal_only: bool = False,
     ind_list: Optional[List] = None,
 ) -> ReadyDataState:
@@ -183,6 +267,10 @@ def create_readydata(
     fam = fam.loc[sample_idx]
     geno = geno[iid_indexer, :]
 
+    if offset is None and offset_from_libsize:
+        total_libsize = jnp.array(pheno.sum(axis=1))
+        offset = jnp.log(total_libsize)
+
     # ensure sample order in genotype and covar are same as count
     assert (fam.index == pheno.index).all(), "samples are not sorted in genotype and count matrix"
     assert (covar.index == pheno.index).all(), "samples are not sorted in covariate and count matrix"
@@ -193,4 +281,5 @@ def create_readydata(
         pheno=ExpressionData(pheno),
         pheno_meta=GeneMetaData(pos_df),
         covar=jnp.float64(covar),
+        offset=offset,
     )

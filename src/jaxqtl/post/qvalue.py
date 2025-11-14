@@ -1,11 +1,9 @@
 from typing import Optional, Tuple
 
+import jax.numpy as jnp
 import numpy as np
-import pandas as pd
 
 from scipy import interpolate, stats
-
-import jax.numpy as jnp
 
 
 def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.ndarray:
@@ -79,17 +77,17 @@ def calculate_qval(
     """Calculate q value"""
 
     # TODO: fix shape if remove NA values; need return the same shape as input p
-    p = p[~np.isnan(p)]  # remove NA values
-    original_shape = p.shape
+    keep = ~np.isnan(p)
+    p = p[keep]
+    if np.min(p) < 0 or np.max(p) > 1:
+        raise ValueError("P values must be in [0, 1].")
+    if fdr_level < 0 or fdr_level > 1:
+        raise ValueError("FDR must be in [0, 1].")
 
     if lam is not None:
         lam = np.sort(lam)  # guard against user unsorted input
     else:
         lam = np.arange(0.05, 1.0, 0.05)
-
-    # check values
-    assert p.min() >= 0 and p.max() <= 1, "p values not in valid range [0, 1]."
-    assert 0 < fdr_level <= 1, "fdr_level must be in (0, 1]."
 
     # estimate pi0
     if pi0 is None:
@@ -127,45 +125,26 @@ def calculate_qval(
         qv[p_ordered] = qv_temp
 
     # reshape qvalues
-    qv = qv.reshape(original_shape)
+    result = np.full_like(keep, fill_value=np.nan, dtype=float)
+    result[keep] = qv
 
-    return qv, pi0
+    return result, pi0
 
 
-def add_qvalues(
-    cis_df: pd.DataFrame,
-    log,
-    fdr: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: Optional[np.ndarray] = None,
-) -> pd.DataFrame:
-    """Annotate permutation results with q-values, p-value threshold"""
+def estimate_sig_threshold(q_values, p_values, fdr: float):
 
-    log.info("Computing q-values")
-    log.info(f"  * Number of phenotypes tested: {cis_df.shape[0]}")
-
-    pval_col = "pval_beta"
-
-    # calculate q-values
-    qval, pi0 = calculate_qval(np.array(cis_df[pval_col]), log, pi0, lam=qvalue_lambda)
-
-    cis_df["qval"] = qval
-    log.info(f"  * Proportion of significant phenotypes (1-pi0): {1 - pi0:.2f}")
-    log.info(f"  * QTL phenotypes @ FDR {fdr:.2f}: {(cis_df['qval'] <= fdr).sum()}")
+    sig_mask = q_values <= fdr
+    if not np.any(sig_mask):
+        # no significant associations
+        return np.nan
 
     # determine global min(p) significance threshold and calculate nominal p-value threshold for each gene
-    if pval_col == "pval_beta":
-        lb = cis_df.loc[cis_df["qval"] <= fdr, "pval_beta"].sort_values().values  # ascending
-        ub = cis_df.loc[cis_df["qval"] > fdr, "pval_beta"].sort_values().values
+    lb = np.nanmax(p_values[sig_mask])
+    non_sig = ~sig_mask
+    if not np.any(non_sig):
+        ub = np.nanmin(p_values[~sig_mask])
+        pthreshold = 0.5 * (lb + ub)
+    else:
+        pthreshold = lb
 
-        if lb.shape[0] > 0:  # significant phenotypes
-            lb = lb[-1]
-            if ub.shape[0] > 0:
-                ub = ub[0]
-                pthreshold = (lb + ub) / 2
-            else:
-                pthreshold = lb
-            log.info(f"  * min p-value threshold @ FDR {fdr}: {pthreshold:.6g}")
-            cis_df["pval_nominal_threshold"] = stats.beta.ppf(pthreshold, cis_df["beta_shape1"], cis_df["beta_shape2"])
-
-    return cis_df
+    return pthreshold

@@ -4,7 +4,7 @@ import jax.numpy as jnp
 
 from jax import config, random
 
-from jaxqtl.infer.optimize import infer_beta
+from jaxqtl.infer.optimize import infer_beta_params
 
 config.update("jax_enable_x64", True)
 
@@ -25,7 +25,7 @@ def test_betaperm():
     n_init = k_init * (1 / p_mean - 1)
     init = jnp.array([k_init, n_init])
 
-    res = infer_beta(p_perm, init, step_size=1.0)
+    res = infer_beta_params(p_perm, init, step_size=1.0)
 
     observed = res[0:2]
     converged = res[2]

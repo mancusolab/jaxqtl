@@ -12,7 +12,7 @@ from jax import lax, numpy as jnp
 from jaxtyping import Array, ArrayLike, PRNGKeyArray, Scalar
 
 from ..families.utils import ncx2_sf, t_cdf
-from .optimize import BetaParams, infer_beta
+from .optimize import BetaParams, infer_beta_params
 from .utils import HypothesisTest, TestResult
 
 
@@ -121,7 +121,9 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         def _df_cost(nc, args):
             (stats,) = args
-            """minimize abs(1-alpha) as a function of M_eff"""
+            """ Compute residual (alpha - 1) as a function of M_eff. We'll perform least-squares curve fitting
+            to the residuals.
+            """
             pval = sf(stats, nc)
             mean = jnp.nanmean(pval)
             var = jnp.nanvar(pval)
@@ -139,6 +141,8 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         # compute updated permutation p-values based on NC param due to LD
         p_perm = sf(stats, estimate)
+        tiny = jnp.finfo(float).tiny
+        p_perm = jnp.maximum(p_perm, tiny)
 
         # init using method-of-moments
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)
@@ -147,7 +151,7 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         # infer beta parameters numerically
         init = jnp.array([k_init, n_init])
-        beta_result = infer_beta(p_perm, init, max_iter=self.max_iter_beta)
+        beta_result = infer_beta_params(p_perm, init, max_iter=self.max_iter_beta)
 
         # compute final permutation pvalues from Beta(k, n) approximation
         adj_obs_p = sf(prep(result.z), estimate)
