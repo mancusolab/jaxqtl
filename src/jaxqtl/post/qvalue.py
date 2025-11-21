@@ -1,9 +1,10 @@
-from typing import Optional, Tuple
+from typing import Optional
 
-import jax.numpy as jnp
 import numpy as np
 
-from scipy import interpolate, stats
+from scipy import interpolate
+
+import jax.numpy as jnp
 
 
 def pi0est(p: np.ndarray, log, lam: np.ndarray, verbose: bool = False) -> np.ndarray:
@@ -73,7 +74,7 @@ def calculate_qval(
     lam: Optional[np.ndarray] = None,
     fdr_level: float = 0.05,
     lowmem=False,
-) -> Tuple[np.ndarray, np.ndarray]:
+) -> tuple[np.ndarray, float]:
     """Calculate q value"""
 
     # TODO: fix shape if remove NA values; need return the same shape as input p
@@ -132,7 +133,6 @@ def calculate_qval(
 
 
 def estimate_sig_threshold(q_values, p_values, fdr: float):
-
     sig_mask = q_values <= fdr
     if not np.any(sig_mask):
         # no significant associations

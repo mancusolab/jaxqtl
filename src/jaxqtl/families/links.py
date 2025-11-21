@@ -158,7 +158,6 @@ class NBlink(Link):
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         """
-        z = jnp.exp(eta)
-        jnp.exp(z) / (self.alpha * (1 - jnp.exp(z)) ** 2)
+        jnp.exp(eta) / (self.alpha * (1 - jnp.exp(eta)) ** 2)
         """
         return _grad_per_sample(self.inverse, eta)

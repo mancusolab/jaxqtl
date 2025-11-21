@@ -6,21 +6,20 @@ import sys
 import pandas as pd
 
 import jax
-import jax.numpy as jnp
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM, LinearModel
 from jaxqtl.infer.permutations import ACAT, BetaPermutation
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
+from jaxqtl.infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from jaxqtl.infer.stderr import FisherInfoError, HuberError
-from jaxqtl.infer.utils import ScoreTest, WaldTest
+from jaxqtl.infer.utils import ScoreTest, SpaTest, WaldTest
 from jaxqtl.io.covar import covar_reader
+from jaxqtl.io.data import create_readydata
 from jaxqtl.io.geno import PlinkReader, VCFReader
 from jaxqtl.io.pheno import PheBedReader
-from jaxqtl.io.data import create_readydata
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import map_nominal
 
 
 class _SplitAction(ap.Action):
@@ -116,10 +115,10 @@ def _create_common_subp(subp, name, help):
         help="Compute Robust/Huber standard errors for GLM rather than Fisher Information",
     )
     common_p.add_argument(
-        "--q-value",
+        "--spa",
         action="store_true",
         default=False,
-        help="Include q-values for downstream FDR correction",
+        help="Whether to perform SPA correction for p-values computed from score statistics. Not applicable for Wald.",
     )
 
     # filtering arguments
@@ -258,29 +257,23 @@ def _nominal_scan(args, log):
 
 
 def _trans_scan(args, log):
-    dat, family, glm, test, perm_test = _common_setup(args, log)
-    out_df = map_nominal(
-        dat,
-        family=family,
-        test=test,
-        mode="trans",
-        standardize=args.standardize,
-        robust_se=args.robust,
-        log=log,
-        max_iter=args.max_iter,
-        cond_snp=args.cond_snp,
-    )
-    out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
+    # TBD
+    # dat, family, glm, test, perm_test = _common_setup(args, log)
+    # out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
     return 0
 
 
 def _common_setup(args, log):
+    # we only use CGF if --spa is set, but may as well set up thin objects here regardless
     if args.model == "poisson":
         family = Poisson()
+        cgf = PoissonCGF()
     elif args.model == "nb":
         family = NegativeBinomial()
+        cgf = NegativeBinomialCGF()
     elif args.model == "gaussian":
         family = Gaussian()
+        cgf = GaussianCGF()
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
@@ -313,7 +306,11 @@ def _common_setup(args, log):
         )
 
     if args.test == "score":
-        test = ScoreTest(model=glm, std_err=se_estimator)
+        if args.spa:
+            # cgf set up top
+            test = SpaTest(model=glm, std_err=se_estimator, cgf=cgf)
+        else:
+            test = ScoreTest(model=glm, std_err=se_estimator)
     elif args.test == "wald":
         test = WaldTest(model=glm, std_err=se_estimator)
     else:
@@ -365,15 +362,25 @@ def _common_setup(args, log):
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset:
         offset = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
+    else:
+        offset = None
 
-    dat = create_readydata(geno, bim, sample_info, pheno, covar, args.offset,
-                           args.set_offset_from_libsize, autosomal_only=args.autosome, ind_list=inds_to_keep)
+    dat = create_readydata(
+        geno,
+        bim,
+        sample_info,
+        pheno,
+        covar,
+        offset,
+        args.set_offset_from_libsize,
+        autosomal_only=args.autosome,
+        ind_list=inds_to_keep,
+    )
 
     # filter gene list
     dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
-
 
     return dat, family, glm, test, perm_test
 

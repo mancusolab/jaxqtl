@@ -27,6 +27,7 @@ class GLMState(NamedTuple):
     eta: Array
     mu: Array
     glm_wt: Array
+    link_prime: Array
     num_iters: Array
     converged: Array
     infor_inv: Array  # for score test
@@ -121,6 +122,7 @@ class AbstractLinearModel(eqx.Module):
     """
     Abstract class to represent a linear model (eg, linear or glm).
     """
+
     family: eqx.AbstractVar[ExponentialFamily]
     solver: eqx.AbstractVar[LinearSolve]
 
@@ -140,6 +142,7 @@ class LinearModel(AbstractLinearModel):
     Linear model class. While this is generalized in the GLM, this simpler implementation helps speed things up a bit
     when running linear regression is needed, compared with 1 step in the IRLS/GLM loop.
     """
+
     family: ExponentialFamily = Gaussian()
     solver: LinearSolve = CholeskySolve()
 
@@ -180,6 +183,7 @@ class LinearModel(AbstractLinearModel):
             eta,
             mu,
             weight,
+            jnp.ones_like(weight),
             n_iter,
             converged,
             resid_covar,
@@ -234,13 +238,12 @@ class GLM(eqx.Module):
             X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, alpha_init
         )
         eta = X @ beta + offset
-        mu = self.family.glink.inverse(eta)
-        resid = (y - mu) * self.family.glink.deriv(mu)  # note: this is the working resid
-        _, _, weight = self.family.calc_weight(X, y, eta, alpha)
+        mu, link_prime, weight = self.family.calc_weight(X, y, eta, alpha)
+        resid = (y - mu) * link_prime  # note: this is the working resid
+
         resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
         stat = beta / beta_se
-
         pval_wald = 2 * norm.sf(jnp.abs(stat))
 
         return GLMState(
@@ -251,6 +254,7 @@ class GLM(eqx.Module):
             eta,
             mu,
             weight,
+            link_prime,
             n_iter,
             converged,
             resid_covar,

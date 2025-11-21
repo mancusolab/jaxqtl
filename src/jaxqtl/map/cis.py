@@ -1,7 +1,5 @@
-from dataclasses import dataclass
 from typing import Literal, Optional
 
-import numpy as np
 import pandas as pd
 
 import equinox as eqx
@@ -103,13 +101,15 @@ def map_cis(
 
         if mode == "cis":
             key, p_key, s_key = rdm.split(key, 3)
-            test_result, perm_result = map_cis_single(cis_data.X, cis_data.G, cis_data.y, cis_data.offset, perm_test, test, p_key, sig_level)
+            test_result, perm_result = map_cis_single(
+                cis_data.X, cis_data.G, cis_data.y, cis_data.offset, perm_test, test, p_key, sig_level
+            )
             result = _process_cis_result(cis_data, test_result, perm_result, s_key)
             results.add_row(result)
         else:
             test_result = eqx.filter_jit(test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
-            #result = _process_nominal_result(cis_data, test_result)
-            #results.add_df(result)
+            # result = _process_nominal_result(cis_data, test_result)
+            # results.add_df(result)
 
         if verbose:
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
@@ -135,6 +135,7 @@ def map_cis(
         if isinstance(perm_test, BetaPermutation):
             # could this update be done for ACAT also?
             from scipy import stats
+
             beta_shape1 = result_df["beta_shape1"].values
             beta_shape2 = result_df["beta_shape2"].values
             result_df["pval_nominal_threshold"] = stats.beta.ppf(p_thold, beta_shape1, beta_shape2)
@@ -259,34 +260,3 @@ def _process_cis_result(cis_data, test_result, perm_result, key):
     }
 
     return result
-
-
-def add_qvalues(
-    cis_df: pd.DataFrame,
-    pval_col: str = "pval_adj",
-    fdr: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: Optional[np.ndarray] = None,
-    log = None,
-) -> pd.DataFrame:
-    """Annotate permutation results with q-values, p-value threshold"""
-    if log is None:
-        log = get_log()
-
-
-    p_values = cis_df[pval_col].values.to_numpy()
-    # calculate q-values
-    q_values, pi0 = calculate_qval(p_values, log, pi0, lam=qvalue_lambda)
-
-    beta_shape1 = cis_df["beta_shape1"].values.to_numpy()
-    beta_shape2 = cis_df["beta_shape2"].values.to_numpy()
-
-    tholds = estimate_sig_threshold(q_values, p_values, beta_shape1, beta_shape2, fdr)
-
-    cis_df["q_value"] = q_values
-    cis_df["pval_nominal_threshold"] = tholds
-    log.info(f"  * Proportion of significant phenotypes (1-pi0): {1 - pi0:.2f}")
-    log.info(f"  * QTL phenotypes @ FDR {fdr:.2f}: {(cis_df['qval'] <= fdr).sum()}")
-
-
-    return cis_df
