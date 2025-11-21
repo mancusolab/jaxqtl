@@ -380,6 +380,8 @@ def _common_setup(args, log):
     # filter gene list
     dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
+    # dat.add_covar_pheno_PC(k=2)
+
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
     return dat, family, glm, test, perm_test

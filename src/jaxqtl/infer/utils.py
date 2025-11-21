@@ -189,8 +189,6 @@ class SpaTest(HypothesisTest):
 
         spa_g_resid = g_resid * (wgt * gprime)[:, jnp.newaxis]
 
-        pval = 2 * norm.sf(jnp.fabs(zscore))
-
         def _pval(args, idx):
             pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, cgf_state)
             return args, pv
@@ -200,9 +198,9 @@ class SpaTest(HypothesisTest):
         return TestResult(
             beta=beta,
             se=se,
-            p=pval,
+            p=gupval,
             z=zscore,
             num_iters=glmstate_cov_only.num_iters,
-            converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
-            alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
+            converged=jnp.ones_like(gupval) * glmstate_cov_only.converged,
+            alpha=jnp.ones_like(gupval) * glmstate_cov_only.alpha,
         )
