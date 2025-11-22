@@ -128,19 +128,19 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
 
     def get_t_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
         """Compute t boundaries for saddlepoint approximation under Negative Binomial."""
-        lbound, ubound = -jnp.inf, jnp.inf
         u_max = jnp.log1p(state.r / state.pred_mean)
 
-        rescaled = u_max / g_resid
-        t_lower = jnp.maximum(lbound, jnp.max(jnp.where(g_resid < 0, rescaled, -jnp.inf)))
-        t_upper = jnp.minimum(ubound, jnp.min(jnp.where(g_resid > 0, rescaled, jnp.inf)))
+        rescaled = jnp.where(g_resid != 0, u_max / g_resid, 0.0)
+        t_lower = jnp.max(jnp.where(g_resid < 0, rescaled, -jnp.inf))
+        t_upper = jnp.min(jnp.where(g_resid > 0, rescaled, jnp.inf))
 
         return t_lower, t_upper
 
     def get_score_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
         offset = jnp.sum(g_resid * state.pred_mean)
-        ubound = jnp.inf
-        lbound = -offset
+        lbound = jnp.where(jnp.all(g_resid >= 0), -offset, -jnp.inf)
+        ubound = jnp.where(jnp.all(g_resid <= 0), -offset, jnp.inf)
+
         return lbound, ubound
 
 
@@ -184,7 +184,7 @@ def saddlepoint_pvalue(
     two_sided_mode: Literal["rstar", "abs", "2min"] = "rstar",
     log_p: bool = False,
     cutoff: float = 1.96,
-    max_iter: int = 1000,
+    max_iter: int = 100,
 ) -> Array:
     """
     Compute p-values of a score test using a saddlepoint approximation.

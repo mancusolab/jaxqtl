@@ -210,6 +210,10 @@ def _create_common_subp(subp, name, help):
     return common_p
 
 
+def _compute_expression_pcs(args, log):
+    ...
+
+
 def _cis_scan(args, log):
     dat, family, glm, test, perm_test = _common_setup(args, log)
 
@@ -264,7 +268,9 @@ def _trans_scan(args, log):
 
 
 def _common_setup(args, log):
-    # we only use CGF if --spa is set, but may as well set up thin objects here regardless
+    # Set up the distributional family and corresponding cumulative generating function (CGF) here.
+    # We only use CGF if --spa is set, but may as well set up thin objects here so we don't need to re-enumerate
+    # later.
     if args.model == "poisson":
         family = Poisson()
         cgf = PoissonCGF()
@@ -277,11 +283,14 @@ def _common_setup(args, log):
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
+    # Whether to use Huber-style sandwich estimator or FisherInfo (ie Asymptotic) SEs
+    # This really only matters when doing Wald test
     if args.robust_se:
         se_estimator = HuberError()
     else:
         se_estimator = FisherInfoError()
 
+    # Power-users may want to explore diff solvers
     if args.solver == "cholesky":
         solver = CholeskySolve()
     elif args.solver == "cg":
@@ -291,6 +300,8 @@ def _common_setup(args, log):
     else:
         raise ValueError(f"Unknown solver: {args.solver}")
 
+    # GLM under Gaussian assumptions is a single step under the IRLS, but that adds a bunch of overhead.
+    # So we use this simpler interface instead for Gaussian case
     if isinstance(family, Gaussian):
         glm = LinearModel(
             family=family,
@@ -305,6 +316,7 @@ def _common_setup(args, log):
             step_size=args.step_size,
         )
 
+    # Set up our hypothesis testing framework. Score, SPA (which is Score + SPA), or Wald test.
     if args.test == "score":
         if args.spa:
             # cgf set up top
@@ -316,6 +328,7 @@ def _common_setup(args, log):
     else:
         raise ValueError("Unknown test method: {args.test_method}")
 
+    # Set up our within-gene multiple testing correction framework here: ACAT (fast) or Beta-Permutations.
     if args.acat:
         perm_test = ACAT()
     else:
@@ -323,7 +336,6 @@ def _common_setup(args, log):
         use_tdist = isinstance(family, Gaussian)
         perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
-    # raw genotype data and impute for genotype data
     if args.bfile is not None:
         geno_reader = PlinkReader()
         prefix = args.bfile
@@ -351,6 +363,8 @@ def _common_setup(args, log):
 
     if args.gene_list is not None:
         gene_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
+    elif args.genes is not None:
+        gene_list = args.genes
     else:
         gene_list = None
 
@@ -408,8 +422,28 @@ def main(args):
     )
     nominal_p.set_defaults(func=_cis_scan)
 
-    nominal_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
-    nominal_p.set_defaults(func=_nominal_scan)
+    trans_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
+    trans_p.set_defaults(func=_nominal_scan)
+
+    gepcs_p = subp.add_parser("compute-pcs", help="Compute gene expression principal components")
+    gepcs_p.add_argument("--pheno", help="Path to phenotypes", required=True)
+    gepcs_p.add_argument("--covar", help="Path to covariate data")
+    gepcs_p.add_argument(
+        "-p",
+        "--platform",
+        type=str,
+        choices=["cpu", "gpu", "tpu"],
+        default="cpu",
+        help="Machine platform: cpu, gpu or tpu",
+    )
+    gepcs_p.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Verbose for logger",
+    )
+    gepcs_p.add_argument("--out", "-o", type=str, help="out file prefix")
+    gepcs_p.set_defaults(func=_compute_expression_pcs)
 
     args = argp.parse_args(args)
 
@@ -433,7 +467,6 @@ def main(args):
     # launch w/e task was selected
     if hasattr(args, "func"):
         args.func(args, log)
-
     else:
         argp.print_help()
 

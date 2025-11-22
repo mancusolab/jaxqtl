@@ -168,7 +168,6 @@ class SpaTest(HypothesisTest):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
-        # Note: linear model might start with bad init
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         cgf_state = self.cgf.init(glmstate_cov_only)
 
