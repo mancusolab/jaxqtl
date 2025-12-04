@@ -1,6 +1,7 @@
 from typing import Literal, Optional
 
 import pandas as pd
+import polars as pl
 
 import equinox as eqx
 import jax
@@ -26,13 +27,13 @@ class _ResultsAggregator:
 
     def add_row(self, row: dict):
         # cheap 1-row DataFrame, but *only* created when needed
-        self.frames.append(pd.DataFrame([row]))
+        self.frames.append(pl.DataFrame([row]))
 
-    def add_df(self, df: pd.DataFrame):
+    def add_df(self, df: pl.DataFrame):
         self.frames.append(df)
 
     def to_df(self):
-        return pd.concat(self.frames, ignore_index=True)
+        return pl.concat(self.frames, how="vertical")
 
 
 def map_cis(
@@ -48,7 +49,7 @@ def map_cis(
     verbose: bool = True,
     log=None,
     seed: int = 123,
-) -> pd.DataFrame:
+) -> pl.DataFrame:
     """Cis eQTL mapping for each gene, report lead variant
 
     Run cis-eQTL mapping by fitting specified GLM model, such as Poisson and Negative Binomial.
@@ -96,6 +97,13 @@ def map_cis(
                 log.warning(f"No cis-SNPs found for {gene_name} over region {chrom}:{lstart}-{rend}. Skipping.")
             continue
 
+        # skip if no variation in y
+        y_var = jnp.var(cis_data.y)
+        if y_var == 0 or jnp.isnan(y_var):
+            if verbose:
+                log.warning(f"No variation found in for {gene_name}. Skipping.")
+            continue
+
         if verbose:
             log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
@@ -123,9 +131,9 @@ def map_cis(
     # if we're in cis-mode (ie take only top hits), compute q-values for FDR correction
     if mode == "cis":
         log.info("Computing q-values")
-        p_values = result_df["pval_adj"].values
+        p_values = result_df.get_column("pval_adj").to_numpy()
         q_values, pi0 = calculate_qval(p_values, log, pi0, lam=qvalue_lambda)
-        result_df["qval"] = q_values
+        result_df = result_df.with_columns(pl.Series("qval", q_values))
         num_sig = (q_values <= fdr_level).sum()
         p_thold = estimate_sig_threshold(q_values, p_values, fdr_level)
 

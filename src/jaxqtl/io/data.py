@@ -1,17 +1,15 @@
 from dataclasses import dataclass
-from typing import List, Optional
+from typing import Optional
+
+import polars as pl
 
 import equinox as eqx
 import jax.numpy as jnp
 
-import numpy as np
-import pandas as pd
-import qtl.norm
-
 from jaxtyping import Array, ArrayLike
-from sklearn.decomposition import PCA
 
-from jaxqtl.io.expr import ExpressionData, GeneMetaData
+from .geno import GenotypeData
+from .pheno import ExpressionData
 
 
 class SNPInfo(eqx.Module):
@@ -38,7 +36,7 @@ class CisData(eqx.Module):
     gene_end: int
 
     # variant-level info
-    cis_info: pd.DataFrame
+    cis_info: pl.DataFrame
 
     # analysis-level info; ie our window around gene start/end
     start: int
@@ -49,9 +47,10 @@ class CisData(eqx.Module):
         num_snp = 0 if self.G is None else self.G.shape[1]
         return num_snp
 
-    def get_af_summary(self) -> tuple[Array, Array]:
-        n, p = self.G.shape
-        counts = jnp.sum(self.G, axis=0)  # count REF allele
+    def get_af_summary(self, idx: int) -> tuple[Array, Array]:
+        g = self.G[:, idx]
+        n = len(g)
+        counts = jnp.sum(g, axis=0)  # count REF allele
         af = counts / (2.0 * n)
         flag = af <= 0.5
         ma_counts = jnp.where(flag, counts, 2 * n - counts)
@@ -59,227 +58,130 @@ class CisData(eqx.Module):
         return af, ma_counts
 
     def get_snp_info(self, idx: int) -> SNPInfo:
-        af, ma_count = self.get_af_summary()
-        af = af[idx]
-        ma_count = ma_count[idx]
-        snp_id = self.cis_info.iloc[idx].snp
-        snp_pos = self.cis_info.iloc[idx].pos
-        a1 = self.cis_info.iloc[idx].a1
-        a0 = self.cis_info.iloc[idx].a0
+        af, ma_count = self.get_af_summary(idx)
+        # chrom, snp, cm, pos, a0, a1, index
+        _, snp_id, _, snp_pos, a0, a1, _ = self.cis_info.row(idx)
         tss_distance = snp_pos - self.gene_start
         return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
 
 
 @dataclass
 class ReadyDataState:
-    geno: Array  # sample x genes
-    bim: pd.DataFrame  # variants on rows, cols: chrom, snp, cm, pos, a0, a1, i
-    pheno: ExpressionData
-    pheno_meta: GeneMetaData
+    genotype: GenotypeData  # sample x genes
+    expression: ExpressionData
     covar: Array  # sample x covariates
     offset: ArrayLike
 
-    def __iter__(self):
-        for item in self.pheno_meta:
-            yield item
-
-        return
+    @property
+    def num_genes(self) -> int:
+        return self.expression.pheno_meta.height
 
     def iter_cis(self, window: int):
-        for gene in self.pheno_meta:
-            gene_name, chrom, gene_start, gene_end = gene
+        for data in self.expression:
+            y, gene_name, chrom, gene_start, gene_end = data
             start = max(0, gene_start - window)
             end = gene_end + window
 
             # query cis-variant info
-            var_info = self.bim
-            cis_var_info = var_info.loc[
-                (var_info["chrom"] == str(chrom)) & (var_info["pos"] >= start) & (var_info["pos"] <= end)
-                ]
-
-            # subset geno cis variants (n, p) and drop monomorphic sites
-            G = self.geno[:, cis_var_info.i.to_numpy()]
-            snp_var = jnp.var(G, axis=0)
-            keep = ~jnp.isnan(snp_var) & (snp_var > 0)
-            G = G[:, keep]
-            cis_var_info = cis_var_info.loc[np.asarray(keep)]
-
             # note: if no variants taken, then G has shape (n,0), cis_var_info has shape (0, 7); both 2-dim
-            y = jnp.asarray(self.pheno[gene_name], dtype=float)
+            G, cis_var_info = self.genotype.query_cis(chrom, start, end)
 
-            yield CisData(self.covar, G, y, self.offset, gene_name, str(chrom), gene_start, gene_end, cis_var_info, start, end)
+            yield CisData(
+                self.covar, G, y, self.offset, gene_name, str(chrom), gene_start, gene_end, cis_var_info, start, end
+            )
 
         return
 
-    def filter_geno(self, maf_threshold: float = 0.0, *chrom):
-        """Filter genotype data
 
-        :param maf_threshold: minor allele frequency, default to 0.0
-        :param chrom: include which chromosomes
-        """
-        if len(chrom) > 0:
-            # filter bim by chr
-            self.bim = self.bim.loc[self.bim.chrom.isin(chrom)]
+def align_pheno_covar(
+    pheno: pl.LazyFrame,
+    covar: pl.LazyFrame,
+    offset: Optional[pl.LazyFrame] = None,
+):
+    # store this once to avoid typos etc
+    IID = "iid"
+    iid_col = pl.col(IID)
 
-        assert 0 <= maf_threshold <= 1, "maf threshold must be in range [0, 1]"
-        if maf_threshold > 0.0:
-            af = np.array(self.geno.mean(axis=0) / 2)
-            maf = np.where(af > 0.5, 1 - af, af)  # convert to maf
-            self.bim = self.bim.loc[maf > maf_threshold]
+    # pull out common iids across pheno/covar
+    common_iids = pheno.select(iid_col).join(covar.select(iid_col), on=IID, how="inner")
 
-        # pull filtered geno by bim file
-        self.geno = jnp.take(self.geno, jnp.array(self.bim.i), axis=1)
-        assert self.geno.shape[1] == len(self.bim), "genotype and bim file do not have same shape"
+    # if offset is provided then repeat
+    if offset is not None:
+        common_iids = common_iids.join(offset.select(iid_col), on=IID, how="inner")
 
-        # reset "i" for pulling genotype by position
-        self.bim.i = np.arange(0, self.geno.shape[1])
+    pheno = pheno.join(common_iids, on=IID, how="semi")
+    covar = covar.join(common_iids, on=IID, how="semi")
 
-    def transform_y(self, mode: str = "log1p"):
-        """
-        tmm: normalize between individuals to make them comparable (differential library size)
-        """
-        if mode == "log1p":
-            self.pheno.count = np.log1p(self.pheno.count)  # prevent log(0)
-        elif mode == "tmm":
-            # use edger TMM method to calculate size factor and convert to counts per million
-            tmm_counts_df = qtl.norm.edger_cpm(self.pheno.count.iloc[:, 4:], normalized_lib_sizes=True)
-            # # mask is filter by gene
-            # inverse normal transformation on each gene (row)
-            norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
-            self.pheno.count.iloc[:, 4:] = norm_df
-        else:
-            raise ValueError(f"Unsupported mode {mode}")
+    if offset is not None:
+        offset = offset.join(common_iids, on=IID, how="inner")
 
-    def add_covar_pheno_PC(self, k: int, add_covar: Optional[str] = None):
-        """calculate phenotype PCs
+    return pheno, covar, offset
 
-        :param k: number of PC to calculate and append to covariates
-        :param add_covar: add covariate o
-        """
-        count_std = self.pheno.count.copy(deep=True)
-        count_std = (count_std - count_std.mean(axis=0)) / count_std.std(axis=0)  # standardize genes
 
-        pca_pheno = PCA(n_components=k)
-        PCs = pca_pheno.fit_transform(count_std)  # nxk
+def align_on_iid(
+    dfs: list[pl.DataFrame],
+    iid_col: str = "iid",
+) -> list[pl.DataFrame]:
+    # first df determines final ordering (minus dropped iids)
+    base_iids = dfs[0].get_column(iid_col).to_list()
 
-        if add_covar is None:
-            self.covar = jnp.hstack((self.covar, PCs))  # append k expression PCs in pheno
-        else:
-            # Covariate already read, here put covariate of interest as last column after PC
-            self.covar = jnp.hstack((self.covar[:, :-1], PCs, self.covar[:, -1][:, jnp.newaxis]))
+    # compute iid intersection across all dfs
+    common_iids = set(base_iids)
+    for df in dfs[1:]:
+        other = set(df.get_column(iid_col).to_list())
+        common_iids &= other
 
-    def filter_gene(self, geneexpr_percent_cutoff: float = 0.0, gene_list: Optional[List] = None):
-        """Filter genes
+    # filter base_iids to keep order but drop missing ones
+    ordered_common_iids = [iid for iid in base_iids if iid in common_iids]
 
-        :param geneexpr_percent_cutoff: cutoff for proportion of gene expression, i.e.,
-            0.01 means filter genes that are expressed in 0.01 x 100% individuals
-        :param gene_list: a list of genes to keep for eQTL mapping
-        """
-        if gene_list is not None:
-            gene_list_insample = list(set(self.pheno_meta.gene_map.phenotype_id).intersection(set(gene_list)))
-            # filter pheno
-            self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
-                self.pheno_meta.gene_map.phenotype_id.isin(gene_list_insample)
-            ]
-            # subset by column name
-            self.pheno.count = self.pheno.count[gene_list_insample]
+    # construct canonical iid frame in *base order*
+    iid_df = pl.DataFrame({iid_col: ordered_common_iids})
 
-            assert set(self.pheno_meta.gene_map.phenotype_id) == set(
-                self.pheno.count.columns
-            ), "gene map does not agree with pheno count matrix after gene list selection"
+    # align all dfs using left join on the canonical ordering
+    aligned = []
+    for df in dfs:
+        aligned.append(iid_df.join(df, on=iid_col, how="left"))
 
-        # filter genes not expressed across samples
-        total_n = len(self.pheno.count.index.unique())  # number of individuals
-        geneexpr_percent = (self.pheno.count > 0).sum(axis=0) / total_n
-        self.pheno.count = self.pheno.count.loc[:, geneexpr_percent > geneexpr_percent_cutoff]
-        self.pheno_meta.gene_map = self.pheno_meta.gene_map.loc[
-            self.pheno_meta.gene_map.phenotype_id.isin(self.pheno.count.columns)
-        ]
-        assert set(self.pheno_meta.gene_map.phenotype_id) == set(
-            self.pheno.count.columns
-        ), "gene map does not agree with pheno count matrix after gene expression percent filtering"
+    return aligned
 
 
 def create_readydata(
-    geno: ArrayLike,
-    bim: pd.DataFrame,
-    fam: pd.DataFrame,
-    pheno: pd.DataFrame,
-    covar: pd.DataFrame,
-    offset: Optional[pd.DataFrame] = None,
-    offset_from_libsize: Optional[bool] = None,
-    autosomal_only: bool = False,
-    ind_list: Optional[List] = None,
+    genotype: GenotypeData,
+    expression: ExpressionData,
+    covar: pl.DataFrame,
+    offset: Optional[pl.DataFrame] = None,
 ) -> ReadyDataState:
-    """Read genotype, phenotype and covariates, including interaction terms
-    Genotype data: plink triplet, vcf
-    pheno_path: bed file
-    covar_path: covariates, must be coded in numerical forms
+    dfs = [genotype.sample_info, expression.pheno, covar]
+    if offset is not None:
+        dfs.append(offset)
 
-    Gene expression data: h5ad file
-    - dat.X: cell x gene sparse matrix, where cell is indexed by unique barcode
-    - dat.obs: cell x features (eg. donor_id, age,...)
-    - dat.var: gene x gene summary stats
-
-    recode sex as: female = 1, male = 0
-
-    All these files must contain the same set of individuals, otherwise only complete data is retained.
-    Internally we check ordering and guarantee they are in the same order as phenotype data
-
-    :param geno: genotype data frame
-    :param bim: bim data frame
-    :param pheno: gene expression data frame
-    :param covar: covariate data frame
-    :param log: logger
-    :param autosomal_only: `True` if keep only autosomal variants, default to `TRUE`
-    :param ind_list: path to a file to include only specified individuals
-    :return: ReadyDataState
-    """
-
-    # keep genes in autosomals
-    if autosomal_only:
-        check_chr_suffix = (pheno.chr.str.lower()).str.startswith("chr", na=False)
-        if check_chr_suffix.sum() > 0:
-            pheno = pheno.loc[pheno.chr.isin([f"chr{i}" for i in range(1, 23)])]
-        else:
-            pheno = pheno.loc[pheno.chr.isin([str(i) for i in range(1, 23)])]
-
-    # put gene name (index) back to columns
-    pos_df = pheno[["chr", "start", "end"]].reset_index()
-    pheno.drop(["chr", "start", "end"], axis=1, inplace=True)
-
-    # transpose to sample x genes
-    pheno = pheno.T
-    pheno.columns.name = None  # remove column name due to tranpose
-    if ind_list is not None:
-        sample_id_subset = ind_list
+    aligned_dfs = align_on_iid(dfs, iid_col="iid")
+    if offset is not None:
+        geno_samples, expression_samples, covar, offset = aligned_dfs
     else:
-        sample_id_subset = pheno.index.to_list()
+        geno_samples, expression_samples, covar = aligned_dfs
 
-    # find complete data of individuals
-    sample_idx = pheno.index.intersection(covar.index).intersection(fam.index).intersection(pd.Index(sample_id_subset))
+    # create new object with the subsetted individuals
+    # we need this method bc we dont know what kind of geno data we're looking at here (PLINK, VCF, etc)
+    genotype = genotype.replace_individuals(geno_samples)
 
-    # subset and order genotype, covariates and pheno
-    sample_idx = sample_idx.sort_values()
-    iid_indexer = fam.index.get_indexer(sample_idx)
-    pheno = pheno.loc[sample_idx]
-    covar = covar.loc[sample_idx]
-    fam = fam.loc[sample_idx]
-    geno = geno[iid_indexer, :]
+    # at this point we have only 1 kind of expression object so just make a new one
+    expression = ExpressionData(expression_samples, expression.pheno_meta)
 
-    if offset is None and offset_from_libsize:
-        total_libsize = jnp.array(pheno.sum(axis=1))
-        offset = jnp.log(total_libsize)
+    # convert covariates to jax.numpy at this point
+    covar = jnp.asarray(covar.select(pl.all().exclude("iid")).to_numpy())
 
-    # ensure sample order in genotype and covar are same as count
-    assert (fam.index == pheno.index).all(), "samples are not sorted in genotype and count matrix"
-    assert (covar.index == pheno.index).all(), "samples are not sorted in covariate and count matrix"
+    # offset should only have two columns by construction at this point
+    if offset is not None:
+        assert offset.width == 2, "Offset dataframe should only have two columns at this point."
+        offset = jnp.asarray(offset[:, 1].to_numpy())
+    else:
+        # otherwise just zero it out
+        offset = jnp.array(0.0)
 
     return ReadyDataState(
-        geno=geno,
-        bim=bim,
-        pheno=ExpressionData(pheno),
-        pheno_meta=GeneMetaData(pos_df),
-        covar=jnp.float64(covar),
+        genotype=genotype,
+        expression=expression,
+        covar=covar,
         offset=offset,
     )

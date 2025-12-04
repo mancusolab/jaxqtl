@@ -59,6 +59,11 @@ class HypothesisTest(eqx.Module):
     ) -> TestResult:
         pass
 
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        pass
+
 
 class WaldTest(HypothesisTest):
     _is_linear: bool = eqx.field(static=True, init=False)
@@ -117,6 +122,10 @@ class WaldTest(HypothesisTest):
 
         return state
 
+    @property
+    def name(self) -> str:
+        return "wald"
+
 
 class ScoreTest(HypothesisTest):
     def test(
@@ -156,6 +165,10 @@ class ScoreTest(HypothesisTest):
             converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(pval) * glmstate_cov_only.alpha,
         )
+
+    @property
+    def name(self) -> str:
+        return "score"
 
 
 class SpaTest(HypothesisTest):
@@ -203,3 +216,7 @@ class SpaTest(HypothesisTest):
             converged=jnp.ones_like(gupval) * glmstate_cov_only.converged,
             alpha=jnp.ones_like(gupval) * glmstate_cov_only.alpha,
         )
+
+    @property
+    def name(self) -> str:
+        return "score.spa"

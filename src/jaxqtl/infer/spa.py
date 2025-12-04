@@ -122,7 +122,7 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
         term = 1 - (state.pred_mean / state.r) * jnp.expm1(t)
 
         # Ensure the term is positive to avoid taking log of zero or negative numbers
-        term = jnp.maximum(term, 1e-10)
+        term = jnp.maximum(term, 1e-16)
 
         return jspec.xlogy(-state.r, term)
 

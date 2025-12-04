@@ -1,13 +1,17 @@
+import gzip
 import os
 import re
 
 from abc import abstractmethod
+from collections import defaultdict
 from dataclasses import dataclass
-from typing import Any, Optional
+from os import PathLike
+from typing import Any, Optional, Union
 
 import decoupler as dc
 import numpy as np
 import pandas as pd
+import polars as pl
 import qtl.io
 import qtl.norm
 import scanpy as sc
@@ -16,6 +20,147 @@ from anndata import AnnData
 from scipy.sparse import diags
 
 import equinox as eqx
+import jax
+
+from jax import numpy as jnp
+from jax.scipy import stats as jsp_stats
+
+from .utils import validate_user_columns
+
+
+@dataclass
+class ExpressionData:
+    pheno: pl.DataFrame
+    pheno_meta: pl.DataFrame
+
+    def __iter__(self):
+        for chrom, start, end, gene in self.pheno_meta.iter_rows():
+            expr = jnp.asarray(self.pheno.get_column(gene).to_numpy(), dtype=float)  # ug i dont like this casting
+            yield expr, gene, chrom, start, end
+
+    @property
+    def offset_from_libsize(self) -> pl.DataFrame:
+        return self.pheno.select(
+            pl.col("iid"),
+            pl.sum_horizontal(pl.exclude("iid")).log().alias("offset"),
+        )
+
+    def filter_by_percentage(self, express_percent: float) -> "ExpressionData":
+        if not (0 <= express_percent <= 1):
+            raise ValueError("`express_percent` must be between 0 and and 1")
+        col_means = (
+            self.pheno.select(pl.all().exclude("iid").mean()).to_numpy().ravel()  # compute mean for all non-iid columns
+        )
+        keep = col_means > express_percent
+        names = np.array(self.pheno.columns[1:])[keep].tolist()
+
+        pheno = self.pheno.select(["iid"] + names)
+        meta = self.pheno_meta.filter(pl.col("phenotype_id").is_in(names))
+        return ExpressionData(pheno=pheno, pheno_meta=meta)
+
+    @classmethod
+    def from_bedfile(
+        cls,
+        path_or_filename: Union[str, PathLike],
+        keep_individuals: Optional[list[str]] = None,
+        drop_individuals: Optional[list[str]] = None,
+        keep_pheno: Optional[list[str]] = None,
+        drop_pheno: Optional[list[str]] = None,
+    ):
+        if keep_individuals and drop_individuals:
+            raise ValueError("Cannot specify both `keep_individuals` and `drop_individuals`")
+        if keep_pheno and drop_pheno:
+            raise ValueError("Cannot specify both `keep_pheno` and `drop_pheno`")
+        if not isinstance(path_or_filename, (str, PathLike)):
+            raise ValueError(f"`path_or_filename` must be `str` or `PathLike`, not {type(path_or_filename)}")
+
+        # load using a lazy frame to speed things up in Rust-based parsing before moving into Python space
+        name = str(path_or_filename)
+        if name.endswith((".bed", ".bed.gz")):
+            phenotype_lf = pl.scan_csv(path_or_filename, separator="\t", has_header=True)
+        elif name.endswith((".parquet", ".parquet.gz")):
+            phenotype_lf = pl.scan_parquet(path_or_filename)
+        else:
+            raise ValueError(f"File {path_or_filename} is unsupported for bed-style phenotype data.")
+
+        schema = phenotype_lf.collect_schema()
+        colnames = list(schema.keys())
+
+        # Allowed options for each of the first four positions
+        # this is messy and likely to be brittle if we want to analyze other molecular types
+        # would be simpler to be strict about column names or make user specify the name of
+        # the 4th phenotype name column
+        resolved = []
+        allowed = [
+            {"chrom", "#chrom", "chr", "#chr"},
+            {"start"},
+            {"end"},
+            {"pheno_id", "pheno", "gene_id", "geneid", "gene"},
+        ]
+        for i, options in enumerate(allowed):
+            name = colnames[i]
+            if name.lower() not in options:
+                opts_str = ", ".join(sorted(options))
+                raise ValueError(f"Column {i} expected to be one of `{opts_str}`, got `{name!r}`")
+            resolved.append(name)
+
+        if keep_individuals is not None:
+            keep_individuals = validate_user_columns(keep_individuals, colnames)
+            # make sure for some weird reason individual ids passed in don't also have the 4 required column names
+            keep_individuals = list(set(keep_individuals) - set(resolved))
+
+            # restrict to the 4 required + individuals specified
+            columns = resolved + keep_individuals
+        elif drop_individuals is not None:
+            drop_individuals = validate_user_columns(drop_individuals, colnames)
+            # restrict to the required columns - individuals specified; ensure that the 4 required columns stay if for
+            # some weird reason the user specified them as individuals to drop
+            columns = list(set(colnames) - (set(drop_individuals) - set(resolved)))
+        else:
+            columns = colnames
+
+        phenotype_lf = phenotype_lf.select(columns)
+
+        # recast chrom col to str
+        meta_lf = phenotype_lf.select(resolved).with_columns(pl.col(resolved[0]).cast(pl.Utf8))
+
+        # drop '#' from col-name if its there
+        normalized_chrom = "chrom"
+        normalized_pheno = "phenotype_id"
+        if colnames[0][0] == "#":
+            meta_lf = meta_lf.rename({colnames[0]: normalized_chrom, colnames[3]: normalized_pheno})
+        else:
+            meta_lf = meta_lf.rename({colnames[3]: normalized_pheno})
+
+        # go eager to pull out pheno names
+        meta_lf = meta_lf.collect()
+        genes = meta_lf.get_column(normalized_pheno).to_list()
+        if keep_pheno is not None:
+            keep_pheno = validate_user_columns(keep_pheno, genes)
+            keep_genes = pl.Series("genes", keep_pheno)
+            meta_lf = meta_lf.filter(pl.col(normalized_pheno).is_in(keep_genes))
+        elif drop_pheno is not None:
+            drop_pheno = validate_user_columns(drop_pheno, genes)
+            keep_genes = pl.Series("genes", list(set(genes) - set(drop_pheno)))
+            meta_lf = meta_lf.filter(pl.col(normalized_pheno).is_in(keep_genes))
+        else:
+            keep_genes = pl.Series("genes", genes)
+
+        # everything after 4th col is expression data
+        # go eager mode, then transpose and relabel everything
+        # then restrict to either all genes, or user-specified genes
+        phenotype_lf = (
+            phenotype_lf.select(columns[4:])
+            .collect()
+            .transpose(
+                include_header=True,
+                header_name="iid",
+                column_names=genes,
+            )
+            .select(["iid"] + keep_genes.to_list())
+        )
+
+        return cls(phenotype_lf, meta_lf)
 
 
 # TODO: need find out commonly used parameters
@@ -175,46 +320,6 @@ class H5AD(PhenoIO):
             )
 
 
-class PheBedReader(PhenoIO):
-    """Read phenotype from bed format
-    filename: *.bed, *.bed.gz
-
-    must have following headers (same as tensorqtl / fastqtl):
-    #Chr, start, end, phenotype_id, sample_id_1, sample_id_2, ...
-
-    tss_start = tss - 1 (0-base format)
-    tss_end = tss (1-base)
-    """
-
-    def __call__(self, pheno_path):
-        if pheno_path.endswith((".bed.gz", ".bed")):
-            phenotype_df = pd.read_csv(pheno_path, sep="\t", index_col=3, dtype={"#chr": str, "#Chr": str})
-        elif pheno_path.endswith(".parquet"):
-            phenotype_df = pd.read_parquet(pheno_path)
-            phenotype_df.set_index(phenotype_df.columns[3], inplace=True)
-        else:
-            raise ValueError("Unsupported file type.")
-
-        # convert all columns to lower case and rename #Chr to chr
-        phenotype_df.rename(
-            columns={i: i.lower().replace("#chr", "chr") for i in phenotype_df.columns[:3]},
-            inplace=True,
-        )
-
-        # ensure chr values are str
-        phenotype_df["chr"] = phenotype_df["chr"].astype(str)
-
-        # set index name
-        phenotype_df.index.name = "phenotype_id"
-
-        phenotype_df["start"] += 1  # change to 1-based
-
-        return phenotype_df
-
-    def process(self, dat: Any, filter_opt=SingleCellFilter) -> pd.DataFrame:
-        pass
-
-
 def load_gene_gft_bed(gtf_bed_path: str) -> pd.DataFrame:
     """Read gft bed file"""
     gene_map = pd.read_csv(gtf_bed_path, delimiter="\t")
@@ -275,3 +380,212 @@ def bed_transform_y(pheno_path: str, method: str = "log1p"):
         raise ValueError(f"Unsupported mode {method}")
 
     return count_df
+
+
+def edger_cpm(counts_df, tmm=None, normalized_lib_sizes=True):
+    """
+    Return edgeR normalized/rescaled CPM (counts per million)
+
+    Reproduces edgeR::cpm.DGEList
+    """
+    lib_size = counts_df.sum(axis=0)
+    if normalized_lib_sizes:
+        if tmm is None:
+            tmm = edger_calcnormfactors(counts_df)
+        lib_size = lib_size * tmm
+    return counts_df / lib_size * 1e6
+
+
+def edger_calcnormfactors(
+    counts,
+    ref=None,
+    logratio_trim=0.3,
+    sum_trim=0.05,
+    acutoff=-1e10,
+):
+    """
+    JAX version of edgeR::calcNormFactors.default (TMM normalization).
+
+    Parameters
+    ----------
+    counts : array-like, shape (G, S)
+        Count matrix (genes x samples). Typically counts_df.values.
+    ref : int or None
+        Reference sample index. If None, chosen as in edgeR.
+    logratio_trim : float
+        Proportion to trim from M-values (log fold change).
+    sum_trim : float
+        Proportion to trim from A-values (average log expression).
+    acutoff : float
+        Minimum A-value.
+    verbose : bool
+        If True, print reference index (host-side, not jitted).
+
+    Returns
+    -------
+    tmm : jax.numpy.ndarray, shape (S,)
+        TMM normalization factors.
+    """
+    Y = jnp.asarray(counts, dtype=jnp.float32)  # shape (G, S)
+    G, ns = Y.shape
+
+    # library sizes
+    N = jnp.sum(Y, axis=0)  # shape (S,)
+
+    # select reference sample if not given
+    if ref is None:
+        Y_norm_tmp = Y / N
+        f75 = jnp.percentile(Y_norm_tmp, 75.0, axis=0)  # shape (S,)
+        dev = jnp.abs(f75 - jnp.mean(f75))
+        ref = int(jnp.argmin(dev))
+
+    # normalized counts and reference column
+    Y_norm = Y / N
+    ref_profile = Y[:, ref] / N[ref]  # shape (G,)
+
+    # log fold change (M) and average log expression (A)
+    logR = jnp.log2(Y_norm / ref_profile[:, None])  # shape (G, S)
+    logYnorm = jnp.log2(Y_norm)
+    log_ref = jnp.log2(ref_profile)
+    absE = 0.5 * (logYnorm + log_ref[:, None])  # shape (G, S)
+
+    # weights v (w in paper)
+    v = (N - Y) / (N * Y)  # shape (G, S)
+    v = v + v[:, ref][:, None]  # v_i + v_ref
+
+    def tmm_for_sample(logR_col, absE_col, v_col):
+        """
+        Compute TMM factor for a single sample (column).
+        logR_col, absE_col, v_col: shape (G,)
+        """
+        # finite & above A cutoff
+        fin = jnp.isfinite(logR_col) & jnp.isfinite(absE_col) & (absE_col > acutoff)
+
+        n = jnp.sum(fin)  # number of "valid" genes
+
+        def nonempty_case(args):
+            logR_col, absE_col, v_col, fin, n = args
+
+            # Use NaNs to tell rankdata which entries to ignore
+            logR_for_rank = jnp.where(fin, logR_col, jnp.nan)
+            absE_for_rank = jnp.where(fin, absE_col, jnp.nan)
+
+            rankR = jsp_stats.rankdata(
+                logR_for_rank,
+                method="average",
+                axis=None,
+                nan_policy="omit",
+            )
+            rankE = jsp_stats.rankdata(
+                absE_for_rank,
+                method="average",
+                axis=None,
+                nan_policy="omit",
+            )
+
+            n_f = n.astype(jnp.float32)
+
+            loL = jnp.floor(n_f * logratio_trim) + 1.0
+            hiL = n_f + 1.0 - loL
+            loS = jnp.floor(n_f * sum_trim) + 1.0
+            hiS = n_f + 1.0 - loS
+
+            keep = fin & (rankR >= loL) & (rankR <= hiL) & (rankE >= loS) & (rankE <= hiS)
+
+            w = v_col  # variance term; paper has a known typo about 1/v
+
+            num = jnp.nansum(jnp.where(keep, logR_col / w, 0.0))
+            den = jnp.nansum(jnp.where(keep, 1.0 / w, 0.0))
+
+            # guard against den == 0
+            tmm_val = jnp.where(den > 0.0, 2.0 ** (num / den), 1.0)
+            return tmm_val
+
+        # if no valid genes for this column, just return 1.0
+        tmm_val = jax.lax.cond(
+            n > 0,
+            nonempty_case,
+            lambda _: jnp.array(1.0, dtype=jnp.float32),
+            (logR_col, absE_col, v_col, fin, n),
+        )
+        return tmm_val
+
+    # vectorize over columns (samples)
+    tmm = jax.vmap(tmm_for_sample, in_axes=1)(logR, absE, v)  # shape (S,)
+
+    # center normalization factors to have geometric mean 1
+    tmm = tmm / jnp.exp(jnp.mean(jnp.log(tmm)))
+    return tmm
+
+
+def inverse_normal_transform(pheno):
+    r = jsp_stats.rankdata(pheno)
+    return jsp_stats.norm.ppf(r / (pheno.shape[0] + 1))
+
+
+def gtf_to_tss_bed(annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id="gene_id"):
+    """Parse genes and TSSs from GTF and return DataFrame for BED output
+    This function is from: https://github.com/broadinstitute/pyqtl/blob/master/qtl/io.py
+    """
+
+    chrom = []
+    start = []
+    end = []
+    gene_id = []
+    gene_name = []
+
+    if annotation_gtf.endswith(".gz"):
+        opener = gzip.open(annotation_gtf, "rt")
+    else:
+        opener = open(annotation_gtf)
+
+    with opener as gtf:
+        for row in gtf:
+            row = row.strip().split("\t")
+            if row[0][0] == "#" or row[2] != feature:
+                continue  # skip header
+            chrom.append(row[0])
+
+            # TSS: gene start (0-based coordinates for BED)
+            if row[6] == "+":
+                start.append(np.int64(row[3]) - 1)
+                end.append(np.int64(row[3]))
+            elif row[6] == "-":
+                start.append(np.int64(row[4]) - 1)  # last base of gene
+                end.append(np.int64(row[4]))
+            else:
+                raise ValueError("Strand not specified.")
+
+            attributes = defaultdict()
+            for a in row[8].replace('"', "").split(";")[:-1]:
+                kv = a.strip().split(" ")
+                if kv[0] != "tag":
+                    attributes[kv[0]] = kv[1]
+                else:
+                    attributes.setdefault("tags", []).append(kv[1])
+
+            gene_id.append(attributes["gene_id"])
+            gene_name.append(attributes["gene_name"])
+
+    if phenotype_id == "gene_id":
+        bed_df = pd.DataFrame(
+            data={"chr": chrom, "start": start, "end": end, "gene_id": gene_id},
+            columns=["chr", "start", "end", "gene_id"],
+            index=gene_id,
+        )
+    elif phenotype_id == "gene_name":
+        bed_df = pd.DataFrame(
+            data={"chr": chrom, "start": start, "end": end, "gene_id": gene_name},
+            columns=["chr", "start", "end", "gene_id"],
+            index=gene_name,
+        )
+    # drop rows corresponding to excluded chromosomes
+    mask = np.ones(len(chrom), dtype=bool)
+    for k in exclude_chrs:
+        mask = mask & (bed_df["chr"] != k)
+    bed_df = bed_df[mask]
+
+    # sort by start position
+    bed_df = bed_df.groupby("chr", sort=False, group_keys=False).apply(lambda x: x.sort_values("start"))
+
+    return bed_df

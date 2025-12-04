@@ -4,8 +4,10 @@ import re
 import sys
 
 import pandas as pd
+import polars as pl
 
 import jax
+import jax.numpy as jnp
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM, LinearModel
@@ -14,10 +16,10 @@ from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from jaxqtl.infer.stderr import FisherInfoError, HuberError
 from jaxqtl.infer.utils import ScoreTest, SpaTest, WaldTest
-from jaxqtl.io.covar import covar_reader
-from jaxqtl.io.data import create_readydata
-from jaxqtl.io.geno import PlinkReader, VCFReader
-from jaxqtl.io.pheno import PheBedReader
+from jaxqtl.io.data import align_pheno_covar, create_readydata
+from jaxqtl.io.geno import PlinkData, VCFData
+from jaxqtl.io.pheno import edger_cpm, ExpressionData, inverse_normal_transform
+from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis, write_parqet
 
@@ -122,10 +124,16 @@ def _create_common_subp(subp, name, help):
     )
 
     # filtering arguments
-    common_p.add_argument(
+    sample_group = common_p.add_mutually_exclusive_group()
+    sample_group.add_argument(
         "--keep",
-        help="Path to file of iids to analyze. All other iids are discarded during current analysis",
+        help="Path to file of iids to analyze. All other iids are discarded during current analysis.",
     )
+    sample_group.add_argument(
+        "--exclude",
+        help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
+    )
+
     common_p.add_argument(
         "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
     )
@@ -211,13 +219,52 @@ def _create_common_subp(subp, name, help):
 
 
 def _compute_expression_pcs(args, log):
-    ...
+    pheno = ExpressionData.from_bedfile(args.pheno)
+
+    # todo: add more sanity checking
+    if args.num_pcs < 1:
+        raise ValueError("Number of PCS must be at least 1")
+
+    if args.covar:
+        covar = read_plink_style_tsvlike(args.covar)
+    else:
+        covar = None
+
+    if args.offset:
+        offset = read_offset_tsvlike(args.offset)
+    else:
+        offset = None
+
+    pheno, covar, offset = align_pheno_covar(pheno, covar, args.offset, args.set_offset_from_libsize)
+    if args.transform == "tmm":
+        tmm_counts_df = edger_cpm(pheno, normalized_lib_sizes=True)
+        pheno = inverse_normal_transform(tmm_counts_df)
+    elif args.transform == "log1p":
+        pheno = jnp.log1p(pheno)  # prevent log(0)
+    elif args.transform == "offset":
+        raise NotImplementedError("'offset' transform not implemented yet.")
+    else:
+        raise ValueError("Invalid transform {args.transform}. Only 'log1p', 'tmm', and 'offset' are accepted.")
+
+    from jax.experimental.sparse.linalg import lobpcg_standard
+
+    n = pheno.shape[0]
+    k = args.num_pcs
+    pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
+    theta, U, i = lobpcg_standard(pheno, jnp.eye(n, k))
+    df_u = pd.DataFrame(data=U, index=pheno.index, columns=[f"EPC{i}" for i in range(k)])
+
+    if covar:
+        covar = pd.concat((covar, df_u))
+    covar.to_csv(args.out)
+
+    return 0
 
 
 def _cis_scan(args, log):
     dat, family, glm, test, perm_test = _common_setup(args, log)
 
-    if dat.pheno_meta.gene_map.shape[0] < 1:
+    if dat.num_genes < 1:
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
@@ -231,8 +278,8 @@ def _cis_scan(args, log):
         seed=args.seed,
     )
     log.info("Finished cis-scan. Writing results.")
-    test_str = "score" if isinstance(test, ScoreTest) else "wald"
-    df_cis.to_csv(args.out + f".cis.{test_str}.tsv.gz", sep="\t", index=False)
+    test_str = test.name
+    df_cis.write_csv(args.out + f".cis.{test_str}.tsv.gz", separator="\t")
     log.info("Finished! Thank you!")
 
     return 0
@@ -336,66 +383,76 @@ def _common_setup(args, log):
         use_tdist = isinstance(family, Gaussian)
         perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
+    if args.keep is not None:
+        log.info("Reading list of samples to keep for analyses.")
+        inds_to_keep = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
+        log.info(f"Found {len(inds_to_keep)} samples to keep.")
+    else:
+        inds_to_keep = None
+
+    if args.exclude is not None:
+        log.info("Reading list of samples to exclude from analyses.")
+        inds_to_exclude = pd.read_csv(args.exclude, header=None, sep="\t").iloc[:, 0].to_list()
+        log.info(f"Found {len(inds_to_keep)} samples to exclude.")
+    else:
+        inds_to_exclude = None
+
+    log.info("Reading genotype, phenotype, and covariate data")
     if args.bfile is not None:
-        geno_reader = PlinkReader()
-        prefix = args.bfile
+        geno_data = PlinkData.load(args.bfile)
     elif args.vcf is not None:
-        geno_reader = VCFReader()
-        prefix = args.vcf
+        geno_data = VCFData.load(args.vcf)
     elif args.geno is not None:
-        geno_reader = PlinkReader()
-        prefix = args.geno
+        geno_data = PlinkData.load(args.geno)
         log.warn("`--geno PREFIX` is deprecated and will be removed in a future version. Use `--bfile PREFIX` instead")
     else:
         # we really shouldn't get here with mutex above
         raise ValueError("No valid genotype file specified.")
 
-    if args.keep is not None:
-        log.info("Reading list of samples to keep for analyses.")
-        inds_to_keep = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
-        log.info(f"Found {len(inds_to_keep)} samples to keep")
-    else:
-        inds_to_keep = None
-
-    log.info("Reading genotype, phenotype, and covariate data")
-    # todo: we should pass in the list of samples here to restrict before reading in all geno data
-    geno, bim, sample_info = geno_reader(prefix)
+    # so we end up aligning everything at the end of this function, but better to reduce as we go
+    # this should help speed up final data alignment a touch
+    if inds_to_keep:
+        geno_data = geno_data.filter_individuals(inds_to_keep, "keep")
+    elif inds_to_exclude:
+        geno_data = geno_data.filter_individuals(inds_to_exclude, "drop")
 
     if args.gene_list is not None:
-        gene_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
+        gene_keep_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
     elif args.genes is not None:
-        gene_list = args.genes
+        gene_keep_list = args.genes
     else:
-        gene_list = None
+        gene_keep_list = None
 
-    # todo: same as above, but for gene_list
-    pheno_reader = PheBedReader()
-    pheno = pheno_reader(args.pheno)
-    covar = covar_reader(args.covar, args.covar_name, args.rm_covar)
+    gene_exclude_list = None
+    expr_data = ExpressionData.from_bedfile(
+        args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
+    )
+    expr_data = expr_data.filter_by_percentage(args.express_percent)
+    covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset:
-        offset = pd.read_csv(args.offset, names=["iid", "eta"], sep="\t", index_col="iid")
+        offset = read_offset_tsvlike(args.offset)
+    elif args.offset_name:
+        if covar is None:
+            raise ValueError("Covariate file must be provided if `--offset-name` is specified.")
+        offset = covar.select(pl.col("iid"), pl.col(args.offset_name))
+    elif args.set_offset_from_libsize:
+        offset = expr_data.offset_from_libsize
     else:
         offset = None
 
     dat = create_readydata(
-        geno,
-        bim,
-        sample_info,
-        pheno,
+        geno_data,
+        expr_data,
         covar,
         offset,
-        args.set_offset_from_libsize,
-        autosomal_only=args.autosome,
-        ind_list=inds_to_keep,
     )
 
     # filter gene list
-    dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
+    # dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
 
     # dat.add_covar_pheno_PC(k=2)
-
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
     return dat, family, glm, test, perm_test
@@ -427,7 +484,19 @@ def main(args):
 
     gepcs_p = subp.add_parser("compute-pcs", help="Compute gene expression principal components")
     gepcs_p.add_argument("--pheno", help="Path to phenotypes", required=True)
-    gepcs_p.add_argument("--covar", help="Path to covariate data")
+    gepcs_p.add_argument(
+        "--num-pcs",
+        type=int,
+        required=True,
+        help="Number of principal components to compute",
+    )
+    gepcs_p.add_argument("--covar", help="Path to covariate data. If included GE PCs will be appended.")
+    gepcs_p.add_argument(
+        "--transform",
+        choices=["tmm", "log1p", "none"],
+        default="none",
+        help="Transformation to perform on observed gene expression before computing PCs.",
+    )
     gepcs_p.add_argument(
         "-p",
         "--platform",
