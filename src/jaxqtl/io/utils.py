@@ -127,3 +127,19 @@ def read_offset_tsvlike(
     df_offset = df_offset.rename({offname: "offset"})
 
     return df_offset
+
+
+def read_single_column_file(
+    path_or_filename: Union[str, PathLike],
+) -> list:
+    output = []
+    open_f = gzip.open if str(path_or_filename).endswith(".gz") else open
+
+    with open_f(path_or_filename, "rt") as file:  # type: ignore
+        first = file.readline()
+        if first and first[0] != "#":
+            output.append(first.strip())
+        for line in file:
+            output.append(line.strip())
+
+    return output

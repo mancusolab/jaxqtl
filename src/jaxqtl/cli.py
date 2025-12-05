@@ -3,7 +3,7 @@ import logging
 import re
 import sys
 
-import pandas as pd
+import numpy as np
 import polars as pl
 
 import jax
@@ -19,7 +19,7 @@ from jaxqtl.infer.utils import ScoreTest, SpaTest, WaldTest
 from jaxqtl.io.data import align_pheno_covar, create_readydata
 from jaxqtl.io.geno import PlinkData, VCFData
 from jaxqtl.io.pheno import edger_cpm, ExpressionData, inverse_normal_transform
-from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike
+from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis
 from jaxqtl.post.qvalue import calculate_qval
@@ -250,9 +250,12 @@ def _create_common_subp(subp, name, help):
 
 
 def _compute_expression_pcs(args, log):
+    raise NotImplementedError("Compute expression pcs is not yet implemented.")
+
     pheno = ExpressionData.from_bedfile(args.pheno)
 
-    # todo: add more sanity checking
+    # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
+    # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
     if args.num_pcs < 1:
         raise ValueError("Number of PCS must be at least 1")
 
@@ -266,7 +269,7 @@ def _compute_expression_pcs(args, log):
     else:
         offset = None
 
-    pheno, covar, offset = align_pheno_covar(pheno, covar, args.offset, args.set_offset_from_libsize)
+    pheno, covar, offset = align_pheno_covar(pheno, covar, args.offset)
     if args.transform == "tmm":
         tmm_counts_df = edger_cpm(pheno, normalized_lib_sizes=True)
         pheno = inverse_normal_transform(tmm_counts_df)
@@ -283,10 +286,13 @@ def _compute_expression_pcs(args, log):
     k = args.num_pcs
     pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
     theta, U, i = lobpcg_standard(pheno, jnp.eye(n, k))
-    df_u = pd.DataFrame(data=U, index=pheno.index, columns=[f"EPC{i}" for i in range(k)])
-
+    colnames = [f"ExprPC{i}" for i in range(k)]
     if covar:
-        covar = pd.concat((covar, df_u))
+        df_u = pl.DataFrame(np.asarray(U), schema=colnames)
+        covar = covar.hstack(df_u)
+    else:
+        pass
+
     covar.to_csv(args.out)
 
     return 0
@@ -350,6 +356,7 @@ def _nominal_scan(args, log):
 
 
 def _trans_scan(args, log):
+    raise NotImplementedError("trans QTL scan not implemented yet.")
     # TBD
     # dat, family, glm, test, perm_test = _common_setup(args, log)
     # out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
@@ -437,14 +444,14 @@ def _common_setup(args, log):
 
     if args.keep is not None:
         log.info("Reading list of samples to keep for analyses.")
-        inds_to_keep = pd.read_csv(args.keep, header=None, sep="\t").iloc[:, 0].to_list()
+        inds_to_keep = read_single_column_file(args.keep)
         log.info(f"Found {len(inds_to_keep)} samples to keep.")
     else:
         inds_to_keep = None
 
     if args.exclude is not None:
         log.info("Reading list of samples to exclude from analyses.")
-        inds_to_exclude = pd.read_csv(args.exclude, header=None, sep="\t").iloc[:, 0].to_list()
+        inds_to_exclude = read_single_column_file(args.exclude)
         log.info(f"Found {len(inds_to_keep)} samples to exclude.")
     else:
         inds_to_exclude = None
@@ -469,7 +476,7 @@ def _common_setup(args, log):
         geno_data = geno_data.filter_individuals(inds_to_exclude, "drop")
 
     if args.gene_list is not None:
-        gene_keep_list = pd.read_csv(args.gene_list, header=None, sep="\t").iloc[:, 0].to_list()
+        gene_keep_list = read_single_column_file(args.gene_list)
     elif args.genes is not None:
         gene_keep_list = args.genes
     else:
