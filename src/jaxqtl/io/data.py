@@ -1,6 +1,7 @@
 from dataclasses import dataclass
 from typing import Optional
 
+import numpy as np
 import polars as pl
 
 import equinox as eqx
@@ -63,6 +64,20 @@ class CisData(eqx.Module):
         _, snp_id, _, snp_pos, a0, a1, _ = self.cis_info.row(idx)
         tss_distance = snp_pos - self.gene_start
         return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
+
+    def get_cis_info(self) -> pl.DataFrame:
+        n, p = self.G.shape
+        counts = jnp.sum(self.G, axis=0)  # count REF allele
+        af = counts / (2.0 * n)
+        flag = af <= 0.5
+        ma_counts = jnp.where(flag, counts, 2 * n - counts)
+        local = self.cis_info.with_columns(
+            (pl.col("pos") - pl.lit(self.gene_start)).alias("tss_distance"),
+            pl.Series("af", np.array(af)),
+            pl.Series("ma_count", np.array(ma_counts, dtype=int)),
+        ).select(["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"])
+
+        return local
 
 
 @dataclass

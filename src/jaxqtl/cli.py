@@ -333,9 +333,8 @@ def _nominal_scan(args, log):
 
     log.info("Finished nominal cis-scan. Writing results.")
     test_str = test.name
-    adj_name = perm_test.name
     # ztd compression?
-    df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
 
     return 0
 
@@ -545,7 +544,7 @@ def main(args):
         "nominal",
         help="Perform cis-eQTL scans and report all association stats per tested gene.",
     )
-    nominal_p.set_defaults(func=_cis_scan)
+    nominal_p.set_defaults(func=_nominal_scan)
 
     trans_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
     trans_p.set_defaults(func=_nominal_scan)

@@ -1,6 +1,7 @@
 from logging import Logger
 from typing import Any, Literal, Optional
 
+import numpy as np
 import polars as pl
 
 import equinox as eqx
@@ -106,8 +107,8 @@ def map_cis(
             results.add_row(result)
         else:
             test_result = eqx.filter_jit(test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
-            # result = _process_nominal_result(cis_data, test_result)
-            # results.add_df(result)
+            result = _process_nominal_result(cis_data, test_result)
+            results.add_df(result)
 
         if verbose:
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
@@ -182,18 +183,18 @@ def _process_cis_result(
         lead_adj_pvalue = float(adj_pvalue)
         method = "ACAT"
 
-    snp = cis_data.get_snp_info(int(vdx))
+    snp = cis_data.get_snp_info(vdx)
     result = {
         "phenotype_id": cis_data.gene_name,
         "chrom": cis_data.chrom,
         "num_var": cis_data.num_snps,
-        "variant_id": snp.id,
+        "snp": snp.id,
         "a1": snp.a1,
         "a0": snp.a0,
         "pos": snp.pos,
         "tss_distance": snp.tss_distance,
-        "ma_count": snp.ma_count,
         "af": snp.af,
+        "ma_count": snp.ma_count,
         "beta_shape1": beta_k,
         "beta_shape2": beta_n,
         "beta_converged": beta_converged,
@@ -201,8 +202,8 @@ def _process_cis_result(
         "nc_estimate": nc_estimate,
         "effect": float(test_result.beta[vdx]),
         "effect_se": float(test_result.se[vdx]),
-        "pval_nominal": float(test_result.p[vdx]),
-        "pval_adj": lead_adj_pvalue,
+        "pvalue": float(test_result.p[vdx]),
+        "pvalue_adj": lead_adj_pvalue,
         "adj_method": method,
         "nb_alpha": float(test_result.alpha[vdx]),
         "model_converged": bool(test_result.converged[vdx]),
@@ -213,3 +214,18 @@ def _process_cis_result(
             result.pop(beta_perm_col, None)
 
     return result
+
+
+def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
+    region_df = cis_data.get_cis_info()
+    region_df = region_df.with_columns(
+        pl.lit(cis_data.gene_name).alias("phenotype_id"),
+        pl.Series("effect", np.asarray(test_result.beta)),
+        pl.Series("se", np.asarray(test_result.se)),
+        pl.Series("pvalue", np.asarray(test_result.p)),
+        pl.Series("nb_alpha", np.asarray(test_result.alpha)),
+        pl.Series("model_converged", np.asarray(test_result.converged)),
+    )
+    # put pheno id in front
+    region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))
+    return region_df
