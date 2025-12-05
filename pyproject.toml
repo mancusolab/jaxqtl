@@ -104,8 +104,7 @@ line-length = 120
 
 [tool.ruff.lint]
 select = ["E", "F", "I001", "UP"]
-ignore = ["E402", "E721", "E731", "E741", "F722", "UP038"]
-ignore-init-module-imports = true
+ignore = ["E402", "E721", "E731", "E741", "F722", "UP038", "TID252"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["jaxqtl"]

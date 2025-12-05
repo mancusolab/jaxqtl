@@ -7,20 +7,20 @@ import polars as pl
 
 import jax
 
-from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.glm import GLM, LinearModel
-from jaxqtl.infer.permutations import ACAT, BetaPermutation
-from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
-from jaxqtl.infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
-from jaxqtl.infer.stderr import FisherInfoError, HuberError
-from jaxqtl.infer.utils import ScoreTest, SpaTest, WaldTest
-from jaxqtl.io.data import create_readydata
-from jaxqtl.io.geno import PlinkData, VCFData
-from jaxqtl.io.pheno import ExpressionData
-from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
-from jaxqtl.log import get_logger
-from jaxqtl.map.cis import map_cis
-from jaxqtl.post.qvalue import calculate_qval
+from .families.distribution import Gaussian, NegativeBinomial, Poisson
+from .infer.glm import GLM, LinearModel
+from .infer.permutations import ACAT, BetaPermutation
+from .infer.solve import CGSolve, CholeskySolve, QRSolve
+from .infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
+from .infer.stderr import FisherInfoError, HuberError
+from .infer.utils import ScoreTest, SpaTest, WaldTest
+from .io.data import create_readydata
+from .io.geno import PlinkData, VCFData
+from .io.pheno import ExpressionData
+from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
+from .log import get_logger
+from .map.cis import map_cis
+from .post.qvalue import calculate_qval
 
 
 class _SplitAction(ap.Action):
