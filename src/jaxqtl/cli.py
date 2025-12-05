@@ -26,6 +26,7 @@ from .post.qvalue import calculate_qval
 class _SplitAction(ap.Action):
     """Parse comma or space delimited command args into a list.
     Useful for pheno/pheno-col-num covar/covar-col-num.
+
     """
 
     def __init__(self, *, type=str, **kwargs):
