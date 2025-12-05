@@ -5,8 +5,9 @@ import re
 from abc import abstractmethod
 from collections import defaultdict
 from dataclasses import dataclass
+from functools import partial
 from os import PathLike
-from typing import Any, Optional, Union
+from typing import Any, Literal, Optional, Union
 
 import decoupler as dc
 import numpy as np
@@ -24,6 +25,7 @@ import jax
 
 from jax import numpy as jnp
 from jax.scipy import stats as jsp_stats
+from jaxtyping import Array, PRNGKeyArray
 
 from .utils import validate_user_columns
 
@@ -57,6 +59,38 @@ class ExpressionData:
         pheno = self.pheno.select(["iid"] + names)
         meta = self.pheno_meta.filter(pl.col("phenotype_id").is_in(names))
         return ExpressionData(pheno=pheno, pheno_meta=meta)
+
+    def compute_pcs(
+        self,
+        num_pcs: int,
+        rng_key: PRNGKeyArray,
+        transform: Optional[Literal["log1p", "tmm"]] = None,
+    ) -> pl.DataFrame:
+        if num_pcs < 1:
+            raise ValueError("`num_pcs` must be greater than 0")
+
+        num = pl.all().exclude("iid")
+        pheno = self.pheno.select(num).to_jax()
+
+        if transform == "tmm":
+            raise NotImplementedError("'tmm' transform not implemented yet.")
+            tmm_counts_df = edger_cpm(pheno, normalized_lib_sizes=True)
+            pheno = inverse_normal_transform(tmm_counts_df)
+        elif transform == "log1p":
+            pheno = jnp.log1p(pheno)  # prevent log(0)
+        elif transform == "offset":
+            raise NotImplementedError("'offset' transform not implemented yet.")
+
+        pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
+        n, _ = pheno.shape
+        U = _prob_pca(rng_key, pheno, num_pcs)
+        data = {"iid": self.pheno.get_column("iid").to_numpy()}
+        for i, eigvec in enumerate(U.T):
+            data[f"ExprPC{i}"] = np.asarray(eigvec)
+
+        df_pcs = pl.DataFrame(data=data)
+
+        return df_pcs
 
     @classmethod
     def from_bedfile(
@@ -589,3 +623,52 @@ def gtf_to_tss_bed(annotation_gtf, feature="gene", exclude_chrs=[], phenotype_id
     bed_df = bed_df.groupby("chr", sort=False, group_keys=False).apply(lambda x: x.sort_values("start"))
 
     return bed_df
+
+
+@partial(jax.jit, static_argnums=(2, 3, 4))
+def _prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3) -> Array:
+    import jax.lax as lax
+    import jax.random as rdm
+    import lineax as lx
+
+    n_dim, p_dim = X.shape
+
+    # initial guess for W
+    w_key, z_key = rdm.split(rng_key, 2)
+
+    # good enough for initialization
+    solver = lx.Cholesky()
+
+    multi_linear_solve = eqx.filter_vmap(lx.linear_solve, in_axes=(None, 1, None))
+
+    # check if reach the max_iter, or met the norm criterion every 100 iteration
+    def _condition(carry):
+        i, _, Z, old_Z = carry
+        iter_check = i < max_iter
+        tol_check = jnp.linalg.norm(Z - old_Z) > tol
+        # scaled_tol_check = tol_check / n_dim > tol
+        return iter_check & tol_check
+
+    # EM algorithm for PPCA
+    def _step(carry):
+        i, W, Z, _ = carry
+
+        # E step
+        W_op = lx.MatrixLinearOperator(W @ W.T, tags=lx.positive_semidefinite_tag)
+        Z_new = multi_linear_solve(W_op, W @ X.T, solver).value
+
+        # M step
+        Z_op = lx.MatrixLinearOperator(Z_new.T @ Z_new, tags=lx.positive_semidefinite_tag)
+        W = multi_linear_solve(Z_op, Z_new.T @ X, solver).value.T
+
+        return i + 1, W, Z_new, Z
+
+    W = rdm.normal(w_key, shape=(k, p_dim))
+    Z = rdm.normal(z_key, shape=(n_dim, k))
+    Z_zero = jnp.zeros_like(Z)
+    initial_carry = 0, W, Z, Z_zero
+
+    _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
+    Z, _ = jnp.linalg.qr(Z)
+
+    return Z

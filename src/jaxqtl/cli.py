@@ -3,11 +3,9 @@ import logging
 import re
 import sys
 
-import numpy as np
 import polars as pl
 
 import jax
-import jax.numpy as jnp
 
 from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
 from jaxqtl.infer.glm import GLM, LinearModel
@@ -16,9 +14,9 @@ from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from jaxqtl.infer.stderr import FisherInfoError, HuberError
 from jaxqtl.infer.utils import ScoreTest, SpaTest, WaldTest
-from jaxqtl.io.data import align_pheno_covar, create_readydata
+from jaxqtl.io.data import create_readydata
 from jaxqtl.io.geno import PlinkData, VCFData
-from jaxqtl.io.pheno import edger_cpm, ExpressionData, inverse_normal_transform
+from jaxqtl.io.pheno import ExpressionData
 from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis
@@ -250,50 +248,35 @@ def _create_common_subp(subp, name, help):
 
 
 def _compute_expression_pcs(args, log):
-    raise NotImplementedError("Compute expression pcs is not yet implemented.")
-
-    pheno = ExpressionData.from_bedfile(args.pheno)
+    log.info("Reading phenotype and filtering")
+    expr_data = ExpressionData.from_bedfile(args.pheno)
+    expr_data = expr_data.filter_by_percentage(args.express_percent)
 
     # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
     # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
     if args.num_pcs < 1:
         raise ValueError("Number of PCS must be at least 1")
 
-    if args.covar:
-        covar = read_plink_style_tsvlike(args.covar)
-    else:
-        covar = None
-
+    """
     if args.offset:
         offset = read_offset_tsvlike(args.offset)
     else:
         offset = None
+    """
+    import jax.random as rdm
 
-    pheno, covar, offset = align_pheno_covar(pheno, covar, args.offset)
-    if args.transform == "tmm":
-        tmm_counts_df = edger_cpm(pheno, normalized_lib_sizes=True)
-        pheno = inverse_normal_transform(tmm_counts_df)
-    elif args.transform == "log1p":
-        pheno = jnp.log1p(pheno)  # prevent log(0)
-    elif args.transform == "offset":
-        raise NotImplementedError("'offset' transform not implemented yet.")
-    else:
-        raise ValueError("Invalid transform {args.transform}. Only 'log1p', 'tmm', and 'offset' are accepted.")
+    key = rdm.key(args.seed)
+    log.info(f"Computing {args.num_pcs} gene expression principal components")
+    df_pcs = expr_data.compute_pcs(args.num_pcs, key, args.transform)
+    log.info(f"Finished computing {args.num_pcs} gene expression principal components")
 
-    from jax.experimental.sparse.linalg import lobpcg_standard
+    if args.covar:
+        log.info("Reading covariate data and appending principal components")
+        covar = read_plink_style_tsvlike(args.covar)
+        df_pcs = covar.join(df_pcs, on="iid", how="left")
 
-    n = pheno.shape[0]
-    k = args.num_pcs
-    pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
-    theta, U, i = lobpcg_standard(pheno, jnp.eye(n, k))
-    colnames = [f"ExprPC{i}" for i in range(k)]
-    if covar:
-        df_u = pl.DataFrame(np.asarray(U), schema=colnames)
-        covar = covar.hstack(df_u)
-    else:
-        pass
-
-    covar.to_csv(args.out)
+    log.info("Writing results.")
+    df_pcs.write_csv(args.out, separator="\t")
 
     return 0
 
@@ -324,7 +307,6 @@ def _cis_scan(args, log):
     test_str = test.name
     adj_name = perm_test.name
     df_cis.write_csv(f"{args.out}.cis.{test_str}.{adj_name}.tsv", separator="\t")
-    log.info("Finished! Thank you!")
 
     return 0
 
@@ -350,7 +332,6 @@ def _nominal_scan(args, log):
     adj_name = perm_test.name
     # ztd compression?
     df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.{adj_name}.parquet.gz", compression="gzip")
-    log.info("Finished! Thank you!")
 
     return 0
 
@@ -565,7 +546,13 @@ def main(args):
     trans_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
     trans_p.set_defaults(func=_nominal_scan)
 
-    gepcs_p = subp.add_parser("compute-pcs", help="Compute gene expression principal components")
+    gepcs_p = subp.add_parser(
+        "compute-pcs",
+        help=(
+            "Compute gene expression principal components."
+            " This uses a randomized probabilistic PCA algorithm and will be dependent on `--seed`."
+        ),
+    )
     gepcs_p.add_argument("--pheno", help="Path to phenotypes", required=True)
     gepcs_p.add_argument(
         "--num-pcs",
@@ -581,6 +568,12 @@ def main(args):
         help="Transformation to perform on observed gene expression before computing PCs.",
     )
     gepcs_p.add_argument(
+        "--express-percent",
+        type=float,
+        default=0.0,
+        help="Keep genes with expression levels above specified value",
+    )
+    gepcs_p.add_argument(
         "-p",
         "--platform",
         type=str,
@@ -594,7 +587,14 @@ def main(args):
         default=False,
         help="Verbose for logger",
     )
-    gepcs_p.add_argument("--out", "-o", type=str, help="out file prefix")
+    gepcs_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization.")
+    gepcs_p.add_argument(
+        "--out",
+        "-o",
+        type=str,
+        default="jaxqtl.princ_comp.tsv",
+        help="Path to output computed gene expression principal components (and covariate data, if specified).",
+    )
     gepcs_p.set_defaults(func=_compute_expression_pcs)
 
     args = argp.parse_args(args)
@@ -619,6 +619,7 @@ def main(args):
     # launch w/e task was selected
     if hasattr(args, "func"):
         args.func(args, log)
+        log.info("Finished! Thank you!")
     else:
         argp.print_help()
 
