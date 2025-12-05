@@ -1,6 +1,5 @@
 from typing import Literal, Optional
 
-import pandas as pd
 import polars as pl
 
 import equinox as eqx
@@ -110,7 +109,7 @@ def map_cis(
         if mode == "cis":
             key, p_key, s_key = rdm.split(key, 3)
             test_result, perm_result = map_cis_single(
-                cis_data.X, cis_data.G, cis_data.y, cis_data.offset, perm_test, test, p_key, sig_level
+                cis_data.X, cis_data.G, cis_data.y, cis_data.offset, test, perm_test, p_key, sig_level
             )
             result = _process_cis_result(cis_data, test_result, perm_result, s_key)
             results.add_row(result)
@@ -124,6 +123,8 @@ def map_cis(
 
         # clear caches every 50 genes
         if (i + 1) % 50 == 0:
+            if verbose:
+                log.debug("Clearing JAX JIT-caches")
             jax.clear_caches()  # clear up caches
 
     result_df = results.to_df()
@@ -157,60 +158,20 @@ def map_cis_single(
     G: ArrayLike,
     y: ArrayLike,
     offset: ArrayLike,
-    perm: AbstractPermutation,
     test: HypothesisTest,
+    perm: AbstractPermutation,
     key: PRNGKeyArray,
     sig_level: float = 0.05,
 ) -> tuple[TestResult, PermutationResult]:
-    """Fit GLM for SNP-gene pairs and report results
-
-    :rtype: MapCisSingleState
-    :param X: array of covariates
-    :param G: genotype array
-    :param y: gene expression array
-    :param offset: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param test: approach for hypothesis test, default to ScoreTest()
-    :param key_init: key for jax RNG
-    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
-    :return: cis mapping results for a single gene
-    """
+    """Fit GLM, perform hypothesis testing for each variant, and then compute gene-level adjustment of p-values"""
     test_result = test(X, G, y, offset)
     perm_result = perm(X, G, y, offset, test_result, test, key, sig_level)
 
     return test_result, perm_result
 
 
-def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
-    """write parquet file for nominal scan (split by chr)
-
-    :param outdf: data frame of full cis nominal mapping
-    :param method: wald or score
-    :param out_path: output path
-    :return: None
-    """
-    # split by chrom
-    for chrom in outdf["chrom"].unique().tolist():
-        one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
-        one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
-        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.{method}.parquet")
-
-    return
-
-
 def _process_cis_result(cis_data, test_result, perm_result, key):
-    """Get lead SNPs and their information
-
-    :param G: genotype array
-    :param chrom: chromosome number
-    :param gene_name: gene name
-    :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=`True`
-    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie,
-        `False` if pick the first occurrence default to `False`
-    :param result: data frame of QTL mapping result
-    :param start_min: TSS start (0-based)
-    :param variant_df: data frame of variant information (bim)
-    :return:
-    """
+    """Process the results for a gene under the cis-scan and format for output"""
 
     # get info at lead hit, and lead snp
     minp = jnp.nanmin(test_result.p)

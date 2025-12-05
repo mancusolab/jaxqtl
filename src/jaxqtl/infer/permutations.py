@@ -55,6 +55,11 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
     ) -> tuple[Array, Aux]:
         return self.perm(X, G, y, offset, result, test, key, sig_level)
 
+    @property
+    @abstractmethod
+    def name(self) -> str:
+        ...
+
 
 class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
     max_perm_direct: int = 1000
@@ -159,6 +164,10 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         return adj_p, (beta_result, estimate, opt_status)
 
+    @property
+    def name(self) -> str:
+        return "perm"
+
 
 class ACAT(AbstractPermutation[None]):
     def perm(
@@ -196,3 +205,7 @@ class ACAT(AbstractPermutation[None]):
         )
 
         return pvalue, None
+
+    @property
+    def name(self) -> str:
+        return "acat"

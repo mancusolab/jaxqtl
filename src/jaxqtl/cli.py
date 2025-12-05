@@ -21,7 +21,7 @@ from jaxqtl.io.geno import PlinkData, VCFData
 from jaxqtl.io.pheno import edger_cpm, ExpressionData, inverse_normal_transform
 from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike
 from jaxqtl.log import get_logger
-from jaxqtl.map.cis import map_cis, write_parqet
+from jaxqtl.map.cis import map_cis
 
 
 class _SplitAction(ap.Action):
@@ -83,6 +83,12 @@ def _create_common_subp(subp, name, help):
         action="store_true",
         default=False,
         help="Standardize covariates",
+    )
+    common_p.add_argument(
+        "--one-hot",
+        action="store_true",
+        default=False,
+        help="Encode string/categorical covariates using one-hot encoding",
     )
 
     # offset options. can only select one; otherwse we don't have an offset
@@ -279,7 +285,8 @@ def _cis_scan(args, log):
     )
     log.info("Finished cis-scan. Writing results.")
     test_str = test.name
-    df_cis.write_csv(args.out + f".cis.{test_str}.tsv.gz", separator="\t")
+    adj_name = perm_test.name
+    df_cis.write_csv(f"{args.out}.cis.{test_str}.{adj_name}.tsv", separator="\t")
     log.info("Finished! Thank you!")
 
     return 0
@@ -287,7 +294,7 @@ def _cis_scan(args, log):
 
 def _nominal_scan(args, log):
     dat, family, glm, test, perm_test = _common_setup(args, log)
-    if dat.pheno_meta.gene_map.shape[0] < 1:
+    if dat.num_genes < 1:
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
@@ -301,8 +308,12 @@ def _nominal_scan(args, log):
         seed=args.seed,
     )
 
-    test_str = "score" if isinstance(test, ScoreTest) else "wald"
-    write_parqet(outdf=df_nominal, method=test_str, out_path=args.out)
+    log.info("Finished nominal cis-scan. Writing results.")
+    test_str = test.name
+    adj_name = perm_test.name
+    # ztd compression?
+    df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    log.info("Finished! Thank you!")
 
     return 0
 
@@ -428,7 +439,26 @@ def _common_setup(args, log):
         args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
     )
     expr_data = expr_data.filter_by_percentage(args.express_percent)
-    covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
+
+    if args.covar is not None:
+        covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
+
+        # perform one-hot encoding for string-based columns, if specified
+        if args.one_hot:
+            cat = pl.selectors.string().exclude("iid")
+            covar = covar.to_dummies(cat, drop_first=True).drop(cat)
+
+        # standardize all numeric columns
+        if args.standardize:
+            num = pl.all().exclude("iid")
+
+            # let's make sure to not standardize the offset if it was provided
+            if args.offset_name:
+                num = num.exclude(args.offset_name)
+
+            covar = covar.with_columns((num - num.mean()) / num.std())
+    else:
+        covar = None
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
     if args.offset:
@@ -437,6 +467,8 @@ def _common_setup(args, log):
         if covar is None:
             raise ValueError("Covariate file must be provided if `--offset-name` is specified.")
         offset = covar.select(pl.col("iid"), pl.col(args.offset_name))
+        # drop the offset from the covariates data
+        covar = covar.drop(args.offset_name)
     elif args.set_offset_from_libsize:
         offset = expr_data.offset_from_libsize
     else:
@@ -448,11 +480,6 @@ def _common_setup(args, log):
         covar,
         offset,
     )
-
-    # filter gene list
-    # dat.filter_gene(gene_list=gene_list, geneexpr_percent_cutoff=args.express_percent)
-
-    # dat.add_covar_pheno_PC(k=2)
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
     return dat, family, glm, test, perm_test
