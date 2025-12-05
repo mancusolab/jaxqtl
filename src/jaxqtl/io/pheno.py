@@ -37,7 +37,7 @@ class ExpressionData:
 
     def __iter__(self):
         for chrom, start, end, gene in self.pheno_meta.iter_rows():
-            expr = jnp.asarray(self.pheno.get_column(gene).to_numpy(), dtype=float)  # ug i dont like this casting
+            expr = self.pheno.get_column(gene).to_jax().astype(float)  # ug i dont like this casting
             yield expr, gene, chrom, start, end
 
     @property
@@ -78,8 +78,6 @@ class ExpressionData:
             pheno = inverse_normal_transform(tmm_counts_df)
         elif transform == "log1p":
             pheno = jnp.log1p(pheno)  # prevent log(0)
-        elif transform == "offset":
-            raise NotImplementedError("'offset' transform not implemented yet.")
 
         pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
         n, _ = pheno.shape

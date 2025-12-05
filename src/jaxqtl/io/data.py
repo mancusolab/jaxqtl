@@ -169,12 +169,12 @@ def create_readydata(
     expression = ExpressionData(expression_samples, expression.pheno_meta)
 
     # convert covariates to jax.numpy at this point
-    covar = jnp.asarray(covar.select(pl.all().exclude("iid")).to_numpy())
+    covar = covar.select(pl.all().exclude("iid")).to_jax()
 
     # offset should only have two columns by construction at this point
     if offset is not None:
         assert offset.width == 2, "Offset dataframe should only have two columns at this point."
-        offset = jnp.asarray(offset[:, 1].to_numpy())
+        offset = offset[:, 1].to_jax()
     else:
         # otherwise just zero it out
         offset = jnp.array(0.0)

@@ -288,12 +288,14 @@ def _cis_scan(args, log):
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
+    log.info("Starting cis-scan.")
     df_cis = map_cis(
         dat,
         test=test,
         perm_test=perm_test,
         mode="cis",
         window=args.window,
+        verbose=args.verbose,
         log=log,
         seed=args.seed,
     )
@@ -317,12 +319,14 @@ def _nominal_scan(args, log):
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
+    log.info("Starting nominal cis-scan.")
     df_nominal = map_cis(
         dat,
         test=test,
         perm_test=perm_test,
         mode="nominal",
         window=args.window,
+        verbose=args.verbose,
         log=log,
         seed=args.seed,
     )
@@ -563,8 +567,8 @@ def main(args):
     gepcs_p.add_argument("--covar", help="Path to covariate data. If included GE PCs will be appended.")
     gepcs_p.add_argument(
         "--transform",
-        choices=["tmm", "log1p", "none"],
-        default="none",
+        choices=["tmm", "log1p"],
+        default=None,
         help="Transformation to perform on observed gene expression before computing PCs.",
     )
     gepcs_p.add_argument(
