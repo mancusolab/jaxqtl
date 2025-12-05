@@ -382,6 +382,8 @@ def _common_setup(args, log):
         else:
             test = ScoreTest(model=glm, std_err=se_estimator)
     elif args.test == "wald":
+        if args.spa:
+            log.warning("`--spa` is only compatible with `--test score`. Found `--test wald`")
         test = WaldTest(model=glm, std_err=se_estimator)
     else:
         raise ValueError("Unknown test method: {args.test_method}")
