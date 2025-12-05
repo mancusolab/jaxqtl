@@ -52,8 +52,8 @@ class _SplitAction(ap.Action):
         setattr(namespace, self.dest, final)
 
 
-def _create_common_subp(subp, name, help):
-    common_p = subp.add_parser(name, help=help)
+def _create_common_subp(subp, name, help_str):
+    common_p = subp.add_parser(name, help=help_str)
 
     # geno arguments
     geno_group = common_p.add_mutually_exclusive_group(required=True)
@@ -163,9 +163,12 @@ def _create_common_subp(subp, name, help):
         help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
     )
 
+    """
+    # not implemented/supported yet
     common_p.add_argument(
         "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
     )
+    """
     common_p.add_argument(
         "--express-percent",
         type=float,
@@ -183,8 +186,10 @@ def _create_common_subp(subp, name, help):
         action=_SplitAction,
         help="Gene name(s) to analyze (comma/space delimited). All other genes will be discarded during analysis",
     )
-    common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
+    # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
 
+    """
+    # functionality not supported yet
     chrom_group = common_p.add_mutually_exclusive_group()
     chrom_group.add_argument(
         "--chr",
@@ -196,14 +201,15 @@ def _create_common_subp(subp, name, help):
         default=False,
         help="Excludes all unplaced and non-autosomal variants",
     )
-    common_p.add_argument("--window", type=int, default=500000, help="One sided window size (bps) with respect to TSS")
+    """
+    common_p.add_argument("--window", type=int, default=500_000, help="One sided window size (bps) with respect to TSS")
 
     # inference/runtime arguments
     common_p.add_argument(
         "--acat",
         default=False,
         action="store_true",
-        help="Whether to perform ACAT for gene-level p-values rather than Beta approximation to permutation testing",
+        help="Perform ACAT for gene-level p-values rather than Beta approximation to permutation testing",
     )
     common_p.add_argument(
         "--nperm",
@@ -215,13 +221,7 @@ def _create_common_subp(subp, name, help):
     common_p.add_argument("--tol", type=float, default=1e-3, help="Tolerance for termination during GLM inference")
     common_p.add_argument("--step-size", type=float, default=1.0, help="Initial step-size during GLM inference")
 
-    common_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization.")
-    common_p.add_argument(
-        "--perm-pheno",
-        action="store_true",
-        default=False,
-        help="Permute phenotype for type I error calibration",
-    )
+    common_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization")
     common_p.add_argument(
         "--solver",
         choices=["cholesky", "cg", "qr"],
