@@ -474,7 +474,9 @@ def _common_setup(args, log):
     else:
         offset = None
 
-    dat = create_readydata(
+    # take the genotype, expression, covariates, and offset and align by iid for valid analyses
+    # lump those into single object for easier passing around
+    data = create_readydata(
         geno_data,
         expr_data,
         covar,
@@ -482,7 +484,7 @@ def _common_setup(args, log):
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
-    return dat, family, glm, test, perm_test
+    return data, family, glm, test, perm_test
 
 
 def main(args):
