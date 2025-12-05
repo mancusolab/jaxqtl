@@ -53,8 +53,8 @@ class _SplitAction(ap.Action):
         setattr(namespace, self.dest, final)
 
 
-def _create_common_subp(subp, name, help_str):
-    common_p = subp.add_parser(name, help=help_str)
+def _create_common_subp(subp, name, help):
+    common_p = subp.add_parser(name, help=help)
 
     # geno arguments
     geno_group = common_p.add_mutually_exclusive_group(required=True)
@@ -421,6 +421,9 @@ def _common_setup(args, log):
 
     # Set up our within-gene multiple testing correction framework here: ACAT (fast) or Beta-Permutations.
     if args.acat:
+        # we only do multiple testing adjustment when in cis mode.
+        if args.cmd != "cis":
+            log.warning("`--acat` is only compatible with `cis` subcommand. Ignoring.")
         perm_test = ACAT()
     else:
         # for lm wald test, use t distribution during permutation
