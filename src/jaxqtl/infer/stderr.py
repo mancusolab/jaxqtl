@@ -46,6 +46,7 @@ class FisherInfoError(ErrVarEstimation):
         weight: ArrayLike,
         alpha: ScalarLike = 0.0,
     ) -> Array:
+        weight = jnp.atleast_1d(weight)
         infor = (X * weight[:, jnp.newaxis]).T @ X
         asmpt_cov = jnpla.inv(infor)
 

@@ -22,6 +22,7 @@ from jaxqtl.io.pheno import edger_cpm, ExpressionData, inverse_normal_transform
 from jaxqtl.io.utils import read_offset_tsvlike, read_plink_style_tsvlike
 from jaxqtl.log import get_logger
 from jaxqtl.map.cis import map_cis
+from jaxqtl.post.qvalue import calculate_qval
 
 
 class _SplitAction(ap.Action):
@@ -79,26 +80,41 @@ def _create_common_subp(subp, name, help):
         help="Covariate name(s) to exclude (comma/space delimited). All other covariates are included during analysis",
     )
     common_p.add_argument(
-        "--standardize",
+        "--normalize-covar",
         action="store_true",
         default=False,
-        help="Standardize covariates",
+        help="Normalize covariates to have zero mean and unit variance.",
     )
     common_p.add_argument(
         "--one-hot",
         action="store_true",
         default=False,
-        help="Encode string/categorical covariates using one-hot encoding",
+        help=(
+            "Encode string/categorical covariates using one-hot encoding."
+            " The category corresponding to the first observation will be dropped for co-linearity reasons.",
+        ),
+    )
+    common_p.add_argument(
+        "--no-intercept",
+        action="store_true",
+        default=False,
+        help=(
+            "By default jaxQTL appends an intercept to the covariates to handle a shared mean term in the response."
+            " Set `--no-intercept` to disable this behavior."
+        ),
     )
 
     # offset options. can only select one; otherwse we don't have an offset
     offset_group = common_p.add_mutually_exclusive_group()
     offset_group.add_argument(
         "--offset",
-        help="Path to log offset in tsv format (no header) with two columns: iid and log(library size)",
+        help=(
+            "Path to offset file in tsv format."
+            "Expects exactly two columns (with header). The first should be iid-like and second the offset name"
+        ),
     )
     offset_group.add_argument(
-        "--offset-name",
+        "--offset-name-from-covar",
         help="Covariate name to use as fixed offset",
     )
     offset_group.add_argument(
@@ -126,7 +142,16 @@ def _create_common_subp(subp, name, help):
         "--spa",
         action="store_true",
         default=False,
-        help="Whether to perform SPA correction for p-values computed from score statistics. Not applicable for Wald.",
+        help=(
+            "Whether to perform SPA correction for p-values computed from score statistics."
+            " Not applicable for `--test wald` and not necessary for `--model gaussian`.",
+        ),
+    )
+    common_p.add_argument(
+        "--q-value",
+        action="store_true",
+        default=False,
+        help="Compute Storey's q value",
     )
 
     # filtering arguments
@@ -283,6 +308,12 @@ def _cis_scan(args, log):
         log=log,
         seed=args.seed,
     )
+    if args.q_value:
+        log.info("Computing q-values")
+        p_values = df_cis.get_column("pval_adj").to_numpy()
+        q_values, pi0 = calculate_qval(p_values, log)
+        df_cis = df_cis.with_columns(pl.Series("qval", q_values))
+
     log.info("Finished cis-scan. Writing results.")
     test_str = test.name
     adj_name = perm_test.name
@@ -361,12 +392,12 @@ def _common_setup(args, log):
     # GLM under Gaussian assumptions is a single step under the IRLS, but that adds a bunch of overhead.
     # So we use this simpler interface instead for Gaussian case
     if isinstance(family, Gaussian):
-        glm = LinearModel(
+        reg_model = LinearModel(
             family=family,
             solver=solver,
         )
     else:
-        glm = GLM(
+        reg_model = GLM(
             family=family,
             solver=solver,
             max_iter=args.max_iter,
@@ -377,14 +408,22 @@ def _common_setup(args, log):
     # Set up our hypothesis testing framework. Score, SPA (which is Score + SPA), or Wald test.
     if args.test == "score":
         if args.spa:
-            # cgf set up top
-            test = SpaTest(model=glm, std_err=se_estimator, cgf=cgf)
+            if not isinstance(family, Gaussian):
+                # cgf set up top
+                test = SpaTest(model=reg_model, std_err=se_estimator, cgf=cgf)
+            else:
+                msg = (
+                    "Found `--spa` together with `--model gaussian`."
+                    " SPA adjustment is unnecessary as normality assumptions are met. Skipping `--spa` adjustment"
+                )
+                log.warning(msg)
+                test = ScoreTest(model=reg_model, std_err=se_estimator)
         else:
-            test = ScoreTest(model=glm, std_err=se_estimator)
+            test = ScoreTest(model=reg_model, std_err=se_estimator)
     elif args.test == "wald":
         if args.spa:
             log.warning("`--spa` is only compatible with `--test score`. Found `--test wald`")
-        test = WaldTest(model=glm, std_err=se_estimator)
+        test = WaldTest(model=reg_model, std_err=se_estimator)
     else:
         raise ValueError("Unknown test method: {args.test_method}")
 
@@ -450,24 +489,30 @@ def _common_setup(args, log):
             cat = pl.selectors.string().exclude("iid")
             covar = covar.to_dummies(cat, drop_first=True).drop(cat)
 
-        # standardize all numeric columns
-        if args.standardize:
+        # normalize all numeric columns to have mean 0 and var 1
+        if args.normalize_covar:
             num = pl.all().exclude("iid")
 
-            # let's make sure to not standardize the offset if it was provided
-            if args.offset_name:
-                num = num.exclude(args.offset_name)
+            # let's make sure to not standardize the offset if it was provided, as we haven't yet extracted it
+            if args.offset_name_from_covar:
+                num = num.exclude(args.offset_name_from_covar)
 
             covar = covar.with_columns((num - num.mean()) / num.std())
+
+        # we add an intercept column to the covariates by default if no normalization is performed
+        # but we allow users to disable this
+        if not args.no_intercept:
+            covar = covar.with_columns(pl.lit(1.0).alias("intercept"))
+
     else:
         covar = None
 
-    # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
+    # before filter gene list, calculate library size and set offset, or read in pre-computed offset
     if args.offset:
         offset = read_offset_tsvlike(args.offset)
-    elif args.offset_name:
+    elif args.offset_name_from_covar:
         if covar is None:
-            raise ValueError("Covariate file must be provided if `--offset-name` is specified.")
+            raise ValueError("Covariate file must be provided if `--offset-name-from-covar` is specified.")
         offset = covar.select(pl.col("iid"), pl.col(args.offset_name))
         # drop the offset from the covariates data
         covar = covar.drop(args.offset_name)
@@ -486,7 +531,7 @@ def _common_setup(args, log):
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
-    return data, family, glm, test, perm_test
+    return data, family, reg_model, test, perm_test
 
 
 def main(args):

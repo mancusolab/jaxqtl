@@ -118,9 +118,7 @@ def read_offset_tsvlike(
         df_offset = read_plink_style_tsvlike(path_or_filename)
 
     if df_offset.width > 2:
-        raise ValueError(
-            f"Offset file {path_or_filename} has multiple columns. Please specify offset column name or index"
-        )
+        raise ValueError(f"Offset file {path_or_filename} has multiple columns. Please specify offset column name")
     elif df_offset.width == 1:
         raise ValueError(f"Offset file {path_or_filename} has single column. Please specify valid offset file")
 

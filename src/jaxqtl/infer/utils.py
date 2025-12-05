@@ -139,10 +139,10 @@ class ScoreTest(HypothesisTest):
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
 
         y_resid = glmstate_cov_only.resid
-        wgt = glmstate_cov_only.glm_wt
-        x_W = X * wgt[:, jnp.newaxis]
+        wgt = jnp.atleast_1d(glmstate_cov_only.glm_wt)
         sqrt_wgt = jnp.sqrt(wgt)
 
+        x_W = X * wgt[:, jnp.newaxis]
         g_resid = G - multi_dot([X, glmstate_cov_only.infor_inv, x_W.T, G])
         w_g_resid = g_resid * sqrt_wgt[:, jnp.newaxis]
         g_std = jnp.sqrt(jnp.sum(w_g_resid**2, axis=0))

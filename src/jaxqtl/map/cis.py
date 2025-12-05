@@ -1,4 +1,5 @@
-from typing import Literal, Optional
+from logging import Logger
+from typing import Any, Literal, Optional
 
 import polars as pl
 
@@ -9,11 +10,11 @@ import jax.random as rdm
 from jax import numpy as jnp
 from jaxtyping import ArrayLike, PRNGKeyArray
 
-from ..infer.permutations import AbstractPermutation, BetaPermutation, PermutationResult
+from ..families.distribution import NegativeBinomial
+from ..infer.permutations import AbstractPermutation, PermutationResult
 from ..infer.utils import HypothesisTest, TestResult
-from ..io.data import ReadyDataState
+from ..io.data import CisData, ReadyDataState
 from ..log import get_log
-from ..post.qvalue import calculate_qval, estimate_sig_threshold
 
 
 class _ResultsAggregator:
@@ -40,13 +41,9 @@ def map_cis(
     test: HypothesisTest,
     perm_test: AbstractPermutation,
     mode: Literal["cis", "nominal"] = "cis",
-    window: int = 500000,
-    sig_level: float = 0.05,
-    fdr_level: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: Optional[ArrayLike] = None,
+    window: int = 500_000,
     verbose: bool = True,
-    log=None,
+    log: Optional[Logger] = None,
     seed: int = 123,
 ) -> pl.DataFrame:
     """Cis eQTL mapping for each gene, report lead variant
@@ -60,23 +57,11 @@ def map_cis(
     :param data: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
     :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
     :param test: approach for hypothesis test, default to ScoreTest()
-    :param append_intercept: `True` if want to append intercept, `False` otherwise
-    :param standardize: `True` if want to standardize covariates data
-    :param seed: seed for permutation, default to 123
     :param window: window size (bp) of one side for cis scope, default to 500000,
         meaning in total 1Mb from left to right
-    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence
-        default to `False`
-    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
-    :param fdr_level: FDR level specified for across genes, default to 0.05 (not used if compute_qvalue=`False`)
-    :param pi0: specified probability of null (optional) when compute_qvalue=`True`
-    :param qvalue_lambda: an array of lambda value to fit a smooth spline (Optional)
-    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param n_perm: number of permutation to estimate min p distribution for each gene using beta approximation approach
-        default to 1000
-    :param compute_qvalue: `True` if add qvalue for genes, default to `False`
     :param verbose: `True` if report QTL mapping progress in log file, default to `True`
     :param log: logger for QTL progress
+    :param seed: seed for permutation, default to 123
     :return: data frame of QTL mapping results
     """
     if log is None:
@@ -109,7 +94,13 @@ def map_cis(
         if mode == "cis":
             key, p_key, s_key = rdm.split(key, 3)
             test_result, perm_result = map_cis_single(
-                cis_data.X, cis_data.G, cis_data.y, cis_data.offset, test, perm_test, p_key, sig_level
+                cis_data.X,
+                cis_data.G,
+                cis_data.y,
+                cis_data.offset,
+                test,
+                perm_test,
+                p_key,
             )
             result = _process_cis_result(cis_data, test_result, perm_result, s_key)
             results.add_row(result)
@@ -129,25 +120,10 @@ def map_cis(
 
     result_df = results.to_df()
 
-    # if we're in cis-mode (ie take only top hits), compute q-values for FDR correction
-    if mode == "cis":
-        log.info("Computing q-values")
-        p_values = result_df.get_column("pval_adj").to_numpy()
-        q_values, pi0 = calculate_qval(p_values, log, pi0, lam=qvalue_lambda)
-        result_df = result_df.with_columns(pl.Series("qval", q_values))
-        num_sig = (q_values <= fdr_level).sum()
-        p_thold = estimate_sig_threshold(q_values, p_values, fdr_level)
-
-        log.info(f"  * Proportion of significant phenotypes (1-pi0): {1 - pi0:.2f}")
-        log.info(f"  * QTL phenotypes @ FDR {fdr_level:.3f}: {num_sig}")
-        log.info(f"  * min p-value threshold @ FDR {fdr_level}: {p_thold:.3e}")
-        if isinstance(perm_test, BetaPermutation):
-            # could this update be done for ACAT also?
-            from scipy import stats
-
-            beta_shape1 = result_df["beta_shape1"].values
-            beta_shape2 = result_df["beta_shape2"].values
-            result_df["pval_nominal_threshold"] = stats.beta.ppf(p_thold, beta_shape1, beta_shape2)
+    # if we didn't fit a negative binomial, just drop the alpha column as its const 0
+    # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
+    if not isinstance(test.model.family, NegativeBinomial):
+        result_df = result_df.drop("nb_alpha")
 
     return result_df
 
@@ -161,16 +137,20 @@ def map_cis_single(
     test: HypothesisTest,
     perm: AbstractPermutation,
     key: PRNGKeyArray,
-    sig_level: float = 0.05,
 ) -> tuple[TestResult, PermutationResult]:
     """Fit GLM, perform hypothesis testing for each variant, and then compute gene-level adjustment of p-values"""
     test_result = test(X, G, y, offset)
-    perm_result = perm(X, G, y, offset, test_result, test, key, sig_level)
+    perm_result = perm(X, G, y, offset, test_result, test, key)
 
     return test_result, perm_result
 
 
-def _process_cis_result(cis_data, test_result, perm_result, key):
+def _process_cis_result(
+    cis_data: CisData,
+    test_result: TestResult,
+    perm_result: tuple[ArrayLike, Any],
+    key: PRNGKeyArray,
+):
     """Process the results for a gene under the cis-scan and format for output"""
 
     # get info at lead hit, and lead snp
@@ -224,8 +204,12 @@ def _process_cis_result(cis_data, test_result, perm_result, key):
         "pval_nominal": float(test_result.p[vdx]),
         "pval_adj": lead_adj_pvalue,
         "adj_method": method,
-        "alpha": float(test_result.alpha[vdx]),
+        "nb_alpha": float(test_result.alpha[vdx]),
         "model_converged": bool(test_result.converged[vdx]),
     }
+    # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
+    if aux is None:
+        for beta_perm_col in ["beta_shape1", "beta_shape2", "beta_converged", "opt_status", "nc_estimate"]:
+            result.pop(beta_perm_col, None)
 
     return result

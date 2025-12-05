@@ -38,7 +38,6 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         result: TestResult,
         test: HypothesisTest,
         key: PRNGKeyArray,
-        sig_level: float = 0.05,
     ) -> tuple[Array, Aux]:
         ...
 
@@ -51,9 +50,8 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         result: TestResult,
         test: HypothesisTest,
         key: PRNGKeyArray,
-        sig_level: float = 0.05,
     ) -> tuple[Array, Aux]:
-        return self.perm(X, G, y, offset, result, test, key, sig_level)
+        return self.perm(X, G, y, offset, result, test, key)
 
     @property
     @abstractmethod
@@ -97,7 +95,6 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         result: TestResult,
         test: HypothesisTest,
         key: PRNGKeyArray,
-        sig_level: float = 0.05,
     ) -> tuple[Array, tuple[BetaParams, float, bool]]:
         """Perform permutation to estimate beta distribution parameters
         Repeat direct_perm for max_direct_perm times --> vector of lead p values
@@ -179,7 +176,6 @@ class ACAT(AbstractPermutation[None]):
         result: TestResult,
         test: HypothesisTest,
         key: PRNGKeyArray,
-        sig_level: float = 0.05,
     ) -> tuple[Array, None]:
         obs_p = result.p
         any_ones = jnp.any(obs_p == 1.0)
