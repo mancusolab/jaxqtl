@@ -164,17 +164,17 @@ def _create_common_subp(subp, name, help):
         help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
     )
 
-    """
-    # not implemented/supported yet
     common_p.add_argument(
-        "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
+        "--min-indiv-expr-pct",
+        type=float,
+        default=None,
+        help="Exclude individuals that have fewer than specified percentage of genes with non-zero expression",
     )
-    """
     common_p.add_argument(
-        "--express-percent",
+        "--min-gene-expr-pct",
         type=float,
         default=0.0,
-        help="Keep genes with expression levels above specified value",
+        help="Exclude genes expressed in fewer than specified percentage of individuals",
     )
     gene_group = common_p.add_mutually_exclusive_group()
     gene_group.add_argument(
@@ -187,6 +187,14 @@ def _create_common_subp(subp, name, help):
         action=_SplitAction,
         help="Gene name(s) to analyze (comma/space delimited). All other genes will be discarded during analysis",
     )
+    """
+    gene_group.add_argument(
+        "--rm-genes",
+        nargs="+",
+        action=_SplitAction,
+        help="Gene name(s) to exclude (comma/space delimited). All other genes will be included during analysis",
+    )
+    """
     # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
 
     """
@@ -251,7 +259,7 @@ def _create_common_subp(subp, name, help):
 def _compute_expression_pcs(args, log):
     log.info("Reading phenotype and filtering")
     expr_data = ExpressionData.from_bedfile(args.pheno)
-    expr_data = expr_data.filter_by_percentage(args.express_percent)
+    expr_data = expr_data.filter_genes_by_percentage(args.min_express_percent)
 
     # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
     # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
@@ -474,7 +482,9 @@ def _common_setup(args, log):
     expr_data = ExpressionData.from_bedfile(
         args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
     )
-    expr_data = expr_data.filter_by_percentage(args.express_percent)
+    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
+    if args.min_indiv_expr_pct:
+        expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
 
     if args.covar is not None:
         covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)

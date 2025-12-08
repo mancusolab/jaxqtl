@@ -47,11 +47,13 @@ class ExpressionData:
             pl.sum_horizontal(pl.exclude("iid")).log().alias("offset"),
         )
 
-    def filter_by_percentage(self, express_percent: float) -> "ExpressionData":
+    def filter_genes_by_percentage(self, express_percent: float) -> "ExpressionData":
         if not (0 <= express_percent <= 1):
             raise ValueError("`express_percent` must be between 0 and and 1")
         col_means = (
-            self.pheno.select(pl.all().exclude("iid").mean()).to_numpy().ravel()  # compute mean for all non-iid columns
+            self.pheno.select((pl.all().exclude("iid") > 0).mean())
+            .to_numpy()
+            .ravel()  # compute mean for all non-iid columns
         )
         keep = col_means > express_percent
         names = np.array(self.pheno.columns[1:])[keep].tolist()
@@ -59,6 +61,17 @@ class ExpressionData:
         pheno = self.pheno.select(["iid"] + names)
         meta = self.pheno_meta.filter(pl.col("phenotype_id").is_in(names))
         return ExpressionData(pheno=pheno, pheno_meta=meta)
+
+    def filter_individuals_by_percentage(self, express_percent: float) -> "ExpressionData":
+        if not (0 <= express_percent <= 1):
+            raise ValueError("`express_percent` must be between 0 and and 1")
+
+        pheno = (
+            self.pheno.with_columns(pl.mean_horizontal(pl.all().exclude("iid") > 0).alias("prop"))
+            .filter(pl.col("prop") > express_percent)
+            .drop("prop")
+        )
+        return ExpressionData(pheno=pheno, pheno_meta=self.pheno_meta)
 
     def compute_pcs(
         self,
