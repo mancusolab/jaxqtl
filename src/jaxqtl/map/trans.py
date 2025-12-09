@@ -102,7 +102,7 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
         {
             "phenotype": pheno_ids,
             "snp": snp_ids,
-            "effect": np.asarray(test_result.beta.flatten()),
+            "beta": np.asarray(test_result.beta.flatten()),
             "se": np.asarray(test_result.se.flatten()),
             "pvalue": np.asarray(test_result.p.flatten()),
             "nb_alpha": np.asarray(nb_alpha),
@@ -126,7 +126,7 @@ def get_trans_schemas() -> tuple[dict[str, type], dict[str, type]]:
     stats_schema = {
         "phenotype": str,
         "snp": str,
-        "effect": float,
+        "beta": float,
         "se": float,
         "pvalue": float,
         "nb_alpha": float,

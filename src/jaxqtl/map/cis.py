@@ -167,19 +167,17 @@ def _process_cis_result(
     # this is kind of hacky but if aux is not None we did a beta-approximation
     if aux is not None:
         beta_params, nc_estimate, opt_status = aux
-        beta_k = float(beta_params.k)
-        beta_n = float(beta_params.n)
-        beta_converged = beta_params.converged
-        opt_status = bool(opt_status)
+        shape_k = float(beta_params.k)
+        shape_n = float(beta_params.n)
         nc_estimate = float(nc_estimate)
+        perm_converged = beta_params.converged and bool(opt_status)
         lead_adj_pvalue = float(adj_pvalue[vdx])
         method = "BETA"
     else:
-        beta_k = float("nan")
-        beta_n = float("nan")
-        beta_converged = True
-        opt_status = True
+        shape_k = float("nan")
+        shape_n = float("nan")
         nc_estimate = float("nan")
+        perm_converged = True
         lead_adj_pvalue = float(adj_pvalue)
         method = "ACAT"
 
@@ -205,13 +203,12 @@ def _process_cis_result(
         "tss_distance": snp.tss_distance,
         "af": snp.af,
         "ma_count": snp.ma_count,
-        "beta_shape1": beta_k,
-        "beta_shape2": beta_n,
-        "beta_converged": beta_converged,
-        "opt_status": opt_status,
+        "shape1": shape_k,
+        "shape2": shape_n,
         "nc_estimate": nc_estimate,
-        "effect": float(test_result.beta[vdx]),
-        "effect_se": float(test_result.se[vdx]),
+        "perm_converged": perm_converged,
+        "beta": float(test_result.beta[vdx]),
+        "se": float(test_result.se[vdx]),
         "pvalue": float(test_result.p[vdx]),
         "pvalue_adj": lead_adj_pvalue,
         "adj_method": method,
@@ -220,7 +217,7 @@ def _process_cis_result(
     }
     # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
     if aux is None:
-        for beta_perm_col in ["beta_shape1", "beta_shape2", "beta_converged", "opt_status", "nc_estimate"]:
+        for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
             result.pop(beta_perm_col, None)
 
     return result
@@ -241,7 +238,7 @@ def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.Da
 
     region_df = region_df.with_columns(
         pl.lit(cis_data.gene_name).alias("phenotype_id"),
-        pl.Series("effect", np.asarray(test_result.beta)),
+        pl.Series("beta", np.asarray(test_result.beta)),
         pl.Series("se", np.asarray(test_result.se)),
         pl.Series("pvalue", np.asarray(test_result.p)),
         pl.Series("nb_alpha", nb_alpha),
