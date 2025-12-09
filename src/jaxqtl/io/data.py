@@ -133,7 +133,7 @@ class ReadyDataState:
         genotype = genotype.replace_individuals(geno_samples)
 
         # at this point we have only 1 kind of expression object so just make a new one
-        expression = ExpressionData(expression_samples, expression.pheno_meta)
+        expression = ExpressionData(expression_samples, expression.pheno_meta, expression.libsize)
 
         # convert covariates to jax.numpy at this point
         covar = covar.select(pl.all().exclude("iid")).to_jax()

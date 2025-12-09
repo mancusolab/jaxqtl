@@ -34,7 +34,7 @@ from .utils import validate_user_columns
 class ExpressionData:
     pheno: pl.DataFrame
     pheno_meta: pl.DataFrame
-    # libsize: Array
+    libsize: pl.DataFrame
 
     def __iter__(self):
         for chrom, start, end, gene in self.pheno_meta.iter_rows():
@@ -46,10 +46,7 @@ class ExpressionData:
 
     @property
     def offset_from_libsize(self) -> pl.DataFrame:
-        return self.pheno.select(
-            pl.col("iid"),
-            pl.sum_horizontal(pl.exclude("iid")).log().alias("offset"),
-        )
+        return self.libsize.with_columns(pl.col("libsize").log().alias("offset")).select(["iid", "offset"])
 
     def filter_genes_by_percentage(self, express_percent: float) -> "ExpressionData":
         if not (0 <= express_percent <= 1):
@@ -64,7 +61,7 @@ class ExpressionData:
 
         pheno = self.pheno.select(["iid"] + names)
         meta = self.pheno_meta.filter(pl.col("phenotype_id").is_in(names))
-        return ExpressionData(pheno=pheno, pheno_meta=meta)
+        return ExpressionData(pheno=pheno, pheno_meta=meta, libsize=self.libsize)
 
     def filter_individuals_by_percentage(self, express_percent: float) -> "ExpressionData":
         if not (0 <= express_percent <= 1):
@@ -75,7 +72,8 @@ class ExpressionData:
             .filter(pl.col("prop") > express_percent)
             .drop("prop")
         )
-        return ExpressionData(pheno=pheno, pheno_meta=self.pheno_meta)
+        libsize = self.libsize.join(pheno, on="iid", how="semi", maintain_order="right")
+        return ExpressionData(pheno=pheno, pheno_meta=self.pheno_meta, libsize=libsize)
 
     def compute_pcs(
         self,
@@ -170,6 +168,14 @@ class ExpressionData:
 
         phenotype_lf = phenotype_lf.select(columns)
 
+        # compute library size from entire counts, before filting out genes
+        libsize = (
+            phenotype_lf.select(columns[4:])
+            .sum()
+            .collect()
+            .transpose(include_header=True, header_name="iid", column_names=["libsize"])
+        )
+
         # recast chrom col to str
         meta_lf = phenotype_lf.select(resolved).with_columns(pl.col(resolved[0]).cast(pl.Utf8))
 
@@ -209,7 +215,10 @@ class ExpressionData:
             .select(["iid"] + keep_genes.to_list())
         )
 
-        return cls(phenotype_lf, meta_lf)
+        # join libsize based on final filtered samples
+        libsize = libsize.join(phenotype_lf, on="iid", how="semi", maintain_order="right")
+
+        return cls(phenotype_lf, meta_lf, libsize)
 
 
 # TODO: need find out commonly used parameters

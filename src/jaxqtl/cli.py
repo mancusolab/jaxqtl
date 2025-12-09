@@ -356,6 +356,7 @@ def _trans_scan(args, log):
         log.info("No gene exists after filtering. Exiting.")
         return 0
 
+    # convert types from python to pyarrow types
     type_map = {int: pa.int64(), float: pa.float64(), str: pa.string(), bool: pa.bool_()}
     var_schema, stats_schema = get_trans_schemas()
     var_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in var_schema.items()])
