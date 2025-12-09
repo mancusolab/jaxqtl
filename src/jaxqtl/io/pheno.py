@@ -34,11 +34,15 @@ from .utils import validate_user_columns
 class ExpressionData:
     pheno: pl.DataFrame
     pheno_meta: pl.DataFrame
+    # libsize: Array
 
     def __iter__(self):
         for chrom, start, end, gene in self.pheno_meta.iter_rows():
             expr = self.pheno.get_column(gene).to_jax().astype(float)  # ug i dont like this casting
             yield expr, gene, chrom, start, end
+
+    def to_jax(self):
+        return self.pheno.select(pl.all().exclude("iid")).to_jax().astype(float)  # ug i dont like this casting
 
     @property
     def offset_from_libsize(self) -> pl.DataFrame:

@@ -1,5 +1,5 @@
 from dataclasses import dataclass
-from typing import Optional
+from typing import Iterator, Optional
 
 import numpy as np
 import polars as pl
@@ -91,7 +91,7 @@ class ReadyDataState:
     def num_genes(self) -> int:
         return self.expression.pheno_meta.height
 
-    def iter_cis(self, window: int):
+    def iter_cis(self, window: int) -> Iterator[CisData]:
         for data in self.expression:
             y, gene_name, chrom, gene_start, gene_end = data
             start = max(0, gene_start - window)
@@ -106,6 +106,52 @@ class ReadyDataState:
             )
 
         return
+
+    def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        yield from self.genotype.iter_geno(chunk_size)
+
+    @classmethod
+    def from_data(
+        cls,
+        genotype: GenotypeData,
+        expression: ExpressionData,
+        covar: pl.DataFrame,
+        offset: Optional[pl.DataFrame] = None,
+    ) -> "ReadyDataState":
+        dfs = [genotype.sample_info, expression.pheno, covar]
+        if offset is not None:
+            dfs.append(offset)
+
+        aligned_dfs = align_on_iid(dfs, iid_col="iid")
+        if offset is not None:
+            geno_samples, expression_samples, covar, offset = aligned_dfs
+        else:
+            geno_samples, expression_samples, covar = aligned_dfs
+
+        # create new object with the subsetted individuals
+        # we need this method bc we dont know what kind of geno data we're looking at here (PLINK, VCF, etc)
+        genotype = genotype.replace_individuals(geno_samples)
+
+        # at this point we have only 1 kind of expression object so just make a new one
+        expression = ExpressionData(expression_samples, expression.pheno_meta)
+
+        # convert covariates to jax.numpy at this point
+        covar = covar.select(pl.all().exclude("iid")).to_jax()
+
+        # offset should only have two columns by construction at this point
+        if offset is not None:
+            assert offset.width == 2, "Offset dataframe should only have two columns at this point."
+            offset = offset[:, 1].to_jax()
+        else:
+            # otherwise just zero it out
+            offset = jnp.array(0.0)
+
+        return ReadyDataState(
+            genotype=genotype,
+            expression=expression,
+            covar=covar,
+            offset=offset,
+        )
 
 
 def align_pheno_covar(
@@ -158,45 +204,3 @@ def align_on_iid(
         aligned.append(iid_df.join(df, on=iid_col, how="left"))
 
     return aligned
-
-
-def create_readydata(
-    genotype: GenotypeData,
-    expression: ExpressionData,
-    covar: pl.DataFrame,
-    offset: Optional[pl.DataFrame] = None,
-) -> ReadyDataState:
-    dfs = [genotype.sample_info, expression.pheno, covar]
-    if offset is not None:
-        dfs.append(offset)
-
-    aligned_dfs = align_on_iid(dfs, iid_col="iid")
-    if offset is not None:
-        geno_samples, expression_samples, covar, offset = aligned_dfs
-    else:
-        geno_samples, expression_samples, covar = aligned_dfs
-
-    # create new object with the subsetted individuals
-    # we need this method bc we dont know what kind of geno data we're looking at here (PLINK, VCF, etc)
-    genotype = genotype.replace_individuals(geno_samples)
-
-    # at this point we have only 1 kind of expression object so just make a new one
-    expression = ExpressionData(expression_samples, expression.pheno_meta)
-
-    # convert covariates to jax.numpy at this point
-    covar = covar.select(pl.all().exclude("iid")).to_jax()
-
-    # offset should only have two columns by construction at this point
-    if offset is not None:
-        assert offset.width == 2, "Offset dataframe should only have two columns at this point."
-        offset = offset[:, 1].to_jax()
-    else:
-        # otherwise just zero it out
-        offset = jnp.array(0.0)
-
-    return ReadyDataState(
-        genotype=genotype,
-        expression=expression,
-        covar=covar,
-        offset=offset,
-    )

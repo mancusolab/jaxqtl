@@ -12,7 +12,7 @@ from jax import numpy as jnp
 from jaxtyping import ArrayLike, PRNGKeyArray
 
 from ..families.distribution import NegativeBinomial
-from ..infer.permutations import AbstractPermutation, PermutationResult
+from ..infer.aggregate import AbstractAggregateTest, PermutationResult
 from ..infer.utils import HypothesisTest, TestResult
 from ..io.data import CisData, ReadyDataState
 from ..log import get_log
@@ -40,7 +40,7 @@ class _ResultsAggregator:
 def map_cis(
     data: ReadyDataState,
     test: HypothesisTest,
-    perm_test: AbstractPermutation,
+    perm_test: AbstractAggregateTest,
     mode: Literal["cis", "nominal"] = "cis",
     window: int = 500_000,
     verbose: bool = True,
@@ -136,7 +136,7 @@ def map_cis_single(
     y: ArrayLike,
     offset: ArrayLike,
     test: HypothesisTest,
-    perm: AbstractPermutation,
+    perm: AbstractAggregateTest,
     key: PRNGKeyArray,
 ) -> tuple[TestResult, PermutationResult]:
     """Fit GLM, perform hypothesis testing for each variant, and then compute gene-level adjustment of p-values"""
@@ -184,6 +184,16 @@ def _process_cis_result(
         method = "ACAT"
 
     snp = cis_data.get_snp_info(vdx)
+    if jnp.ndim(test_result.alpha) > 0:
+        nb_alpha = float(test_result.alpha[vdx])
+    else:
+        nb_alpha = float(test_result.alpha)
+
+    if jnp.ndim(test_result.converged) > 0:
+        glm_converged = bool(test_result.converged[vdx])
+    else:
+        glm_converged = bool(test_result.converged)
+
     result = {
         "phenotype_id": cis_data.gene_name,
         "chrom": cis_data.chrom,
@@ -205,8 +215,8 @@ def _process_cis_result(
         "pvalue": float(test_result.p[vdx]),
         "pvalue_adj": lead_adj_pvalue,
         "adj_method": method,
-        "nb_alpha": float(test_result.alpha[vdx]),
-        "model_converged": bool(test_result.converged[vdx]),
+        "nb_alpha": nb_alpha,
+        "model_converged": glm_converged,
     }
     # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
     if aux is None:
@@ -218,13 +228,24 @@ def _process_cis_result(
 
 def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
     region_df = cis_data.get_cis_info()
+
+    if jnp.ndim(test_result.alpha) > 0:
+        nb_alpha = np.asarray(test_result.alpha)
+    else:
+        nb_alpha = np.full_like(test_result.beta, test_result.alpha)
+
+    if jnp.ndim(test_result.converged) > 0:
+        glm_converged = np.asarray(test_result.converged)
+    else:
+        glm_converged = np.full_like(test_result.beta, test_result.converged)
+
     region_df = region_df.with_columns(
         pl.lit(cis_data.gene_name).alias("phenotype_id"),
         pl.Series("effect", np.asarray(test_result.beta)),
         pl.Series("se", np.asarray(test_result.se)),
         pl.Series("pvalue", np.asarray(test_result.p)),
-        pl.Series("nb_alpha", np.asarray(test_result.alpha)),
-        pl.Series("model_converged", np.asarray(test_result.converged)),
+        pl.Series("nb_alpha", nb_alpha),
+        pl.Series("model_converged", glm_converged),
     )
     # put pheno id in front
     region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))

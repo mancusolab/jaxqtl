@@ -1,7 +1,7 @@
 import warnings
 
 from abc import abstractmethod
-from typing import Any, cast, Literal, NamedTuple
+from typing import Any, cast, Iterator, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -63,6 +63,10 @@ class GenotypeData(eqx.Module):
     def query_cis(self, chrom: str, start: int, end: int) -> tuple[Array, pl.DataFrame]:
         ...
 
+    @abstractmethod
+    def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        ...
+
 
 class PlinkData(GenotypeData):
     """Read raw genotype data from plink triplets
@@ -116,24 +120,36 @@ class PlinkData(GenotypeData):
         cis_idx = cis_var_info.get_column("i").to_numpy()
 
         # subset geno cis variants at the specified samples
-        G = jnp.asarray(self.genotype[cis_idx, :][:, self.sample_idx].compute().T)  # (n, p)
+        geno = jnp.asarray(self.genotype[cis_idx, :][:, self.sample_idx].compute().T)  # (n, p)
 
         # drop monomorphnic sites
-        snp_var = jnp.var(G, axis=0)
+        snp_var = jnp.var(geno, axis=0)
         keep = ~jnp.isnan(snp_var) & (snp_var > 0)
-        G = G[:, keep]
+        geno = geno[:, keep]
         cis_var_info = cis_var_info.filter(np.asarray(keep))  # back to numpy for polars :(
 
-        return G, cis_var_info
+        return geno, cis_var_info
 
-    def __call__(self, bed_path: str) -> GenoState:
-        # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
-        with warnings.catch_warnings(action="ignore", category=FutureWarning):
-            bim, fam, bed = read_plink(bed_path, verbose=False)
-        fam = fam.set_index("iid", drop=False)
-        G = jnp.asarray(bed.compute().T)  # nxp
-        G, bim, fam = _impute_geno(G, bim, fam)
-        return GenoState(G, bim, fam)
+    def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        if chunk_size < 1:
+            raise ValueError("`chunk_size` must be positive")
+
+        for block_info in self.variant_info.iter_slices(chunk_size):
+            # pull the variant indices as a NumPy array
+            cis_idx = block_info.get_column("i").to_numpy()
+
+            # subset geno cis variants at the specified samples
+            geno = jnp.asarray(self.genotype[cis_idx, :][:, self.sample_idx].compute().T)  # (n, p)
+
+            # drop monomorphnic sites
+            snp_var = jnp.var(geno, axis=0)
+            keep = ~jnp.isnan(snp_var) & (snp_var > 0)
+            geno = geno[:, keep]
+            cis_var_info = block_info.filter(np.asarray(keep))  # back to numpy for polars :(
+
+            yield geno, cis_var_info
+
+        return
 
 
 class VCFData(GenotypeData):

@@ -213,8 +213,8 @@ class SpaTest(HypothesisTest):
             p=gupval,
             z=zscore,
             num_iters=glmstate_cov_only.num_iters,
-            converged=jnp.ones_like(gupval) * glmstate_cov_only.converged,
-            alpha=jnp.ones_like(gupval) * glmstate_cov_only.alpha,
+            converged=glmstate_cov_only.converged,
+            alpha=glmstate_cov_only.alpha,
         )
 
     @property

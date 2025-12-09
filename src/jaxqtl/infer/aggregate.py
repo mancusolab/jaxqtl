@@ -20,7 +20,7 @@ Aux = TypeVar("Aux")
 PermutationResult: TypeAlias = tuple[Scalar, Aux]
 
 
-class AbstractPermutation(eqx.Module, Generic[Aux]):
+class AbstractAggregateTest(eqx.Module, Generic[Aux]):
     """
     For a given cis-window around a gene (L variants), perform permutation test to
     identify (one candidate) eQTL for this gene.
@@ -29,7 +29,7 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
     """
 
     @abstractmethod
-    def perm(
+    def aggregate(
         self,
         X: ArrayLike,
         G: ArrayLike,
@@ -51,7 +51,7 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         test: HypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, Aux]:
-        return self.perm(X, G, y, offset, result, test, key)
+        return self.aggregate(X, G, y, offset, result, test, key)
 
     @property
     @abstractmethod
@@ -59,7 +59,7 @@ class AbstractPermutation(eqx.Module, Generic[Aux]):
         ...
 
 
-class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
+class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
     max_perm_direct: int = 1000
     max_iter_beta: int = 1000
 
@@ -86,7 +86,7 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
 
         return z_stats
 
-    def perm(
+    def aggregate(
         self,
         X: ArrayLike,
         G: ArrayLike,
@@ -166,8 +166,8 @@ class BetaPermutation(AbstractPermutation[tuple[BetaParams, float, bool]]):
         return "perm"
 
 
-class ACAT(AbstractPermutation[None]):
-    def perm(
+class ACAT(AbstractAggregateTest[None]):
+    def aggregate(
         self,
         X: ArrayLike,
         G: ArrayLike,
@@ -182,12 +182,14 @@ class ACAT(AbstractPermutation[None]):
         any_zeros = jnp.any(obs_p == 0.0)
         obs_p = eqx.error_if(obs_p, any_ones & any_zeros, "Cannot have both 0 and 1 p-values.")
 
+        weight = 1.0 / len(obs_p)
+
         # split into 'large' and 'small' checks
         cct_stat = jnp.sum(
             jnp.where(
                 obs_p < 1e-16,
-                jnp.reciprocal(obs_p * jnp.pi),
-                jnp.tan(0.5 - obs_p * jnp.pi),
+                weight * jnp.reciprocal(obs_p * jnp.pi),
+                weight * jnp.tan((0.5 - obs_p) * jnp.pi),
             )
         )
 

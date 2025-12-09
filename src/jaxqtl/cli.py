@@ -4,22 +4,24 @@ import re
 import sys
 
 import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 import jax
 
 from .families.distribution import Gaussian, NegativeBinomial, Poisson
+from .infer.aggregate import ACAT, BetaPermutation
 from .infer.glm import GLM, LinearModel
-from .infer.permutations import ACAT, BetaPermutation
 from .infer.solve import CGSolve, CholeskySolve, QRSolve
 from .infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from .infer.stderr import FisherInfoError, HuberError
 from .infer.utils import ScoreTest, SpaTest, WaldTest
-from .io.data import create_readydata
+from .io.data import ReadyDataState
 from .io.geno import PlinkData, VCFData
 from .io.pheno import ExpressionData
 from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
 from .log import get_logger
-from .map.cis import map_cis
+from .map import get_trans_schemas, map_cis, map_trans
 from .post.qvalue import calculate_qval
 
 
@@ -317,7 +319,7 @@ def _cis_scan(args, log):
     log.info("Finished cis-scan. Writing results.")
     test_str = test.name
     adj_name = perm_test.name
-    df_cis.write_csv(f"{args.out}.cis.{test_str}.{adj_name}.tsv", separator="\t")
+    df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
 
     return 0
 
@@ -349,10 +351,30 @@ def _nominal_scan(args, log):
 
 
 def _trans_scan(args, log):
-    raise NotImplementedError("trans QTL scan not implemented yet.")
-    # TBD
-    # dat, family, glm, test, perm_test = _common_setup(args, log)
-    # out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
+    data, family, glm, test, perm_test = _common_setup(args, log)
+    if data.num_genes < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
+
+    type_map = {int: pa.int64(), float: pa.float64(), str: pa.string(), bool: pa.bool_()}
+    var_schema, stats_schema = get_trans_schemas()
+    var_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in var_schema.items()])
+    stats_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in stats_schema.items()])
+
+    test_str = test.name
+    var_out = f"{args.out}.trans.{test_str}.variant.info.parquet.gz"
+    stats_out = f"{args.out}.trans.{test_str}.sumstats.parquet.gz"
+    with pq.ParquetWriter(var_out, var_schema_pa) as var_writer, pq.ParquetWriter(
+        stats_out, stats_schema_pa
+    ) as stats_writer:
+        for tables in map_trans(data, test, chunk_size=2500, verbose=args.verbose, log=log, seed=args.seed):
+            if tables is None:
+                break
+
+            var_df, stats_df = tables
+            var_writer.write(var_df.to_arrow().cast(var_schema_pa))
+            stats_writer.write(stats_df.to_arrow().cast(stats_schema_pa))
+
     return 0
 
 
@@ -528,7 +550,7 @@ def _common_setup(args, log):
 
     # take the genotype, expression, covariates, and offset and align by iid for valid analyses
     # lump those into single object for easier passing around
-    data = create_readydata(
+    data = ReadyDataState.from_data(
         geno_data,
         expr_data,
         covar,
@@ -561,7 +583,7 @@ def main(args):
     nominal_p.set_defaults(func=_nominal_scan)
 
     trans_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
-    trans_p.set_defaults(func=_nominal_scan)
+    trans_p.set_defaults(func=_trans_scan)
 
     gepcs_p = subp.add_parser(
         "compute-pcs",
