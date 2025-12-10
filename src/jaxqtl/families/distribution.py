@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import ClassVar, List, Tuple, Type
+from typing import ClassVar, Tuple, Type
 
 import numpy as np
 
@@ -9,7 +9,7 @@ import jax.numpy as jnp
 import jax.scipy.stats as jaxstats
 
 from jax import lax
-from jax.scipy.special import gammaln, xlog1py, xlogy
+from jax.scipy.special import gammaln
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from .links import Identity, Link, Log, Logit, NBlink, Power
@@ -29,7 +29,8 @@ class ExponentialFamily(eqx.Module):
     """
 
     glink: Link
-    _links: ClassVar[List[Type[Link]]]
+    _links: ClassVar[list[Type[Link]]]
+    _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def __check_init__(self):
         if not any([isinstance(self.glink, link) for link in self._links]):
@@ -69,10 +70,11 @@ class ExponentialFamily(eqx.Module):
         weight_i = 1 / (V(mu_i) * phi * g'(mu_i)**2)
         this is part of the Information matrix
         """
-        mu_k = self.glink.inverse(eta)
+        mu_k = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
+        var_k = jnp.clip(self.variance(mu_k), jnp.finfo(float).eps)
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.scale(X, y, mu_k)
-        weight_k = 1.0 / (phi * self.variance(mu_k, alpha) * g_deriv_k**2)
+        weight_k = 1.0 / (phi * var_k * g_deriv_k**2)
 
         return mu_k, g_deriv_k, weight_k
 
@@ -125,7 +127,8 @@ class Gaussian(ExponentialFamily):
     """
 
     glink: Link = Identity()
-    _links: ClassVar[List[Type[Link]]] = [Identity, Log, Power]
+    _links: ClassVar[list[Type[Link]]] = [Identity, Log, Power]
+    _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.normal(mu, scale)
@@ -162,11 +165,12 @@ class Binomial(ExponentialFamily):
     """
 
     glink: Link = Logit()
-    _links: ClassVar[List[Type[Link]]] = [
+    _links: ClassVar[list[Type[Link]]] = [
         Logit,
         Log,
         Identity,
     ]  # Probit, Cauchy, LogC, CLogLog, LogLog
+    _bounds: ClassVar[tuple[float, float]] = (0.0, 1.0)
 
     def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.binomial(1, mu)
@@ -198,7 +202,8 @@ class Binomial(ExponentialFamily):
 
 class Poisson(ExponentialFamily):
     glink: Link = Log()
-    _links: ClassVar[List[Type[Link]]] = [Identity, Log]  # Sqrt
+    _links: ClassVar[list[Type[Link]]] = [Identity, Log]  # Sqrt
+    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.poisson(mu)
@@ -229,7 +234,8 @@ class NegativeBinomial(ExponentialFamily):
     """
 
     glink: Link = Log()
-    _links: ClassVar[List[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
+    _links: ClassVar[list[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
+    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def random_gen(self, mu: jnp.ndarray, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> np.ndarray:
         r = 1 / alpha
@@ -241,11 +247,16 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.asarray(1.0)
 
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike) -> Array:
-        r = 1.0 / alpha
-        mu = self.glink.inverse(eta)
-        p = mu / (mu + r)
+        log_r = -jnp.log(alpha)
+        r = jnp.exp(log_r)
+        log_mu = jnp.log(self.glink.inverse(eta))
+        log_mu_plus_r = jnp.logaddexp(log_mu, log_r)
+
+        log_p = log_mu - log_mu_plus_r
+        log1m_p = log_r - log_mu_plus_r
+
         term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
-        term2 = xlog1py(r, -p) + xlogy(y, p)
+        term2 = r * log1m_p + y * log_p
         return -jnp.sum(term1 + term2)
 
     def variance(self, mu: ArrayLike, alpha: ScalarLike = 0.0) -> Array:
@@ -279,7 +290,7 @@ class NegativeBinomial(ExponentialFamily):
         _alpha_score = jax.grad(_ll)
         _alpha_hess = jax.hessian(_ll)
 
-        return _alpha_score(log_alpha), _alpha_hess(log_alpha)  # .reshape((1,))
+        return _alpha_score(log_alpha), _alpha_hess(log_alpha)
 
     def update_dispersion(
         self,
@@ -315,13 +326,10 @@ class NegativeBinomial(ExponentialFamily):
             diff, num_iter, alpha_o = val
             log_alpha_o = jnp.log(alpha_o)
             score, hess = self.log_alpha_score_and_hessian(X, y, eta, log_alpha_o)
-            log_alpha_n = jnp.minimum(
-                jnp.maximum(log_alpha_o - step_size * (score / hess), jnp.log(1e-8)),
-                jnp.log(1e10),
-            )
+            log_alpha_n = jnp.clip(log_alpha_o - step_size * (score / hess), jnp.log(1e-8), jnp.log(1e10))
             diff = jnp.exp(log_alpha_n) - jnp.exp(log_alpha_o)
 
-            return diff.squeeze(), num_iter + 1, jnp.exp(log_alpha_n).squeeze()
+            return diff, num_iter + 1, jnp.exp(log_alpha_n)
 
         def cond_fun(val: Tuple):
             diff, num_iter, alpha_o = val

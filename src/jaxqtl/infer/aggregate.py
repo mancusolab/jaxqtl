@@ -116,7 +116,7 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
             init = float(dof)
         else:
             prep = lambda stat: stat**2
-            stats = jnp.where(jnp.isnan(z_stats_perm), 1.0, prep(z_stats_perm))
+            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, prep(z_stats_perm))
             sf = lambda stat, x: ncx2_sf(stat, 1, x)
             solver = optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4)
             init = 0.1
