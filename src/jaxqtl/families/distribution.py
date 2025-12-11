@@ -71,7 +71,7 @@ class ExponentialFamily(eqx.Module):
         this is part of the Information matrix
         """
         mu_k = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
-        var_k = jnp.clip(self.variance(mu_k), jnp.finfo(float).eps)
+        var_k = jnp.clip(self.variance(mu_k, alpha), jnp.finfo(float).tiny)
         g_deriv_k = self.glink.deriv(mu_k)
         phi = self.scale(X, y, mu_k)
         weight_k = 1.0 / (phi * var_k * g_deriv_k**2)
@@ -203,7 +203,7 @@ class Binomial(ExponentialFamily):
 class Poisson(ExponentialFamily):
     glink: Link = Log()
     _links: ClassVar[list[Type[Link]]] = [Identity, Log]  # Sqrt
-    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).tiny, float("inf"))
 
     def random_gen(self, mu: ArrayLike, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> Array:
         y = np.random.poisson(mu)
@@ -235,7 +235,7 @@ class NegativeBinomial(ExponentialFamily):
 
     glink: Link = Log()
     _links: ClassVar[list[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
-    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).tiny, float("inf"))
 
     def random_gen(self, mu: jnp.ndarray, scale: ScalarLike = 1.0, alpha: ScalarLike = 0.0) -> np.ndarray:
         r = 1 / alpha
@@ -247,6 +247,7 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.asarray(1.0)
 
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, alpha: ScalarLike) -> Array:
+        alpha = jnp.maximum(alpha, jnp.finfo(float).tiny)
         log_r = -jnp.log(alpha)
         r = jnp.exp(log_r)
         log_mu = jnp.log(self.glink.inverse(eta))
