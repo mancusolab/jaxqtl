@@ -20,7 +20,7 @@ class ErrVarEstimation(eqx.Module):
         eta: ArrayLike,
         mu: ArrayLike,
         weight: ArrayLike,
-        alpha: ScalarLike = 0.0,
+        disp: ScalarLike = 1.0,
     ) -> Array:
         """calculate standard errors for SNP
 
@@ -30,7 +30,7 @@ class ErrVarEstimation(eqx.Module):
         :param eta: linear component eta
         :param mu: fitted mean
         :param weight: weight for each individual
-        :param alpha: dispersion parameter in NB model
+        :param disp: dispersion parameter
         """
         pass
 
@@ -44,7 +44,7 @@ class FisherInfoError(ErrVarEstimation):
         eta: ArrayLike,
         mu: ArrayLike,
         weight: ArrayLike,
-        alpha: ScalarLike = 0.0,
+        disp: ScalarLike = 1.0,
     ) -> Array:
         weight = jnp.atleast_1d(weight)
         infor = (X * weight[:, jnp.newaxis]).T @ X
@@ -62,7 +62,7 @@ class HuberError(ErrVarEstimation):
         eta: ArrayLike,
         mu: ArrayLike,
         weight: ArrayLike,
-        alpha: ScalarLike = 0.0,
+        disp: ScalarLike = 1.0,
     ) -> Array:
         """
         Huber white sandwich estimator using observed hessian
@@ -71,10 +71,10 @@ class HuberError(ErrVarEstimation):
         gprime = family.glink.deriv(mu)
 
         # calculate observed hessian
-        W = 1 / phi * (family._hlink_score(eta, alpha) / gprime - family._hlink_hess(eta, alpha) * (y - mu))
+        W = 1 / phi * (family._hlink_score(eta, disp) / gprime - family._hlink_hess(eta, disp) * (y - mu))
         hess_inv = jnpla.inv(-(X * W).T @ X)
 
-        score_no_x = (y - mu) / (family.variance(mu, alpha) * gprime * phi)
+        score_no_x = (y - mu) / (family.variance(mu, disp) * gprime * phi)
         Bs = (X * (score_no_x**2)).T @ X
         robust_cov = hess_inv @ Bs @ hess_inv
 

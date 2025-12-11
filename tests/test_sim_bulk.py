@@ -87,13 +87,11 @@ def test_sim_NB():
     init_nb, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(X, y, log_offset)
     alpha_n = jnp.nan_to_num(alpha_n, nan=0.1)
 
-    glm_state = jaxqtl_nb.fit(
-        X, y, init=init_nb, alpha_init=alpha_n, offset=log_offset, se_estimator=FisherInfoError()
-    )
+    glm_state = jaxqtl_nb.fit(X, y, init=init_nb, alpha_init=alpha_n, offset=log_offset, se_estimator=FisherInfoError())
 
-    print(f"jaxqtl alpha: {glm_state.alpha}")
+    print(f"jaxqtl alpha: {glm_state.disp}")
     print(f"jaxqtl beta: {glm_state.beta}")
     print(f"jaxqtl pval: {glm_state.p}")
     print(f"statsmodel params: {sm_state.params}")
-    assert_array_eq(glm_state.alpha, sm_state.params[-1], rtol=1e-3)
-    assert_array_eq(glm_state.alpha, true_alpha, rtol=1e-3)
+    assert_array_eq(glm_state.disp, sm_state.params[-1], rtol=1e-3)
+    assert_array_eq(glm_state.disp, true_alpha, rtol=1e-3)

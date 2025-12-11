@@ -78,10 +78,10 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
     af = counts / (2.0 * n)
     flag = af <= 0.5
     ma_counts = jnp.where(flag, counts, 2 * n - counts)
-    if jnp.ndim(test_result.alpha) == 1:
-        nb_alpha = jnp.repeat(test_result.alpha, p)
+    if jnp.ndim(test_result.disp) == 1:
+        nb_alpha = jnp.repeat(test_result.disp, p)
     else:
-        nb_alpha = test_result.alpha.flatten()
+        nb_alpha = test_result.disp.flatten()
 
     if jnp.ndim(test_result.converged) == 1:
         glm_converged = jnp.repeat(test_result.converged, p)

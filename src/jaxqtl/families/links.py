@@ -109,6 +109,20 @@ class Logit(Link):
         return _grad_per_sample(self.inverse, eta)
 
 
+class Inverse(Link):
+    def __call__(self, mu: ArrayLike) -> Array:
+        return jnp.reciprocal(mu)
+
+    def inverse(self, eta: ArrayLike) -> Array:
+        return jnp.reciprocal(eta)
+
+    def deriv(self, mu: ArrayLike) -> Array:
+        return _grad_per_sample(self, mu)
+
+    def inverse_deriv(self, eta: ArrayLike) -> Array:
+        return _grad_per_sample(self.inverse, eta)
+
+
 class Log(Link):
     def __call__(self, mu: ArrayLike) -> Array:
         return jnp.log(mu)

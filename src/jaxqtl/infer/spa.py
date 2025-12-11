@@ -116,7 +116,7 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
     """The NegativeBinomial distribution family."""
 
     def init(self, glm_state: GLMState) -> NegBinCGFState:
-        return NegBinCGFState(glm_state.mu, 1.0 / glm_state.alpha)
+        return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
     def cgf(self, t: Array, state: NegBinCGFState) -> Array:
         term = 1 - (state.pred_mean / state.r) * jnp.expm1(t)
