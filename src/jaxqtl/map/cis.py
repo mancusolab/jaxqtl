@@ -170,7 +170,7 @@ def _process_cis_result(
         shape_k = float(beta_params.k)
         shape_n = float(beta_params.n)
         nc_estimate = float(nc_estimate)
-        perm_converged = beta_params.converged and bool(opt_status)
+        perm_converged = bool(beta_params.converged) and bool(opt_status)
         lead_adj_pvalue = float(adj_pvalue[vdx])
         method = "BETA"
     else:
@@ -182,10 +182,10 @@ def _process_cis_result(
         method = "ACAT"
 
     snp = cis_data.get_snp_info(vdx)
-    if jnp.ndim(test_result.alpha) > 0:
-        nb_alpha = float(test_result.alpha[vdx])
+    if jnp.ndim(test_result.disp) > 0:
+        nb_alpha = float(test_result.disp[vdx])
     else:
-        nb_alpha = float(test_result.alpha)
+        nb_alpha = float(test_result.disp)
 
     if jnp.ndim(test_result.converged) > 0:
         glm_converged = bool(test_result.converged[vdx])
@@ -226,10 +226,10 @@ def _process_cis_result(
 def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
     region_df = cis_data.get_cis_info()
 
-    if jnp.ndim(test_result.alpha) > 0:
-        nb_alpha = np.asarray(test_result.alpha)
+    if jnp.ndim(test_result.disp) > 0:
+        nb_alpha = np.asarray(test_result.disp)
     else:
-        nb_alpha = np.full_like(test_result.beta, test_result.alpha)
+        nb_alpha = np.full_like(test_result.beta, test_result.disp)
 
     if jnp.ndim(test_result.converged) > 0:
         glm_converged = np.asarray(test_result.converged)

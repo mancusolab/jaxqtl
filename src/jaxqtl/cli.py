@@ -167,6 +167,12 @@ def _create_common_subp(subp, name, help):
     )
 
     common_p.add_argument(
+        "--perm-pheno",
+        action="store_true",
+        default=False,
+        help="foo",
+    )
+    common_p.add_argument(
         "--min-indiv-expr-pct",
         type=float,
         default=None,
@@ -548,6 +554,19 @@ def _common_setup(args, log):
         offset = expr_data.offset_from_libsize
     else:
         offset = None
+
+    if args.perm_pheno:
+        import numpy as np
+
+        import jax.random as rdm
+
+        key = rdm.key(args.seed)
+        pidx = np.asarray(rdm.permutation(key, offset.height))
+        # permute pheno + offset
+        pheno = expr_data.pheno.with_columns(pl.all().exclude("iid").gather(pidx))
+        offset = offset.with_columns(pl.all().exclude("iid").gather(pidx))
+
+        expr_data = ExpressionData(pheno, expr_data.pheno_meta, None)
 
     # take the genotype, expression, covariates, and offset and align by iid for valid analyses
     # lump those into single object for easier passing around

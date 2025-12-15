@@ -32,7 +32,7 @@ class GLMState(NamedTuple):
     converged: Array
     infor_inv: Array  # for score test
     resid: Array  # for score test, not the working resid!
-    alpha: Array  # dispersion parameter in NB model
+    disp: Array  # dispersion parameter
 
 
 class _AbstractInit(eqx.Module):
@@ -91,9 +91,9 @@ class _NBInit(_AbstractInit):
         glm_state_pois = jaxqtl_pois.fit(X, y, offset)
 
         # fit covariate-only model (null)
-        alpha_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
+        disp_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
         eta = glm_state_pois.eta
-        disp = self.family.estimate_dispersion(X, y, eta, alpha=1.0 / alpha_init, max_iter=max_iter)
+        disp = self.family.estimate_dispersion(X, y, eta, disp=1.0 / disp_init, max_iter=max_iter)
 
         # convert disp to 0.1 if bad initialization
         disp = jnp.nan_to_num(disp, nan=0.1)
@@ -115,7 +115,7 @@ class _SimpleInit(_AbstractInit):
         step_size: float = 1e-2,
     ):
         init_val = self.family.init_eta(y)
-        return init_val, jnp.array(0.0)
+        return init_val, jnp.array(1.0)
 
 
 class AbstractLinearModel(eqx.Module):
@@ -158,22 +158,21 @@ class LinearModel(AbstractLinearModel):
         offset: ArrayLike = 0.0,
         std_err: ErrVarEstimation = FisherInfoError(),
     ):
-        beta, n_iter, converged, alpha = lstsq(X, y - offset, self.solver)
+        beta, n_iter, converged, disp = lstsq(X, y - offset, self.solver)
 
         mu = X @ beta
         eta = mu
         resid = y - mu - offset  # note: this is the working resid
 
-        phi = self.family.scale(X, y, mu)
-        weight = 1.0 / phi
+        weight = 1.0 / disp
 
-        resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
+        resid_covar = std_err(self.family, X, y, eta, mu, weight, disp)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
 
-        df = X.shape[0] - X.shape[1]
+        df = jnp.maximum(X.shape[0] - X.shape[1], 1)
         stat = beta / beta_se
 
-        pval_wald = t_cdf(-abs(stat), df) * 2
+        pval_wald = 2 * t_cdf(-jnp.abs(stat), df)
 
         return GLMState(
             beta,
@@ -188,7 +187,7 @@ class LinearModel(AbstractLinearModel):
             converged,
             resid_covar,
             resid,
-            alpha,
+            disp,
         )
 
 
@@ -233,15 +232,15 @@ class GLM(eqx.Module):
         """
 
         # initialize eta and alpha
-        init, alpha_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
-        beta, n_iter, converged, alpha = irls(
-            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, alpha_init
+        init, disp_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
+        beta, n_iter, converged, disp = irls(
+            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init
         )
         eta = X @ beta + offset
-        mu, link_prime, weight = self.family.calc_weight(X, y, eta, alpha)
+        mu, link_prime, weight = self.family.calc_weight(X, y, eta, disp)
         resid = (y - mu) * link_prime  # note: this is the working resid
 
-        resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
+        resid_covar = std_err(self.family, X, y, eta, mu, weight, disp)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
         stat = beta / beta_se
         pval_wald = 2 * norm.sf(jnp.abs(stat))
@@ -259,5 +258,5 @@ class GLM(eqx.Module):
             converged,
             resid_covar,
             resid,
-            alpha,
+            disp,
         )

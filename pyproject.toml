@@ -42,14 +42,15 @@ dependencies = [
     "jax",
     "jaxtyping",
     "equinox",
+    "lineax",
     "optimistix",
-    "numpy",
     "typing_extensions",
     "scanpy",
     "decoupler",
     "pandas_plink",
+    "polars",
+    "qtl",
     "cyvcf2",
-    "fastparquet",
     "pyarrow",
 ]
 

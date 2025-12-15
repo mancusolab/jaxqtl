@@ -37,8 +37,8 @@ maf = 0.2
 
 # sample from observed
 onek1k = pd.read_csv("../example/local/onek1k_3CT_sc/CD4_NC.features.tsv.gz", sep="\t")
-sample_covar = onek1k[['individual', 'age', 'sex', 'iid_offset']]
-sample_covar = sample_covar.drop_duplicates(subset=['individual', 'age', 'sex'], keep='last').reset_index(drop=True)
+sample_covar = onek1k[["individual", "age", "sex", "iid_offset"]]
+sample_covar = sample_covar.drop_duplicates(subset=["individual", "age", "sex"], keep="last").reset_index(drop=True)
 
 bim, fam, bed = read_plink("../example/local/onek1k_3CT_sc/chr1_0.2", verbose=False)
 G = bed.compute()  # pxn array
@@ -74,5 +74,5 @@ print(res.bulk_express_percent)
 print(res.pval_nb_score)
 print(res.pval_pois_score)
 print(res.pval_lm_score)
-print(res.alpha)
-print('finish')
+print(res.disp)
+print("finish")
