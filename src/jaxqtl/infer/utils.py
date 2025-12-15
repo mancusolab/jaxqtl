@@ -23,7 +23,7 @@ class TestResult(NamedTuple):
     z: Array
     num_iters: Array
     converged: Array
-    alpha: Array
+    disp: Array
 
 
 class HypothesisTest(eqx.Module):
@@ -100,7 +100,7 @@ class WaldTest(HypothesisTest):
                 z=result.z,
                 num_iters=result.num_iters,
                 converged=result.converged,
-                alpha=result.disp,
+                disp=result.disp,
             )
         else:
 
@@ -115,7 +115,7 @@ class WaldTest(HypothesisTest):
                     z=glmstate.z[-1],
                     num_iters=glmstate.num_iters,
                     converged=glmstate.converged,
-                    alpha=glmstate.disp,
+                    disp=glmstate.disp,
                 )
 
             _, state = lax.scan(_func, 0.0, G.T)
@@ -162,8 +162,8 @@ class ScoreTest(HypothesisTest):
             p=pval,
             z=zscore,
             num_iters=glmstate_cov_only.num_iters,
-            converged=jnp.ones_like(pval) * glmstate_cov_only.converged,
-            alpha=jnp.ones_like(pval) * glmstate_cov_only.disp,
+            converged=glmstate_cov_only.converged,
+            disp=glmstate_cov_only.disp,
         )
 
     @property
@@ -214,7 +214,7 @@ class SpaTest(HypothesisTest):
             z=zscore,
             num_iters=glmstate_cov_only.num_iters,
             converged=glmstate_cov_only.converged,
-            alpha=glmstate_cov_only.disp,
+            disp=glmstate_cov_only.disp,
         )
 
     @property

@@ -115,7 +115,7 @@ class _SimpleInit(_AbstractInit):
         step_size: float = 1e-2,
     ):
         init_val = self.family.init_eta(y)
-        return init_val, jnp.array(0.0)
+        return init_val, jnp.array(1.0)
 
 
 class AbstractLinearModel(eqx.Module):
@@ -172,7 +172,7 @@ class LinearModel(AbstractLinearModel):
         df = jnp.maximum(X.shape[0] - X.shape[1], 1)
         stat = beta / beta_se
 
-        pval_wald = t_cdf(-abs(stat), df) * 2
+        pval_wald = 2 * t_cdf(-jnp.abs(stat), df)
 
         return GLMState(
             beta,
@@ -232,15 +232,15 @@ class GLM(eqx.Module):
         """
 
         # initialize eta and alpha
-        init, alpha_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
-        beta, n_iter, converged, alpha = irls(
-            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, alpha_init
+        init, disp_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
+        beta, n_iter, converged, disp = irls(
+            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init
         )
         eta = X @ beta + offset
-        mu, link_prime, weight = self.family.calc_weight(X, y, eta, alpha)
+        mu, link_prime, weight = self.family.calc_weight(X, y, eta, disp)
         resid = (y - mu) * link_prime  # note: this is the working resid
 
-        resid_covar = std_err(self.family, X, y, eta, mu, weight, alpha)
+        resid_covar = std_err(self.family, X, y, eta, mu, weight, disp)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
         stat = beta / beta_se
         pval_wald = 2 * norm.sf(jnp.abs(stat))
@@ -258,5 +258,5 @@ class GLM(eqx.Module):
             converged,
             resid_covar,
             resid,
-            alpha,
+            disp,
         )

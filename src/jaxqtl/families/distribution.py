@@ -74,10 +74,10 @@ class ExponentialFamily(eqx.Module):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        disp: ScalarLike = 0.01,
+        disp: ScalarLike = 1.0,
         step_size: ScalarLike = 1.0,
     ) -> Array:
-        return jnp.asarray(0.0)
+        return jnp.asarray(disp)
 
     def estimate_dispersion(
         self,
@@ -90,22 +90,7 @@ class ExponentialFamily(eqx.Module):
         max_iter: int = 1000,
         offset_eta: ScalarLike = 0.0,
     ) -> Array:
-        return jnp.asarray(1.0)
-
-    def _hlink(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        """
-        If canonical link, then this is identity function
-        """
-        return jnp.asarray(eta)
-
-    def _hlink_score(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        """
-        If canonical link, then this is identity function
-        """
-        return jnp.ones_like(eta)
-
-    def _hlink_hess(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        return jnp.zeros_like(eta)
+        return jnp.asarray(disp)
 
 
 class Gaussian(ExponentialFamily):
@@ -146,11 +131,11 @@ class Gaussian(ExponentialFamily):
         X: ArrayLike,
         y: ArrayLike,
         eta: ArrayLike,
-        disp: ScalarLike = 0.0,
+        disp: ScalarLike = 1.0,
     ) -> Array:
         mu = self.glink.inverse(eta)
-        phi = self.scale(X, y, mu)
-        logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(phi)))
+        sigma_sq = self.variance(mu, disp)
+        logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(sigma_sq)))
         return -logprob
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
@@ -168,10 +153,7 @@ class Gamma(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        resid = jnp.sum(jnp.square(mu - y))
-        df = y.shape[0] - X.shape[1]
-        phi = resid / df
-        return phi
+        return jnp.asarray(1.0)
 
     def negloglikelihood(
         self,
@@ -346,15 +328,3 @@ class NegativeBinomial(ExponentialFamily):
         diff, num_iters, disp = lax.while_loop(cond_fun, body_fun, init_tuple)
 
         return disp
-
-    def _hlink(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        """
-        Using log link in g function
-        """
-        return jnp.log1p(-1.0 / (disp * jnp.exp(eta)))
-
-    def _hlink_score(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        return 1.0 / (disp * jnp.exp(eta) + 1.0)
-
-    def _hlink_hess(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> Array:
-        return -disp * jnp.exp(eta) / (disp * jnp.exp(eta) + 1) ** 2

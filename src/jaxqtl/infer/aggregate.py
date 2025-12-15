@@ -143,8 +143,11 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
         # compute updated permutation p-values based on NC param due to LD
         p_perm = sf(stats, estimate)
+
+        # clip between these values, bc x ~ Beta(a, b) => x != 0 and x != 1, but numerically may result in 0/1
         tiny = jnp.finfo(float).tiny
-        p_perm = jnp.maximum(p_perm, tiny)
+        eps = jnp.finfo(float).eps
+        p_perm = jnp.clip(p_perm, tiny, 1 - eps)
 
         # init using method-of-moments
         p_mean, p_var = jnp.mean(p_perm), jnp.var(p_perm)

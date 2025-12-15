@@ -3,9 +3,8 @@ from abc import abstractmethod
 import equinox as eqx
 import jax.numpy as jnp
 
-from jax import Array
 from jax.numpy import linalg as jnpla
-from jaxtyping import ArrayLike, ScalarLike
+from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ..families.distribution import ExponentialFamily
 
@@ -67,15 +66,14 @@ class HuberError(ErrVarEstimation):
         """
         Huber white sandwich estimator using observed hessian
         """
-        phi = family.scale(X, y, mu)  # note: this scaler will cancel out in robust_cov
-        gprime = family.glink.deriv(mu)
+        variance = family.variance(mu, disp)
+        mu_eta = family.glink.inverse_deriv(eta)
 
-        # calculate observed hessian
-        W = 1 / phi * (family._hlink_score(eta, disp) / gprime - family._hlink_hess(eta, disp) * (y - mu))
-        hess_inv = jnpla.inv(-(X * W).T @ X)
+        r = (y - mu) * mu_eta / variance
+        Bs = (X * (r**2)[:, None]).T @ X
+        W = jnp.atleast_1d(weight)
+        Vh_inv = jnpla.inv(X.T @ (X * W[:, None]))
 
-        score_no_x = (y - mu) / (family.variance(mu, disp) * gprime * phi)
-        Bs = (X * (score_no_x**2)).T @ X
-        robust_cov = hess_inv @ Bs @ hess_inv
+        robust_cov = Vh_inv @ Bs @ Vh_inv
 
         return robust_cov
