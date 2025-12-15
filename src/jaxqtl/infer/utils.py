@@ -84,7 +84,7 @@ class WaldTest(HypothesisTest):
             # fit model to covariates then compute residuals for y and G
             result = self.model.fit(X, y, offset, self.std_err)
             y_resid = result.resid
-            x_W = X * result.glm_wtw
+            x_W = X * result.glm_wt
             G_resid = G - multi_dot([X, result.infor_inv, x_W.T, G])
 
             # fit residualized model, one snp at-a-time; but we can do this all in one go

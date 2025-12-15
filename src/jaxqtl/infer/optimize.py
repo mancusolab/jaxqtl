@@ -86,7 +86,7 @@ def lstsq(
     solver: LinearSolve,
 ) -> IRLSState:
     beta = solver.lstsq(X, y)
-    alpha = jnp.array(0)
+    alpha = jnp.array(1)
     converged = jnp.array(True)
     num_iters = 1
 

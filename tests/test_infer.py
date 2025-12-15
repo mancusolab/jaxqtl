@@ -1,5 +1,6 @@
 import numpy as np
 import pandas as pd
+import pytest
 import statsmodels
 import statsmodels.api as sm
 
@@ -14,9 +15,10 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Binomial, Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.glm import GLM
+from jaxqtl.infer.glm import GLM, LinearModel
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer.stderr import HuberError
+from jaxqtl.infer.utils import ScoreTest
 
 
 config.update("jax_enable_x64", True)
@@ -25,15 +27,13 @@ config.update("jax_enable_x64", True)
 spector_data = sm.datasets.spector.load()
 spector_data.exog = sm.add_constant(spector_data.exog, prepend=True)  # X
 
-y_arr = jnp.array(spector_data.endog)[:, jnp.newaxis]
+y_arr = jnp.array(spector_data.endog)
 X_arr = jnp.array(spector_data.exog)
 
 maxiter = 100
 stepsize = 1.0
 
 jaxqtl_lm = GLM(family=Gaussian(), max_iter=maxiter, step_size=stepsize)
-init_lm = jaxqtl_lm.family.init_eta(y_arr)
-
 X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
 
 
@@ -41,27 +41,22 @@ def score_test_snp(a, b, c):
     pass
 
 
-def test_linear_regression_cho():
+@pytest.mark.parametrize("solver", (CGSolve(), CholeskySolve(), QRSolve()))
+def test_linear_regression(solver):
     # test linear regression function
     mod = sm.OLS(spector_data.endog, spector_data.exog)
     sm_state = mod.fit()
 
-    jaxqtl_cho = GLM(
-        solver=CholeskySolve(),
-        max_iter=maxiter,
-        step_size=stepsize,
-    )
-
-    init_lm = jaxqtl_cho.family.init_eta(jnp.array(spector_data.endog)[:, jnp.newaxis])
-
-    glm_state = jaxqtl_cho.fit(X_arr, y_arr, init=init_lm)
+    jaxqtl_cho = LinearModel(solver=solver)
+    glm_state = jaxqtl_cho.fit(X_arr, y_arr)
 
     assert_array_eq(glm_state.beta, sm_state.params)
     assert_array_eq(glm_state.se, sm_state.bse)
     assert_array_eq(glm_state.p, sm_state.pvalues)
 
 
-def test_binomial_cg():
+@pytest.mark.parametrize("solver", (CGSolve(), CholeskySolve(), QRSolve()))
+def test_binomial(solver):
     # test logistic regression
     mod = sm.Logit(spector_data.endog, spector_data.exog)
     sm_state = mod.fit()
@@ -69,37 +64,18 @@ def test_binomial_cg():
     jaxqtl_bin_cg = GLM(
         family=Binomial(),
         max_iter=maxiter,
-        solver=CGSolve(),
+        solver=solver,
         step_size=stepsize,
     )
-    init_logistic = jaxqtl_bin_cg.family.init_eta(y_arr)
-    glm_state = jaxqtl_bin_cg.fit(X_arr, y_arr, init=init_logistic)
+    glm_state = jaxqtl_bin_cg.fit(X_arr, y_arr)
 
     assert_array_eq(glm_state.beta, sm_state.params, rtol=1e-4)
     assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-4)
     assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-4)
 
 
-def test_binomial_cho():
-    # test logistic regression
-    mod = sm.Logit(spector_data.endog, spector_data.exog)
-    sm_state = mod.fit()
-
-    jaxqtl_bin_cho = GLM(
-        family=Binomial(),
-        max_iter=maxiter,
-        solver=CholeskySolve(),
-        step_size=stepsize,
-    )
-    init_logistic = jaxqtl_bin_cho.family.init_eta(y_arr)
-    glm_state = jaxqtl_bin_cho.fit(X_arr, y_arr, init=init_logistic)
-
-    assert_array_eq(glm_state.beta, sm_state.params, rtol=1e-4)
-    assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-4)
-    assert_array_eq(glm_state.p, sm_state.pvalues, rtol=1e-4)
-
-
-def test_poisson_qr():
+@pytest.mark.parametrize("solver", (CGSolve(), CholeskySolve(), QRSolve()))
+def test_poisson(solver):
     # test logistic regression
     mod = smPoisson(spector_data.endog, spector_data.exog)
     sm_state = mod.fit()
@@ -107,49 +83,10 @@ def test_poisson_qr():
     jaxqtl_poisson_qr = GLM(
         family=Poisson(),
         max_iter=maxiter,
-        solver=QRSolve(),
+        solver=solver,
         step_size=stepsize,
     )
-    init_pois = jaxqtl_poisson_qr.family.init_eta(y_arr)
-    glm_state = jaxqtl_poisson_qr.fit(X_arr, y_arr, init=init_pois)
-
-    assert_array_eq(glm_state.beta, sm_state.params)
-    assert_array_eq(glm_state.se, sm_state.bse)
-    assert_array_eq(glm_state.p, sm_state.pvalues)
-
-
-def test_poisson_cho():
-    # test logistic regression
-    mod = smPoisson(spector_data.endog, spector_data.exog)
-    sm_state = mod.fit()
-
-    jaxqtl_poisson_cho = GLM(
-        family=Poisson(),
-        max_iter=maxiter,
-        solver=CholeskySolve(),
-        step_size=stepsize,
-    )
-    init_pois = jaxqtl_poisson_cho.family.init_eta(y_arr)
-    glm_state = jaxqtl_poisson_cho.fit(X_arr, y_arr, init=init_pois)
-
-    assert_array_eq(glm_state.beta, sm_state.params)
-    assert_array_eq(glm_state.se, sm_state.bse)
-    assert_array_eq(glm_state.p, sm_state.pvalues)
-
-
-def test_poisson_cg():
-    # test logistic regression
-    mod = smPoisson(spector_data.endog, spector_data.exog)
-    sm_state = mod.fit()
-
-    jaxqtl_poisson_cg = GLM(
-        family=Poisson(),
-        max_iter=maxiter,
-        solver=CGSolve(),
-        step_size=stepsize,
-    )
-    init_pois = jaxqtl_poisson_cg.family.init_eta(y_arr)
-    glm_state = jaxqtl_poisson_cg.fit(X_arr, y_arr, init=init_pois)
+    glm_state = jaxqtl_poisson_qr.fit(X_arr, y_arr)
 
     assert_array_eq(glm_state.beta, sm_state.params)
     assert_array_eq(glm_state.se, sm_state.bse)
@@ -161,14 +98,13 @@ def test_CGsolve_realdata():
     # AssertionError: get diff result
     """
     dat = jnp.array(pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t"))
-    y = dat[:, -2][:, jnp.newaxis]
+    y = dat[:, -2]
     X = dat[:, 0:-2]
 
     sm_state = smPoisson(np.array(y), np.array(X)).fit()
 
     jaxqtl_poisson_cg = GLM(family=Poisson(), max_iter=maxiter, solver=CGSolve(), step_size=stepsize)
-    init_pois = jaxqtl_poisson_cg.family.init_eta(y)
-    glm_state = jaxqtl_poisson_cg.fit(X, y, init=init_pois)
+    glm_state = jaxqtl_poisson_cg.fit(X, y)
 
     assert_array_eq(glm_state.beta, sm_state.params, rtol=1e-3)
     assert_array_eq(glm_state.se, sm_state.bse, rtol=1e-3)
@@ -181,11 +117,10 @@ def test_1D_X():
     sm_state = mod.fit()
 
     X_arr = jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis]
-    y_arr = jnp.array(spector_data.endog)[:, jnp.newaxis]
+    y_arr = jnp.array(spector_data.endog)
 
     jaxqtl_pois = GLM(family=Poisson(), max_iter=maxiter, step_size=stepsize)
-    init_pois = jaxqtl_pois.family.init_eta(y_arr)
-    glm_state = jaxqtl_pois.fit(X_arr, y_arr, init=init_pois)
+    glm_state = jaxqtl_pois.fit(X_arr, y_arr)
 
     assert_array_eq(glm_state.beta, sm_state.params)
     assert_array_eq(glm_state.se, sm_state.bse)
@@ -198,8 +133,8 @@ def test_robust_SE_Poisson():
     """
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
-    y = jnp.array(dat["y"])[:, jnp.newaxis]
-    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+    y = jnp.array(dat["y"])
+    library_size = jnp.array(dat["log_offset"])
 
     # test poisson robust
     sm_mod = sm.GLM(
@@ -211,14 +146,12 @@ def test_robust_SE_Poisson():
     white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
 
     jaxqtl_pois = GLM(family=Poisson(), solver=CholeskySolve())
-    init_pois = jaxqtl_pois.family.init_eta(y)
 
     glmstate = jaxqtl_pois.fit(
         M,
         y,
-        init=init_pois,
         offset=library_size,
-        se_estimator=HuberError(),
+        std_err=HuberError(),
     )
 
     assert_array_eq(glmstate.se**2, jnp.diag(white_cov))
@@ -227,20 +160,18 @@ def test_robust_SE_Poisson():
 def test_robust_SE_lm():
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
-    y = jnp.array(dat["y"])[:, jnp.newaxis]
+    y = jnp.array(dat["y"])
 
     # test lm robust
     sm_mod = sm.GLM(np.array(y), np.array(M), family=sm.families.Gaussian()).fit()
     white_cov = statsmodels.stats.sandwich_covariance.cov_white_simple(sm_mod, use_correction=False)
 
     jaxqtl_lm = GLM(family=Gaussian(), solver=CholeskySolve())
-    init_lm = jaxqtl_lm.family.init_eta(y)
 
     glmstate = jaxqtl_lm.fit(
         M,
         y,
-        init=init_lm,
-        se_estimator=HuberError(),
+        std_err=HuberError(),
     )
 
     assert_array_eq(glmstate.se**2, jnp.diag(white_cov))
@@ -253,8 +184,8 @@ def test_NB():
 
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
-    y = jnp.array(dat["y"])[:, jnp.newaxis]
-    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+    y = jnp.array(dat["y"])
+    library_size = jnp.array(dat["log_offset"])
 
     sm_mod = smNB(
         np.array(y),
@@ -269,13 +200,10 @@ def test_NB():
         max_iter=maxiter,
         step_size=stepsize,
     )
-    init_eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M, y, library_size)
     glm_state = jaxqtl_nb.fit(
         M,
         y,
-        init=init_eta,
         offset=library_size,
-        alpha_init=alpha_n.squeeze(),
     )
 
     assert_array_eq(glm_state.disp, sm_alpha, rtol=1e-2)
@@ -289,8 +217,8 @@ def test_NB_robust():
     # test negative binomial
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
-    y = jnp.array(dat["y"])[:, jnp.newaxis]
-    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+    y = jnp.array(dat["y"])
+    library_size = jnp.array(dat["log_offset"])
 
     sm_mod = smNB(
         np.array(y),
@@ -305,48 +233,37 @@ def test_NB_robust():
         max_iter=maxiter,
         step_size=stepsize,
     )
-    init_eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M, y, library_size)
 
-    glm_state_robust = jaxqtl_nb.fit(
-        M,
-        y,
-        init=init_eta,
-        offset=library_size,
-        alpha_init=alpha_n.squeeze(),
-        se_estimator=HuberError(),
-    )
+    glm_state_robust = jaxqtl_nb.fit(M, y, offset=library_size, std_err=HuberError())
 
     assert_array_eq(glm_state_robust.se**2, jnp.diag(white_cov)[:-1], rtol=1e-3)
 
 
 def test_lm_scoretest():
-    jaxqtl_lm = GLM(family=Gaussian(), max_iter=maxiter, step_size=stepsize)
-    init_lm = jaxqtl_lm.family.init_eta(y_arr)
+    jaxqtl_lm = LinearModel(family=Gaussian())
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
 
     # statsmodel result
     sm_glm = sm.GLM(np.array(y_arr), np.array(X_covar), family=sm.families.Gaussian())
     sm_res = sm_glm.fit()
-
-    # print(sm_res.summary())
     chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
-    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
-    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
+    def _get_var(name):
+        return jnp.asarray(spector_data.exog[name])[:, None]
+
+    score_test = ScoreTest(jaxqtl_lm)
+    _, _, pval_GPA, Z_GPA, _, _, _ = score_test(X_covar, _get_var("GPA"), y_arr, 0)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
-
-    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_TUCE, Z_TUCE, _, _, _ = score_test(X_covar, _get_var("TUCE"), y_arr, 0)
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_lm.fit(X_covar, y_arr, init=init_lm)
 
-    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_PSI, Z_PSI, _, _, _ = score_test(X_covar, _get_var("PSI"), y_arr, 0)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
 
@@ -355,9 +272,9 @@ def test_poisson_scoretest():
     R_res = pd.read_csv("./example/data/spector_scoretest_pois_Rres.tsv", sep="\t")
 
     jaxqtl_pois = GLM(family=Poisson(), max_iter=maxiter, step_size=stepsize)
-    init_pois = jaxqtl_pois.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
+    offset = np.log(np.array(offset).squeeze())
 
     # statsmodel result
     sm_glm = sm.GLM(
@@ -371,21 +288,21 @@ def test_poisson_scoretest():
     # print(sm_res.summary())
     chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
-    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
+    def _get_var(name):
+        return jnp.asarray(spector_data.exog[name])[:, None]
+
+    offset = jnp.asarray(offset)
+    score_test = ScoreTest(jaxqtl_pois)
+    _, _, pval_GPA, Z_GPA, _, _, _ = score_test(X_covar, _get_var("GPA"), y_arr, offset)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
-
-    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_TUCE, Z_TUCE, _, _, _ = score_test(X_covar, _get_var("TUCE"), y_arr, offset)
     print(f"Add TUCE variable: pval={pval_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_pois.fit(X_covar, y_arr, init=init_pois, offset=jnp.log(jnp.array(offset)))
-
-    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_PSI, Z_PSI, _, _, _ = score_test(X_covar, _get_var("PSI"), y_arr, offset)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
     pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
@@ -397,7 +314,6 @@ def test_poisson_scoretest():
 def test_bin_scoretest():
     R_res = pd.read_csv("./example/data/spector_scoretest_bin_Rres.tsv", sep="\t")
     jaxqtl_bin = GLM(family=Binomial(), max_iter=maxiter, step_size=stepsize)
-    init_bin = jaxqtl_bin.family.init_eta(y_arr)
 
     X_covar = jnp.array(spector_data.exog.drop("GPA", axis=1))
 
@@ -407,19 +323,20 @@ def test_bin_scoretest():
     # print(sm_res.summary())
     chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=spector_data.exog["GPA"])
 
-    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_GPA, pval_GPA, _, _ = score_test_snp(jnp.array(spector_data.exog["GPA"])[:, jnp.newaxis], X_covar, mod_null)
+    def _get_var(name):
+        return jnp.asarray(spector_data.exog[name])[:, None]
+
+    score_test = ScoreTest(jaxqtl_bin)
+    _, _, pval_GPA, Z_GPA, _, _, _ = score_test(X_covar, _get_var("GPA"), y_arr, 0)
     print(f"Add GPA variable: pval={pval_GPA}, Z={Z_GPA}")
     assert_array_eq(pval_GPA, jnp.array(sm_p), rtol=1e-3)  # check result with statsmodel
 
     X_covar = jnp.array(spector_data.exog.drop("TUCE", axis=1))
-    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_TUCE, pval_TUCE, _, _ = score_test_snp(jnp.array(spector_data.exog["TUCE"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_TUCE, Z_TUCE, _, _, _ = score_test(X_covar, _get_var("TUCE"), y_arr, 0)
     print(f"Add TUCE variable: pval={Z_TUCE}, Z={Z_TUCE}")
 
     X_covar = jnp.array(spector_data.exog.drop("PSI", axis=1))
-    mod_null = jaxqtl_bin.fit(X_covar, y_arr, init=init_bin)
-    Z_PSI, pval_PSI, _, _ = score_test_snp(jnp.array(spector_data.exog["PSI"])[:, jnp.newaxis], X_covar, mod_null)
+    _, _, pval_PSI, Z_PSI, _, _, _ = score_test(X_covar, _get_var("PSI"), y_arr, 0)
     print(f"Add PSI variable: pval={pval_PSI}, Z={Z_PSI}")
 
     pval_vec = jnp.array([pval_GPA[0], pval_TUCE[0], pval_PSI[0]])  # fix shape
@@ -433,8 +350,8 @@ def test_nb_scoretest():
     Rres = pd.read_csv("./example/data/ENSG00000178607_rs74787440.nb.scoretest.tsv", sep="\t")
     dat = pd.read_csv("./example/data/ENSG00000178607_rs74787440.gz", sep="\t")
     M = jnp.array(dat.iloc[:, 0:12])
-    y = jnp.array(dat["y"])[:, jnp.newaxis]
-    library_size = jnp.array(dat["log_offset"])[:, jnp.newaxis]
+    y = jnp.array(dat["y"])
+    library_size = jnp.array(dat["log_offset"])
 
     # print(sm_res.summary())
     M_cov = M[:, 0:-1]
@@ -445,9 +362,7 @@ def test_nb_scoretest():
         solver=CholeskySolve(),
         step_size=stepsize,
     )
-    eta, alpha_n = jaxqtl_nb.calc_eta_and_dispersion(M_cov, y, library_size)
-    glm_state = jaxqtl_nb.fit(M_cov, y, init=eta, offset=library_size, alpha_init=alpha_n)
+    score_test = ScoreTest(jaxqtl_nb)
 
-    Z, pval, _, _ = score_test_snp(M[:, -1][:, jnp.newaxis], M_cov, glm_state)
-
+    _, _, pval, Z, _, _, _ = score_test(M_cov, M[:, -1][:, jnp.newaxis], y, library_size)
     assert_array_eq(Z, Rres["Z"])

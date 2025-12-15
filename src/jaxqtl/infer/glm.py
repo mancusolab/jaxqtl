@@ -133,7 +133,7 @@ class AbstractLinearModel(eqx.Module):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: ErrVarEstimation = FisherInfoError(),
-    ):
+    ) -> GLMState:
         pass
 
 
@@ -157,21 +157,21 @@ class LinearModel(AbstractLinearModel):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: ErrVarEstimation = FisherInfoError(),
-    ):
-        beta, n_iter, converged, disp = lstsq(X, y - offset, self.solver)
+    ) -> GLMState:
+        beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
+        df = jnp.maximum(X.shape[0] - X.shape[1], 1)
 
         mu = X @ beta
         eta = mu
         resid = y - mu - offset  # note: this is the working resid
+        disp = jnp.sum(resid**2) / df
 
         weight = 1.0 / disp
 
         resid_covar = std_err(self.family, X, y, eta, mu, weight, disp)
         beta_se = jnp.sqrt(jnp.diag(resid_covar))
 
-        df = jnp.maximum(X.shape[0] - X.shape[1], 1)
         stat = beta / beta_se
-
         pval_wald = 2 * t_cdf(-jnp.abs(stat), df)
 
         return GLMState(
@@ -191,7 +191,7 @@ class LinearModel(AbstractLinearModel):
         )
 
 
-class GLM(eqx.Module):
+class GLM(AbstractLinearModel):
     """
     Generalized Linear Model class. This encapsulates the core logic for representing a GLM (ie family and solver).
     """
