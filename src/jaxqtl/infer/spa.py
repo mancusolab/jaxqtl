@@ -191,6 +191,7 @@ def saddlepoint_pvalue(
     This version ensures that either a two-sided SPA or a two-sided Normal approximation is used,
     and includes debug prints for comparison.
     """
+    is_discrete = isinstance(cgf, (PoissonCGF, NegativeBinomialCGF))
 
     # Convert inputs to JAX arrays
     g_resid = jnp.asarray(g_resid, dtype=float)
@@ -243,11 +244,14 @@ def saddlepoint_pvalue(
         (K_val, K_p), (_, K_pp) = jax.jvp(_closure, (t_bar,), (1.0,))
 
         # for numerical reasons we may have negatives, so push up to a tiny value
-        under_radical = jnp.maximum(2 * (t_bar * current_score - K_val), 1e-16)
+        under_radical = 2 * (t_bar * current_score - K_val)
         w = jnp.sign(t_bar) * jnp.sqrt(under_radical)
-        v = t_bar * jnp.sqrt(K_pp)
 
-        # Lugannani-Rice formula
+        # if we're in the discrete setting, use continuity adjustment
+        scale_factor = -jnp.expm1(-t_bar) if is_discrete else t_bar
+        v = scale_factor * jnp.sqrt(K_pp)
+
+        # Barndorff-Neilsen formula for right tail probabilities
         # we can get diff 'bad' results depending on ratio being 0 (-inf) or negative (nan)
         # so just bottom out to 'nan' here
         ratio = v / w
@@ -268,13 +272,14 @@ def saddlepoint_pvalue(
         return t_result_lower, t_result_upper, t_result_symm, is_successful
 
     def compute_spa_p_value(_):
-        log_tail_lower, log_tail_upper, log_tail_symm, is_successful = _spa(score)
+        ascore = jnp.abs(score)
+        _, log_upper_pos, log_tail_symm, is_successful = _spa(ascore)
         if two_sided_mode == "rstar":
             spa_result = log_tail_symm
         else:
-            log_lower_neg, log_upper_neg, _, ok_neg = _spa(-score)
+            log_lower_neg, _, _, ok_neg = _spa(-ascore)
             is_successful = is_successful & ok_neg
-            log_tails = jnp.array([log_tail_upper, log_lower_neg])
+            log_tails = jnp.array([log_upper_pos, log_lower_neg])
             if two_sided_mode == "abs":
                 spa_result = logsumexp(log_tails)
             elif two_sided_mode == "2min":

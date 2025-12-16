@@ -202,7 +202,7 @@ class SpaTest(HypothesisTest):
         spa_g_resid = g_resid * (wgt * gprime)[:, jnp.newaxis]
 
         def _pval(args, idx):
-            pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, cgf_state)
+            pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, cgf_state, two_sided_mode="abs")
             return args, pv
 
         _, gupval = lax.scan(_pval, 0.0, jnp.arange(G.shape[1]))
