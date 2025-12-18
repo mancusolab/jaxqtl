@@ -308,8 +308,8 @@ def _cis_scan(args, log):
     log.info("Starting cis-scan.")
     df_cis = map_cis(
         dat,
-        test=test,
-        perm_test=perm_test,
+        snp_test=test,
+        gene_test=perm_test,
         mode="cis",
         window=args.window,
         verbose=args.verbose,
@@ -339,8 +339,8 @@ def _nominal_scan(args, log):
     log.info("Starting nominal cis-scan.")
     df_nominal = map_cis(
         dat,
-        test=test,
-        perm_test=perm_test,
+        snp_test=test,
+        gene_test=perm_test,
         mode="nominal",
         window=args.window,
         verbose=args.verbose,

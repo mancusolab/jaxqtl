@@ -1,5 +1,5 @@
 from logging import Logger
-from typing import Any, Literal, Optional
+from typing import Any, Literal
 
 import numpy as np
 import polars as pl
@@ -19,9 +19,7 @@ from ..log import get_log
 
 
 class _ResultsAggregator:
-    """
-    Single internal class to unify dealing with cis results or nominal results
-    """
+    """Accumulate per-gene or per-variant result frames into a single DataFrame."""
 
     def __init__(self):
         self.frames: list = []
@@ -39,31 +37,30 @@ class _ResultsAggregator:
 
 def map_cis(
     data: ReadyDataState,
-    test: HypothesisTest,
-    perm_test: AbstractAggregateTest,
+    snp_test: HypothesisTest,
+    gene_test: AbstractAggregateTest,
     mode: Literal["cis", "nominal"] = "cis",
     window: int = 500_000,
     verbose: bool = True,
-    log: Optional[Logger] = None,
+    log: Logger | None = None,
     seed: int = 123,
 ) -> pl.DataFrame:
-    """Cis eQTL mapping for each gene, report lead variant
+    r"""Run cis or nominal eQTL mapping per gene and return summary statistics.
 
-    Run cis-eQTL mapping by fitting specified GLM model, such as Poisson and Negative Binomial.
-    To test association between each SNP and gene expression, choose either score test (much faster) or
-    wald test.
-    For each gene, calculate the corrected p value using permutation to estimate the null distribution of
-    minimum p values.
+    **Arguments:**
 
-    :param data: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
-    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
-    :param test: approach for hypothesis test, default to ScoreTest()
-    :param window: window size (bp) of one side for cis scope, default to 500000,
-        meaning in total 1Mb from left to right
-    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
-    :param log: logger for QTL progress
-    :param seed: seed for permutation, default to 123
-    :return: data frame of QTL mapping results
+    - `data`: Genotype/expression/covariate bundle aligned on IID.
+    - `snp_test`: Hypothesis test to apply per variant (score or Wald).
+    - `gene_test`: Gene-level multiple testing adjustment for the cis mode.
+    - `mode`: `"cis"` (per-gene lead SNP with multiple testing adjustment) or `"nominal"` (all variant stats).
+    - `window`: Cis window size in base pairs on each side of a gene TSS/stop.
+    - `verbose`: Whether to emit progress logging.
+    - `log`: Optional logger to use; defaults to module logger.
+    - `seed`: PRNG seed for permutation and tie-breaking.
+
+    **Returns:**
+
+    A `pl.DataFrame` of concatenated cis or nominal results.
     """
     if log is None:
         log = get_log()
@@ -93,20 +90,23 @@ def map_cis(
             log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         if mode == "cis":
+            # cis-mode tests each variant, and then performs either permutations or ACAT to compute a gene-level
+            # calibrated p-value
             key, p_key, s_key = rdm.split(key, 3)
             test_result, perm_result = map_cis_single(
                 cis_data.X,
                 cis_data.G,
                 cis_data.y,
                 cis_data.offset,
-                test,
-                perm_test,
+                snp_test,
+                gene_test,
                 p_key,
             )
             result = _process_cis_result(cis_data, test_result, perm_result, s_key)
             results.add_row(result)
         else:
-            test_result = eqx.filter_jit(test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
+            # nominal mode only performs variant-level testing
+            test_result = eqx.filter_jit(snp_test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
             result = _process_nominal_result(cis_data, test_result)
             results.add_df(result)
 
@@ -123,7 +123,7 @@ def map_cis(
 
     # if we didn't fit a negative binomial, just drop the alpha column as its const 0
     # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
-    if not isinstance(test.model.family, NegativeBinomial):
+    if not isinstance(snp_test.model.family, NegativeBinomial):
         result_df = result_df.drop("nb_alpha")
 
     return result_df
@@ -135,13 +135,29 @@ def map_cis_single(
     G: ArrayLike,
     y: ArrayLike,
     offset: ArrayLike,
-    test: HypothesisTest,
-    perm: AbstractAggregateTest,
+    snp_test: HypothesisTest,
+    gene_test: AbstractAggregateTest,
     key: PRNGKeyArray,
 ) -> tuple[TestResult, PermutationResult]:
-    """Fit GLM, perform hypothesis testing for each variant, and then compute gene-level adjustment of p-values"""
-    test_result = test(X, G, y, offset)
-    perm_result = perm(X, G, y, offset, test_result, test, key)
+    r"""Fit GLM, test variants, and compute gene-level permutation adjustment.
+
+    **Arguments:**
+
+    - `X`: Covariate matrix of shape ``(n, p)``.
+    - `G`: Genotype matrix of shape ``(n, m)``.
+    - `y`: Response vector of length ``n``.
+    - `offset`: Offset vector broadcastable to ``y``.
+    - `test`: Hypothesis test callable producing per-variant statistics.
+    - `perm`: Aggregate permutation test for multiple-testing correction.
+    - `key`: PRNG key for permutation randomness.
+
+    **Returns:**
+
+    Per-variant stats plus permutation-adjusted p-values as a tuple of
+        ([`jaxqtl.TestResult`][], [`jaxqtl.PermutationResult`][]).
+    """
+    test_result = snp_test(X, G, y, offset)
+    perm_result = gene_test(X, G, y, offset, test_result, snp_test, key)
 
     return test_result, perm_result
 

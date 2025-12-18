@@ -1,5 +1,5 @@
+from collections.abc import Iterator
 from dataclasses import dataclass
-from typing import Iterator, Optional
 
 import numpy as np
 import polars as pl
@@ -14,6 +14,8 @@ from .pheno import ExpressionData
 
 
 class SNPInfo(eqx.Module):
+    """Container for cis-variant metadata used in mapping results."""
+
     id: str
     pos: int
     a1: str
@@ -24,6 +26,8 @@ class SNPInfo(eqx.Module):
 
 
 class CisData(eqx.Module):
+    """Batch of genotype/phenotype data for a single gene-level cis window."""
+
     # individual-level info
     X: Array
     G: Array
@@ -45,10 +49,12 @@ class CisData(eqx.Module):
 
     @property
     def num_snps(self) -> int:
+        """Number of SNPs present in the cis-genotype matrix."""
         num_snp = 0 if self.G is None else self.G.shape[1]
         return num_snp
 
     def get_af_summary(self, idx: int) -> tuple[Array, Array]:
+        """Compute allele frequency and minor allele count for a single variant."""
         g = self.G[:, idx]
         n = len(g)
         counts = jnp.sum(g, axis=0)  # count REF allele
@@ -59,6 +65,7 @@ class CisData(eqx.Module):
         return af, ma_counts
 
     def get_snp_info(self, idx: int) -> SNPInfo:
+        """Return SNPInfo for a variant at the provided column index."""
         af, ma_count = self.get_af_summary(idx)
         # chrom, snp, cm, pos, a0, a1, index
         _, snp_id, _, snp_pos, a0, a1, _ = self.cis_info.row(idx)
@@ -66,6 +73,7 @@ class CisData(eqx.Module):
         return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
 
     def get_cis_info(self) -> pl.DataFrame:
+        """Return cis variant information augmented with AF and minor allele counts."""
         n, p = self.G.shape
         counts = jnp.sum(self.G, axis=0)  # count REF allele
         af = counts / (2.0 * n)
@@ -82,6 +90,8 @@ class CisData(eqx.Module):
 
 @dataclass
 class ReadyDataState:
+    """Aligned genotype, expression, covariates, and offsets ready for mapping."""
+
     genotype: GenotypeData  # sample x genes
     expression: ExpressionData
     covar: Array  # sample x covariates
@@ -89,9 +99,11 @@ class ReadyDataState:
 
     @property
     def num_genes(self) -> int:
+        """Number of phenotypes available after alignment."""
         return self.expression.pheno_meta.height
 
     def iter_cis(self, window: int) -> Iterator[CisData]:
+        """Iterate over genes and yield per-gene cis windows with matched genotype."""
         for data in self.expression:
             y, gene_name, chrom, gene_start, gene_end = data
             start = max(0, gene_start - window)
@@ -108,6 +120,7 @@ class ReadyDataState:
         return
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        """Yield genotype blocks and metadata in chunks."""
         yield from self.genotype.iter_geno(chunk_size)
 
     @classmethod
@@ -116,8 +129,9 @@ class ReadyDataState:
         genotype: GenotypeData,
         expression: ExpressionData,
         covar: pl.DataFrame,
-        offset: Optional[pl.DataFrame] = None,
+        offset: pl.DataFrame | None = None,
     ) -> "ReadyDataState":
+        """Align genotype, expression, covariates, and optional offset on IID and return a ReadyDataState."""
         dfs = [genotype.sample_info, expression.pheno, covar]
         if offset is not None:
             dfs.append(offset)
@@ -157,8 +171,9 @@ class ReadyDataState:
 def align_pheno_covar(
     pheno: pl.LazyFrame,
     covar: pl.LazyFrame,
-    offset: Optional[pl.LazyFrame] = None,
+    offset: pl.LazyFrame | None = None,
 ):
+    """Align phenotype, covariate, and optional offset LazyFrames on shared IIDs."""
     # store this once to avoid typos etc
     IID = "iid"
     iid_col = pl.col(IID)
@@ -183,6 +198,7 @@ def align_on_iid(
     dfs: list[pl.DataFrame],
     iid_col: str = "iid",
 ) -> list[pl.DataFrame]:
+    """Align multiple DataFrames on a shared IID column, preserving the order of the first frame."""
     # first df determines final ordering (minus dropped iids)
     base_iids = dfs[0].get_column(iid_col).to_list()
 

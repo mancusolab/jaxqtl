@@ -7,7 +7,7 @@ from collections import defaultdict
 from dataclasses import dataclass
 from functools import partial
 from os import PathLike
-from typing import Any, Literal, Optional, Union
+from typing import Any, Literal
 
 import decoupler as dc
 import numpy as np
@@ -32,23 +32,29 @@ from .utils import validate_user_columns
 
 @dataclass
 class ExpressionData:
+    """Phenotype matrix plus gene-level metadata and library sizes."""
+
     pheno: pl.DataFrame
     pheno_meta: pl.DataFrame
     libsize: pl.DataFrame
 
     def __iter__(self):
+        """Yield expression values and genomic metadata for each phenotype."""
         for chrom, start, end, gene in self.pheno_meta.iter_rows():
             expr = self.pheno.get_column(gene).to_jax().astype(float)  # ug i dont like this casting
             yield expr, gene, chrom, start, end
 
     def to_jax(self):
+        """Return expression values as a JAX array (samples x phenotypes)."""
         return self.pheno.select(pl.all().exclude("iid")).to_jax().astype(float)  # ug i dont like this casting
 
     @property
     def offset_from_libsize(self) -> pl.DataFrame:
+        """Compute log library size offsets."""
         return self.libsize.with_columns(pl.col("libsize").log().alias("offset")).select(["iid", "offset"])
 
     def filter_genes_by_percentage(self, express_percent: float) -> "ExpressionData":
+        """Keep genes expressed in more than `express_percent` of samples."""
         if not (0 <= express_percent <= 1):
             raise ValueError("`express_percent` must be between 0 and and 1")
         col_means = (
@@ -64,6 +70,7 @@ class ExpressionData:
         return ExpressionData(pheno=pheno, pheno_meta=meta, libsize=self.libsize)
 
     def filter_individuals_by_percentage(self, express_percent: float) -> "ExpressionData":
+        """Keep samples expressing more than `express_percent` of genes."""
         if not (0 <= express_percent <= 1):
             raise ValueError("`express_percent` must be between 0 and and 1")
 
@@ -79,8 +86,9 @@ class ExpressionData:
         self,
         num_pcs: int,
         rng_key: PRNGKeyArray,
-        transform: Optional[Literal["log1p", "tmm"]] = None,
+        transform: Literal["log1p", "tmm"] | None = None,
     ) -> pl.DataFrame:
+        """Compute PCA scores from expression data with optional transformation."""
         if num_pcs < 1:
             raise ValueError("`num_pcs` must be greater than 0")
 
@@ -108,12 +116,13 @@ class ExpressionData:
     @classmethod
     def from_bedfile(
         cls,
-        path_or_filename: Union[str, PathLike],
-        keep_individuals: Optional[list[str]] = None,
-        drop_individuals: Optional[list[str]] = None,
-        keep_pheno: Optional[list[str]] = None,
-        drop_pheno: Optional[list[str]] = None,
+        path_or_filename: str | PathLike,
+        keep_individuals: list[str] | None = None,
+        drop_individuals: list[str] | None = None,
+        keep_pheno: list[str] | None = None,
+        drop_pheno: list[str] | None = None,
     ):
+        """Load expression, metadata, and library size information from a BED-like file."""
         if keep_individuals and drop_individuals:
             raise ValueError("Cannot specify both `keep_individuals` and `drop_individuals`")
         if keep_pheno and drop_pheno:
@@ -230,7 +239,7 @@ class SingleCellFilter:
     celltype_col: str = "cell_type"
     mt_col: str = "percent.mt"
     geneid_col: str = "ensemble_id"
-    layer: Optional[str] = None  # which layer to perform
+    layer: str | None = None  # which layer to perform
     min_cells: int = 3
     min_genes: int = 200
     max_genes: int = 2500  # can decide this based on plotting
@@ -244,18 +253,22 @@ class SingleCellFilter:
 
 
 class PhenoIO(eqx.Module):
-    """Read genotype or count data from different file format"""
+    """Interface for reading and processing phenotype data."""
 
     @abstractmethod
     def __call__(self, pheno_path: str):
+        """Load raw phenotype data from a backend-specific path."""
         pass
 
     @abstractmethod
     def process(self, dat: Any, filter_opt=SingleCellFilter) -> pd.DataFrame:
+        """Process raw phenotype data and return a tabular representation."""
         pass
 
 
 class H5AD(PhenoIO):
+    """PhenoIO implementation for single-cell H5AD inputs."""
+
     def __call__(self, pheno_path: str):
         """Read raw count file in H5AD format"""
         return sc.read_h5ad(pheno_path)
@@ -265,7 +278,7 @@ class H5AD(PhenoIO):
         dat: AnnData,
         filter_opt=SingleCellFilter,
         divide_size_factor: bool = False,
-        norm_fix_L: Optional[int] = None,
+        norm_fix_L: int | None = None,
     ) -> pd.DataFrame:
         """Filter single cell data and create pseudo-bulk
         dat.X: n_obs (cell) x n_vars (genes)
@@ -329,8 +342,8 @@ class H5AD(PhenoIO):
         filter_opt=SingleCellFilter,
         gtf_bed_path: str = "../example/data/Homo_sapiens.GRCh37.87.bed.gz",
         out_dir: str = "../example/local/phe_bed",
-        celltype_path: Optional[str] = None,
-        suffix: Optional[str] = None,
+        celltype_path: str | None = None,
+        suffix: str | None = None,
         autosomal_only: bool = True,
     ):
         """After creating pseudo-bulk using process(), create bed file for each cell type"""
@@ -577,6 +590,7 @@ def edger_calcnormfactors(
 
 
 def inverse_normal_transform(pheno):
+    """Apply inverse normal transform across observations."""
     r = jsp_stats.rankdata(pheno)
     return jsp_stats.norm.ppf(r / (pheno.shape[0] + 1))
 

@@ -2,12 +2,12 @@ import gzip
 import re
 
 from os import PathLike
-from typing import Optional, Union
 
 import polars as pl
 
 
 def validate_user_columns(user_cols, observed_cols) -> list[str]:
+    """Validate user-specified column names or indices against observed columns."""
     # drop any duplicates and convert back to list
     user_cols = list(set(user_cols))
 
@@ -34,9 +34,9 @@ def validate_user_columns(user_cols, observed_cols) -> list[str]:
 
 
 def read_plink_style_tsvlike(
-    path_or_filename: Union[str, PathLike],
-    keep_columns: Optional[Union[list[str], list[int]]] = None,
-    drop_columns: Optional[Union[list[str], list[int]]] = None,
+    path_or_filename: str | PathLike,
+    keep_columns: list[str] | list[int] | None = None,
+    drop_columns: list[str] | list[int] | None = None,
 ) -> pl.DataFrame:
     """
     Helper function to read in a phenotype or covariate file. Allows for an optional list of column names or column
@@ -107,9 +107,10 @@ def read_plink_style_tsvlike(
 
 
 def read_offset_tsvlike(
-    path_or_filename: Union[str, PathLike],
-    column: Optional[Union[str, int]] = None,
+    path_or_filename: str | PathLike,
+    column: str | int | None = None,
 ) -> pl.DataFrame:
+    """Read an offset file with an IID column and a single numeric offset column."""
     if column is not None:
         if not isinstance(column, (str, int)):
             raise ValueError(f"Column must be of type `str` or `int`, if not `None`. Found {type(column)}.")
@@ -130,8 +131,9 @@ def read_offset_tsvlike(
 
 
 def read_single_column_file(
-    path_or_filename: Union[str, PathLike],
+    path_or_filename: str | PathLike,
 ) -> list:
+    """Read a newline-delimited single-column text (optionally gzipped) into a list."""
     output = []
     open_f = gzip.open if str(path_or_filename).endswith(".gz") else open
 

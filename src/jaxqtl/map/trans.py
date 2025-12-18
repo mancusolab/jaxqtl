@@ -1,7 +1,7 @@
 import itertools as itt
 
+from collections.abc import Iterator
 from logging import Logger
-from typing import Iterator, Optional
 
 import numpy as np
 import polars as pl
@@ -21,10 +21,22 @@ def map_trans(
     test: HypothesisTest,
     chunk_size: int = 5000,
     verbose: bool = True,
-    log: Optional[Logger] = None,
+    log: Logger | None = None,
     seed: int = 123,
 ) -> Iterator[tuple[pl.DataFrame, pl.DataFrame]]:
-    """ """
+    r"""Perform trans-eQTL mapping in genotype chunks and stream results.
+
+    **Arguments:**
+    - `data`: Genotype/expression/covariate bundle aligned on IID.
+    - `test`: Hypothesis test to apply per variant (score or Wald).
+    - `chunk_size`: Number of variants per block to stream from genotype storage.
+    - `verbose`: Whether to emit progress logging.
+    - `log`: Optional logger to use; defaults to module logger.
+    - `seed`: PRNG seed reserved for future stochastic operations.
+
+    **Returns:**
+    - `Iterator[tuple[pl.DataFrame, pl.DataFrame]]`: `(variant_df, sumstat_df)` pairs per genotype block.
+    """
     if log is None:
         log = get_log()
 
@@ -72,7 +84,7 @@ def map_trans(
 
 
 def _process_result(geno_chunk, region_df, test_result, pheno_ids):
-    # TODO: NOT FINISHED
+    """Format per-chunk test results into variant- and summary-level frames."""
     n, p = geno_chunk.shape
     counts = jnp.sum(geno_chunk, axis=0)
     af = counts / (2.0 * n)
@@ -114,6 +126,11 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
 
 
 def get_trans_schemas() -> tuple[dict[str, type], dict[str, type]]:
+    """Return expected Polars schema dictionaries for trans mapping outputs.
+
+    **Returns:**
+    - `tuple[dict[str, type], dict[str, type]]`: Variant schema and summary-stat schema.
+    """
     var_schema = {
         "chrom": str,
         "snp": str,

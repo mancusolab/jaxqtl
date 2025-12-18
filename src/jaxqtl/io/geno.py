@@ -1,7 +1,8 @@
 import warnings
 
 from abc import abstractmethod
-from typing import Any, cast, Iterator, Literal, NamedTuple
+from collections.abc import Iterator
+from typing import Any, cast, Literal, NamedTuple
 
 import numpy as np
 import pandas as pd
@@ -18,6 +19,7 @@ from jaxtyping import Array
 
 
 def _impute_geno(geno, bim, fam):
+    """Drop monomorphic/all-missing variants and impute remaining missing calls with column means."""
     # to make sure that the bim index is continuous
     bim = bim.reset_index(drop=True)
     # if we observe SNPs have nan value for all participants (although not likely), drop them
@@ -38,13 +40,15 @@ def _impute_geno(geno, bim, fam):
 
 
 class GenoState(NamedTuple):
+    """Tuple of genotypes with variant and sample metadata."""
+
     genotype: Array
     bim: pd.DataFrame
     fam: pd.DataFrame
 
 
 class GenotypeData(eqx.Module):
-    """Read genotype or count data from different file format"""
+    """Interface for reading and querying genotype data across backends."""
 
     genotype: eqx.AbstractVar[Any]
     sample_info: eqx.AbstractVar[pl.DataFrame]
@@ -53,18 +57,22 @@ class GenotypeData(eqx.Module):
     @classmethod
     @abstractmethod
     def load(cls, prefix: str) -> "GenotypeData":
+        """Load genotype data from a backend-specific prefix."""
         ...
 
     @abstractmethod
     def replace_individuals(self, sample_info: pl.DataFrame) -> "GenotypeData":
+        """Return a copy of the dataset with updated sample information."""
         ...
 
     @abstractmethod
     def query_cis(self, chrom: str, start: int, end: int) -> tuple[Array, pl.DataFrame]:
+        """Extract genotypes and variant metadata for a chromosome interval."""
         ...
 
     @abstractmethod
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        """Yield genotype blocks and variant metadata in fixed-size chunks."""
         ...
 
 
@@ -90,6 +98,7 @@ class PlinkData(GenotypeData):
 
     @classmethod
     def load(cls, prefix: str):
+        """Load PLINK genotype triplets (bed/bim/fam) from a prefix."""
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         with warnings.catch_warnings(action="ignore", category=FutureWarning):
             bim, fam, bed = read_plink(prefix, verbose=False)
@@ -99,6 +108,7 @@ class PlinkData(GenotypeData):
         return PlinkData(genotype, sample_info, variant_info)
 
     def filter_individuals(self, individuals: list[str], how: Literal["keep", "drop"]):
+        """Keep or drop individuals by IID, returning a new PlinkData object."""
         if how not in ["keep", "drop"]:
             raise ValueError("`how` must be have value of 'keep' or 'drop'")
 
@@ -108,9 +118,11 @@ class PlinkData(GenotypeData):
         return PlinkData(self.genotype, subset, self.variant_info)
 
     def replace_individuals(self, sample_info: pl.DataFrame):
+        """Return a copy of the dataset with a new sample_info frame."""
         return PlinkData(self.genotype, sample_info, self.variant_info)
 
     def query_cis(self, chrom: str, start: int, end: int) -> tuple[Array, pl.DataFrame]:
+        """Subset genotypes and variant metadata within a chromosome window."""
         # subset cis variants
         cis_var_info = self.variant_info.filter(
             (pl.col("chrom") == str(chrom)) & (pl.col("pos") >= start) & (pl.col("pos") <= end)
@@ -131,6 +143,7 @@ class PlinkData(GenotypeData):
         return geno, cis_var_info
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
+        """Iterate over variant blocks of roughly `chunk_size` and yield aligned genotypes."""
         if chunk_size < 1:
             raise ValueError("`chunk_size` must be positive")
 
@@ -153,6 +166,8 @@ class PlinkData(GenotypeData):
 
 
 class VCFData(GenotypeData):
+    """Genotype reader for VCF inputs."""
+
     def __call__(self, vcf_path: str) -> GenoState:
         """read genotype from VCF file
         Note: slower than PlinkReader()
