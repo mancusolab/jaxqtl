@@ -119,12 +119,9 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
     def cgf(self, t: Array, state: NegBinCGFState) -> Array:
-        term = 1 - (state.pred_mean / state.r) * jnp.expm1(t)
+        term = -(state.pred_mean / state.r) * jnp.expm1(t)
 
-        # Ensure the term is positive to avoid taking log of zero or negative numbers
-        term = jnp.maximum(term, 1e-16)
-
-        return jspec.xlogy(-state.r, term)
+        return jspec.xlog1py(-state.r, term)
 
     def get_t_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
         """Compute t boundaries for saddlepoint approximation under Negative Binomial."""
@@ -202,10 +199,14 @@ def saddlepoint_pvalue(
     t_bounds = cgf.get_t_bounds(g_resid, state)
     score_bounds = cgf.get_score_bounds(g_resid, state)
 
+    # pre-compute offset due to covariates, etc
+    offset = g_resid.T @ state.pred_mean
+
     # Our score function
     @eqx.filter_value_and_grad
     def _closure(t):
-        return jnp.sum(cgf((t * scale) * g_resid, state)) - t * scale * (g_resid.T @ state.pred_mean)
+        rescale = t * scale
+        return jnp.sum(cgf(rescale * g_resid, state)) - rescale * offset
 
     # Wrapper around score function for root-finding
     def _fn(t, args):

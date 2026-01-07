@@ -80,7 +80,7 @@ def map_trans(
         if verbose:
             log.info(f"Finished trans-qtl scan for over region {chrom}:{lstart}-{rend}")
 
-    return
+    return None
 
 
 def _process_result(geno_chunk, region_df, test_result, pheno_ids):

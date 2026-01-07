@@ -69,7 +69,7 @@ class WaldTest(HypothesisTest):
     _is_linear: bool = eqx.field(static=True, init=False)
 
     def __post_init__(self):
-        _is_linear = isinstance(self.model.family, Gaussian)
+        self._is_linear = isinstance(self.model.family, Gaussian)
 
     def test(
         self,

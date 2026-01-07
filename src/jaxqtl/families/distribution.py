@@ -1,5 +1,5 @@
 from abc import abstractmethod
-from typing import ClassVar, Tuple, Type
+from typing import ClassVar
 
 import equinox as eqx
 import jax.debug
@@ -27,7 +27,7 @@ class ExponentialFamily(eqx.Module):
     """
 
     glink: Link
-    _links: ClassVar[list[Type[Link]]]
+    _links: ClassVar[list[type[Link]]]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def __check_init__(self):
@@ -53,7 +53,7 @@ class ExponentialFamily(eqx.Module):
         y: ArrayLike,
         eta: ArrayLike,
         disp: ScalarLike = 0.0,
-    ) -> Tuple[Array, Array, Array]:
+    ) -> tuple[Array, Array, Array]:
         """
         weight for each observation in IRLS
         weight_i = 1 / (V(mu_i) * phi * g'(mu_i)**2)
@@ -100,7 +100,7 @@ class Gaussian(ExponentialFamily):
     """
 
     glink: Link = Identity()
-    _links: ClassVar[list[Type[Link]]] = [Identity, Log, Power]
+    _links: ClassVar[list[type[Link]]] = [Identity, Log, Power]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -149,7 +149,7 @@ class Gamma(ExponentialFamily):
     """
 
     glink: Link = Inverse()
-    _links: ClassVar[list[Type[Link]]] = [Identity, Inverse, Log]
+    _links: ClassVar[list[type[Link]]] = [Identity, Inverse, Log]
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -183,7 +183,7 @@ class Binomial(ExponentialFamily):
     """
 
     glink: Link = Logit()
-    _links: ClassVar[list[Type[Link]]] = [
+    _links: ClassVar[list[type[Link]]] = [
         Logit,
         Log,
         Identity,
@@ -216,7 +216,7 @@ class Binomial(ExponentialFamily):
 
 class Poisson(ExponentialFamily):
     glink: Link = Log()
-    _links: ClassVar[list[Type[Link]]] = [Identity, Log]  # Sqrt
+    _links: ClassVar[list[type[Link]]] = [Identity, Log]  # Sqrt
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -244,7 +244,7 @@ class NegativeBinomial(ExponentialFamily):
     """
 
     glink: Link = Log()
-    _links: ClassVar[list[Type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
+    _links: ClassVar[list[type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
@@ -268,7 +268,7 @@ class NegativeBinomial(ExponentialFamily):
 
     def _log_alpha_score_and_hessian(
         self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ScalarLike
-    ) -> Tuple[Array, Array]:
+    ) -> tuple[Array, Array]:
         """
         internally take exponential such as to take derivative wrt 1/alpha
         """
@@ -295,7 +295,7 @@ class NegativeBinomial(ExponentialFamily):
         # which could enable Riemannian optimization, but this is fine for now...
         log_alpha = jnp.log(disp)
         score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
-        log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-8), jnp.log(1e10))
+        log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-9), jnp.log(1e9))
 
         return jnp.exp(log_alpha_n)
 
@@ -310,7 +310,7 @@ class NegativeBinomial(ExponentialFamily):
         max_iter=1000,
         offset_eta=0.0,
     ) -> Array:
-        def body_fun(val: Tuple):
+        def body_fun(val: tuple):
             diff, num_iter, alpha_o = val
             log_alpha_o = jnp.log(alpha_o)
             score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha_o)
@@ -319,7 +319,7 @@ class NegativeBinomial(ExponentialFamily):
 
             return diff, num_iter + 1, jnp.exp(log_alpha_n)
 
-        def cond_fun(val: Tuple):
+        def cond_fun(val: tuple):
             diff, num_iter, alpha_o = val
             cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
             return cond_l

@@ -65,6 +65,9 @@ def map_cis(
     if log is None:
         log = get_log()
 
+    if mode not in ["cis", "nominal"]:
+        raise ValueError("`mode` must be 'cis' or 'nominal'")
+
     key = rdm.key(seed)
     results = _ResultsAggregator()
     for i, cis_data in enumerate(data.iter_cis(window)):

@@ -267,7 +267,7 @@ def _create_common_subp(subp, name, help):
 def _compute_expression_pcs(args, log):
     log.info("Reading phenotype and filtering")
     expr_data = ExpressionData.from_bedfile(args.pheno)
-    expr_data = expr_data.filter_genes_by_percentage(args.min_express_percent)
+    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
 
     # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
     # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
@@ -318,7 +318,7 @@ def _cis_scan(args, log):
     )
     if args.q_value:
         log.info("Computing q-values")
-        p_values = df_cis.get_column("pval_adj").to_numpy()
+        p_values = df_cis.get_column("pvalue_adj").to_numpy()
         q_values, pi0 = calculate_qval(p_values, log)
         df_cis = df_cis.with_columns(pl.Series("qval", q_values))
 
@@ -477,7 +477,7 @@ def _common_setup(args, log):
     if args.exclude is not None:
         log.info("Reading list of samples to exclude from analyses.")
         inds_to_exclude = read_single_column_file(args.exclude)
-        log.info(f"Found {len(inds_to_keep)} samples to exclude.")
+        log.info(f"Found {len(inds_to_exclude)} samples to exclude.")
     else:
         inds_to_exclude = None
 
@@ -547,9 +547,9 @@ def _common_setup(args, log):
     elif args.offset_name_from_covar:
         if covar is None:
             raise ValueError("Covariate file must be provided if `--offset-name-from-covar` is specified.")
-        offset = covar.select(pl.col("iid"), pl.col(args.offset_name))
+        offset = covar.select(pl.col("iid"), pl.col(args.offset_name_from_covar))
         # drop the offset from the covariates data
-        covar = covar.drop(args.offset_name)
+        covar = covar.drop(args.offset_name_from_covar)
     elif args.set_offset_from_libsize:
         offset = expr_data.offset_from_libsize
     else:
