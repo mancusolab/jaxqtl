@@ -1,4 +1,4 @@
-from typing import NamedTuple, Tuple
+from typing import NamedTuple
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -49,10 +49,10 @@ def irls(
     """
     n, p = X.shape
 
-    def body_fun(val: Tuple):
+    def body_fun(val: tuple):
         likelihood_o, diff, num_iter, beta_o, eta_o, disp_o = val
 
-        mu_k, g_deriv_k, weight = family.calc_weight(X, y, eta_o, disp_o)
+        mu_k, g_deriv_k, weight = family.calc_weight(eta_o, disp_o)
         r = eta_o + g_deriv_k * (y - mu_k) * step_size - offset
 
         beta = solver.wgt_lstsq(X, r, weight)
@@ -65,7 +65,7 @@ def irls(
 
         return likelihood_n, diff, num_iter + 1, beta, eta_n, alpha_n
 
-    def cond_fun(val: Tuple):
+    def cond_fun(val: tuple):
         likelihood_o, diff, num_iter, beta, eta, disp = val
         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
         return cond_l
@@ -123,7 +123,7 @@ def infer_beta_params(
     def loglik(params, p: ArrayLike) -> Array:
         return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
 
-    def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> Tuple[Array, Array]:
+    def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> tuple[Array, Array]:
         """
         We compute the FIM under the Beta(k, n) distribution as well as the Christoffel symbols of the 2nd kind.
         We use the christoffel symbols to perform a 2nd-order natural gradient approach which keeps us on the positive
@@ -168,7 +168,7 @@ def infer_beta_params(
 
     score_fn = grad(loglik)
 
-    def body_fun(val: Tuple):
+    def body_fun(val: tuple):
         old_lik, diff, num_iter, old_param = val
         # first order approx to RGD => NGD
         # direction = NatGrad
@@ -184,7 +184,7 @@ def infer_beta_params(
 
         return new_lik, diff, num_iter + 1, new_param
 
-    def cond_fun(val: Tuple):
+    def cond_fun(val: tuple):
         old_lik, diff, num_iter, old_param = val
         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
         return cond_l

@@ -369,9 +369,10 @@ def _trans_scan(args, log):
     test_str = test.name
     var_out = f"{args.out}.trans.{test_str}.variant.info.parquet.gz"
     stats_out = f"{args.out}.trans.{test_str}.sumstats.parquet.gz"
-    with pq.ParquetWriter(var_out, var_schema_pa) as var_writer, pq.ParquetWriter(
-        stats_out, stats_schema_pa
-    ) as stats_writer:
+    with (
+        pq.ParquetWriter(var_out, var_schema_pa) as var_writer,
+        pq.ParquetWriter(stats_out, stats_schema_pa) as stats_writer,
+    ):
         for tables in map_trans(data, test, chunk_size=2500, verbose=args.verbose, log=log, seed=args.seed):
             if tables is None:
                 break

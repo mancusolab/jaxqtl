@@ -237,7 +237,7 @@ class GLM(AbstractLinearModel):
             X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init
         )
         eta = X @ beta + offset
-        mu, link_prime, weight = self.family.calc_weight(X, y, eta, disp)
+        mu, link_prime, weight = self.family.calc_weight(eta, disp)
         resid = (y - mu) * link_prime  # note: this is the working resid
 
         resid_covar = std_err(self.family, X, y, eta, mu, weight, disp)

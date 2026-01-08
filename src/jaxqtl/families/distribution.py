@@ -1,9 +1,16 @@
 from abc import abstractmethod
-from typing import ClassVar
+from typing import ClassVar, TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from typing import ClassVar as AbstractClassVar
+else:
+    from equinox import AbstractClassVar
 
 import equinox as eqx
-import jax.debug
+import jax
 import jax.numpy as jnp
+import jax.random as rdm
 import jax.scipy.stats as jaxstats
 
 from jax import lax
@@ -14,50 +21,106 @@ from .links import Identity, Inverse, Link, Log, Logit, NBlink, Power
 
 
 class ExponentialFamily(eqx.Module):
-    """
-    Define parent class for exponential family distribution (One parameter EF for now).
-    Provide all required link function relevant to generalized linear model (GLM).
-    GLM: g(mu) = X @ b, where mu = E(Y|X)
-    : hlink : h(X @ b) = b'-1 (g^-1(X @ b)) = theta, default is canonical link which returns identity function.
-    : hlink_der : derivative of hlink function
-    : glink : g(mu) = X @ b, canonical link is g = b'-1, allows user to provide other link function.
-    : glink_inv : inverse of glink, where g^-1(X @ b) = mu
-    : glink_der : derivative of glink
-    : log_prob : log joint density of all observations
+    r"""Base interface for one-parameter exponential families and their GLM link. A natural exponential family has
+    density $f(y \mid \theta, \phi) = \exp\left((y \theta - b(\theta))/\phi + c(y, \phi)\right)$,
+    where $\theta$ is the natural parameter, $\phi$ is the dispersion/scale, $b(\theta)$ is the cumulant
+    (log-partition) function, and $c(y, \phi)$ is the log base measure.
+
+    The exponential dispersion model uses mean $\mu = b'(\theta)$ and variance function $V(\mu)$ with link
+    mapping $g: \mu \mapsto \eta$. Subclasses specify $b(\cdot)$, $V(\cdot)$, and the link. For most cases,
+    $V(\mu) := \phi b''(\theta)$; however, Negative Binomial models use $V(\mu) := \mu + \alpha \mu^2$ with
+    overdispersion $\alpha$.
+
+    !!! info
+
+        Not all links are valid depending on the concrete class; this is checked automatically with a `ValueError`
+        if invalid.
+
     """
 
-    glink: Link
-    _links: ClassVar[list[type[Link]]]
+    glink: eqx.AbstractVar[Link]
+    _valid_links: AbstractClassVar[list[type[Link]]]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def __check_init__(self):
-        if not any([isinstance(self.glink, link) for link in self._links]):
+        if not any([isinstance(self.glink, link) for link in self._valid_links]):
             raise ValueError(f"Link {self.glink} is invalid for Family {self}")
 
     @abstractmethod
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
-        # phi is the dispersion parameter
+        r"""Compute a dispersion/scale parameter (i.e. $\phi$) given predictors and the mean.
+
+        **Arguments:**
+
+        - `X`: Design matrix.
+        - `y`: Observed response.
+        - `mu`: Mean parameter for each observation.
+
+        **Returns:**
+
+        Dispersion estimate.
+        """
         pass
 
     @abstractmethod
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, disp: ScalarLike) -> Array:
+        r"""Compute the negative log-likelihood at a given linear predictor `eta` and dispersion `disp`.
+
+        **Arguments:**
+
+        - `X`: Design matrix.
+        - `y`: Observed response.
+        - `eta`: Linear predictor.
+        - `disp`: Dispersion/scale parameter.
+
+        **Returns:**
+
+        Negative log-likelihood.
+        """
         pass
 
     @abstractmethod
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Return the variance as a function of the mean and dispersion.
+
+        **Arguments:**
+
+        - `mu`: Mean parameter.
+        - `disp`: Dispersion/scale parameter.
+
+        **Returns:**
+
+        Variance for each observation.
+        """
         pass
 
-    def calc_weight(
-        self,
-        X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        disp: ScalarLike = 0.0,
-    ) -> tuple[Array, Array, Array]:
+    @abstractmethod
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Draw a sample given a linear predictor and dispersion.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor.
+        - `disp`: Dispersion/scale parameter.
+
+        **Returns:**
+
+        Simulated observations.
         """
-        weight for each observation in IRLS
-        weight_i = 1 / (V(mu_i) * phi * g'(mu_i)**2)
-        this is part of the Information matrix
+        pass
+
+    def calc_weight(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> tuple[Array, Array, Array]:
+        r"""Compute mean, link derivative, and IRLS weights for observations.
+
+        **Arguments:**
+
+        - `eta`: Linear predictor.
+        - `disp`: Dispersion/scale parameter.
+
+        **Returns:**
+
+        Tuple of (mu, link derivative, weights).
         """
         mu_k = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
         var_k = jnp.clip(self.variance(mu_k, disp), jnp.finfo(float).eps)
@@ -67,6 +130,16 @@ class ExponentialFamily(eqx.Module):
         return mu_k, g_deriv_k, weight_k
 
     def init_eta(self, y: ArrayLike) -> Array:
+        r"""Provide a heuristic initializer for the linear predictor.
+
+        **Arguments:**
+
+        - `y`: Observed response.
+
+        **Returns:**
+
+        Initial linear predictor.
+        """
         return self.glink((y + y.mean()) / 2)
 
     def update_dispersion(
@@ -77,6 +150,20 @@ class ExponentialFamily(eqx.Module):
         disp: ScalarLike = 1.0,
         step_size: ScalarLike = 1.0,
     ) -> Array:
+        r"""Perform one dispersion update step. If not implemented, defaults to `disp` argument.
+
+        **Arguments:**
+
+        - `X`: Design matrix.
+        - `y`: Observed response.
+        - `eta`: Linear predictor.
+        - `disp`: Current dispersion estimate.
+        - `step_size`: Update step size.
+
+        **Returns:**
+
+        Updated dispersion estimate.
+        """
         return jnp.asarray(disp)
 
     def estimate_dispersion(
@@ -88,20 +175,49 @@ class ExponentialFamily(eqx.Module):
         step_size: ScalarLike = 1.0,
         tol: ScalarLike = 1e-3,
         max_iter: int = 1000,
-        offset_eta: ScalarLike = 0.0,
     ) -> Array:
+        r"""Iteratively estimate dispersion. If not implemented, defaults to `disp` argument
+
+        **Arguments:**
+
+        - `X`: Design matrix.
+        - `y`: Observed response.
+        - `eta`: Linear predictor.
+        - `disp`: Initial dispersion estimate.
+        - `step_size`: Update step size.
+        - `tol`: Convergence tolerance.
+        - `max_iter`: Maximum iterations.
+
+        **Returns:**
+
+        Estimated dispersion.
+        """
         return jnp.asarray(disp)
 
 
 class Gaussian(ExponentialFamily):
-    """
-    By explicitly write phi (here is sigma^2),
-    we can treat normal distribution as one-parameter EF
+    r"""Normal exponential dispersion model with density
+    $f(y \mid \mu, \phi) = (2\pi \phi)^{-1/2}\exp(-(y-\mu)^2/(2\phi))$. Dispersion $\phi > 0$ equals the variance,
+    and the mean $\mu$ lies in $\mathbb{R}$.
+
+    !!! info
+
+        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][],
+        [`jaxqtl.families.links.Power`][].
+
     """
 
-    glink: Link = Identity()
-    _links: ClassVar[list[type[Link]]] = [Identity, Log, Power]
+    glink: Link
+    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log, Power]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
+
+    def __init__(self, glink: Link = Identity()):
+        r"""** Arguments: **
+
+        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.families.links.Identity`][]).
+        """
+        self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         resid = jnp.sum(jnp.square(mu - y))
@@ -118,7 +234,6 @@ class Gaussian(ExponentialFamily):
         step_size: ScalarLike = 1.0,
         tol: ScalarLike = 1e-3,
         max_iter: int = 1000,
-        offset_eta: ScalarLike = 0.0,
     ) -> Array:
         mu = self.glink.inverse(eta)
         rss = jnp.sum(jnp.square(mu - y))
@@ -141,16 +256,34 @@ class Gaussian(ExponentialFamily):
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
         return jnp.ones_like(mu) * disp
 
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = self.glink.inverse(eta)
+        return mu + rdm.normal(key, shape=mu.shape) * jnp.sqrt(disp)
+
 
 class Gamma(ExponentialFamily):
-    """
-    By explicitly write phi (here is sigma^2),
-    we can treat normal distribution as one-parameter EF
+    r"""Gamma exponential dispersion model with density
+    $f(y \mid \mu, \phi) = y^{1/\phi-1}\exp(-y/(\mu\phi))/(\Gamma(1/\phi)(\mu\phi)^{1/\phi})$.
+    Dispersion $\phi > 0$ scales the variance $\phi \mu^2$, and the mean $\mu$ lies in $\mathbb{R}_{+}$.
+
+    !!! info
+
+        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Inverse`][],
+        [`jaxqtl.families.links.Log`][].
+
     """
 
-    glink: Link = Inverse()
-    _links: ClassVar[list[type[Link]]] = [Identity, Inverse, Log]
+    glink: Link
+    _valid_links: ClassVar[list[type[Link]]] = [Identity, Inverse, Log]
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+
+    def __init__(self, glink: Link = Inverse()):
+        r"""** Arguments: **
+
+        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.families.links.Inverse`][]).
+        """
+        self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
@@ -175,20 +308,31 @@ class Gamma(ExponentialFamily):
 
 
 class Binomial(ExponentialFamily):
-    """
-    default setting:
-    glink = log(p/(1-p))
-    glink_inv = 1/(1 + e^-x) # use log1p to calculate this
-    glink_der = 1/(p*(1-p)) # use log trick to calculate this
+    r"""Bernoulli/binomial ($n=1$) model with density $f(y \mid \mu) = \mu^{y}(1-\mu)^{1-y}$ and fixed dispersion 1.
+    The mean $\mu$ lies in $[0, 1]$; there is no additional scale parameter beyond $\mu$.
+
+    !!! info
+
+        Valid links: [`jaxqtl.families.links.Logit`][], [`jaxqtl.families.links.Log`][],
+        [`jaxqtl.families.links.Identity`][].
+
     """
 
-    glink: Link = Logit()
-    _links: ClassVar[list[type[Link]]] = [
+    glink: Link
+    _valid_links: ClassVar[list[type[Link]]] = [
         Logit,
         Log,
         Identity,
     ]  # Probit, Cauchy, LogC, CLogLog, LogLog
     _bounds: ClassVar[tuple[float, float]] = (0.0, 1.0)
+
+    def __init__(self, glink: Link = Logit()):
+        r"""** Arguments: **
+
+        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.families.links.Logit`][]).
+        """
+        self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
@@ -215,9 +359,26 @@ class Binomial(ExponentialFamily):
 
 
 class Poisson(ExponentialFamily):
+    r"""Poisson exponential family with density $f(y \mid \mu) = \exp(-\mu) \mu^{y}/y!$ and unit dispersion.
+    The mean $\mu$ lies in $\mathbb{R}_{+}$; dispersion is fixed at 1.
+
+    !!! info
+
+        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][].
+
+    """
+
     glink: Link = Log()
-    _links: ClassVar[list[type[Link]]] = [Identity, Log]  # Sqrt
+    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log]  # Sqrt
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+
+    def __init__(self, glink: Link = Log()):
+        r"""** Arguments: **
+
+        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.families.links.Log`][]).
+        """
+        self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
@@ -235,17 +396,35 @@ class Poisson(ExponentialFamily):
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
         return mu
 
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        lam = self.glink.inverse(eta)
+        return rdm.poisson(key, lam=lam)
+
 
 class NegativeBinomial(ExponentialFamily):
-    """
-    NB-2 method
-    Notation: alpha = 1/r = 1.
-    Now only use Log link (not the canonical link of NB)
+    r"""NB2 parameterization with dispersion $\alpha$ (variance $\mu + \alpha \mu^2$) and density
+    $f(y \mid \mu, \alpha) = \frac{\Gamma(y+r)}{\Gamma(r)\,y!}\left(\frac{r}{r+\mu}\right)^r
+    \left(\frac{\mu}{r+\mu}\right)^y$ where $r = 1/\alpha$. The dispersion satisfies $\alpha > 0$ and the mean $\mu$
+    lies in $\mathbb{R}_{+}$.
+
+    !!! info
+
+        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][],
+        [`jaxqtl.families.links.NBlink`][], [`jaxqtl.families.links.Power`][].
+
     """
 
     glink: Link = Log()
-    _links: ClassVar[list[type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
+    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+
+    def __init__(self, glink: Link = Log()):
+        r"""** Arguments: **
+
+        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.families.links.Log`][]).
+        """
+        self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
@@ -308,16 +487,13 @@ class NegativeBinomial(ExponentialFamily):
         step_size=1.0,
         tol=1e-3,
         max_iter=1000,
-        offset_eta=0.0,
     ) -> Array:
         def body_fun(val: tuple):
             diff, num_iter, alpha_o = val
-            log_alpha_o = jnp.log(alpha_o)
-            score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha_o)
-            log_alpha_n = jnp.clip(log_alpha_o - step_size * (score / hess), jnp.log(1e-8), jnp.log(1e10))
-            diff = jnp.exp(log_alpha_n) - jnp.exp(log_alpha_o)
+            alpha_n = self.update_dispersion(X, y, eta, alpha_o, step_size)
+            diff = alpha_n - alpha_o
 
-            return diff, num_iter + 1, jnp.exp(log_alpha_n)
+            return diff, num_iter + 1, alpha_n
 
         def cond_fun(val: tuple):
             diff, num_iter, alpha_o = val
@@ -328,3 +504,9 @@ class NegativeBinomial(ExponentialFamily):
         diff, num_iters, disp = lax.while_loop(cond_fun, body_fun, init_tuple)
 
         return disp
+
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 0.1) -> Array:
+        mu = self.glink.inverse(eta)
+        r = 1.0 / disp
+        p = r / (r + mu)
+        return rdm.negative_binomial(key, total_count=r, p=p)
