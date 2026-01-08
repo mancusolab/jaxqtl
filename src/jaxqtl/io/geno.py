@@ -104,7 +104,8 @@ class PlinkData(GenotypeData):
             bim, fam, bed = read_plink(prefix, verbose=False)
             genotype = cast(DaskArray, bed)
             sample_info = pl.DataFrame(fam)
-            variant_info = pl.DataFrame(bim)
+            # keep chromosome identifiers as strings to avoid downstream dtype mismatches during filtering
+            variant_info = pl.DataFrame(bim).with_columns(pl.col("chrom").cast(pl.Utf8()))
         return PlinkData(genotype, sample_info, variant_info)
 
     def filter_individuals(self, individuals: list[str], how: Literal["keep", "drop"]):
@@ -134,7 +135,7 @@ class PlinkData(GenotypeData):
         # subset geno cis variants at the specified samples
         geno = jnp.asarray(self.genotype[cis_idx, :][:, self.sample_idx].compute().T)  # (n, p)
 
-        # drop monomorphnic sites
+        # drop monomorphic sites
         snp_var = jnp.var(geno, axis=0)
         keep = ~jnp.isnan(snp_var) & (snp_var > 0)
         geno = geno[:, keep]

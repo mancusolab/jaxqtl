@@ -66,7 +66,7 @@ def _create_common_subp(subp, name, help):
 
     # pheno / covariate arguments
     common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
-    common_p.add_argument("--covar", help="Path to covariate data")
+    common_p.add_argument("--covar", help="Path to covariate data", required=True)
     covar_group = common_p.add_mutually_exclusive_group()
     covar_group.add_argument(
         "--covar-name",
@@ -595,7 +595,6 @@ def main(args):
     gepcs_p.add_argument(
         "--num-pcs",
         type=int,
-        required=True,
         help="Number of principal components to compute",
     )
     gepcs_p.add_argument("--covar", help="Path to covariate data", required=True)
@@ -606,7 +605,7 @@ def main(args):
         help="Transformation to perform on observed gene expression before computing PCs.",
     )
     gepcs_p.add_argument(
-        "--express-percent",
+        "--min-gene-expr-pct",
         type=float,
         default=0.0,
         help="Keep genes with expression levels above specified value",
