@@ -14,14 +14,11 @@ from jax.scipy import stats
 from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from .glm import GLMState
+from ..infer.glm import GLMState
+from .base import _residualize_genotypes, _score_from_residuals, HypothesisTest, TestResult
 
 
-# set up a protocol to ensure that all downstream types can structurally match this object
-# with any additional stuff for more complex cases...
 class HasPredMean(Protocol):
-    # annoying for type-checking reasons with mypy, but we need to define this as a property here to enforce read-only
-    # type checking downstream, which is always the case with NamedTuple objects! >:(
     @property
     def pred_mean(self) -> Array:
         ...
@@ -31,7 +28,7 @@ CGFStateT = TypeVar("CGFStateT", bound=HasPredMean)
 
 
 class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
-    """The abstract base class for instances of Exponential Family distributions."""
+    """Abstract base for cumulant generating functions used by SPA."""
 
     @abstractmethod
     def init(self, glm_state: GLMState) -> CGFStateT:
@@ -42,20 +39,6 @@ class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
 
     @abstractmethod
     def cgf(self, t: Array, state: CGFStateT) -> Array:
-        r"""Evaluates the cumulant generating function for each observation at `t`.
-
-        Namely, $K_y(t) := \log \mathbb{E}[\exp(t \cdot y))]$
-        where $y$ is the random variable distributed under [`giddyup.families.ExpFam`][] with
-        mean corresponding to `pred_mean`.
-
-        **Arguments:**
-
-        - `t`: Number at which to evaluate `cgf`.
-
-        **Returns:**
-
-        The CGF evaluated under distribution assumptions at `t`.
-        """
         ...
 
     def get_t_bounds(self, g_resid: Array, state: CGFStateT) -> tuple:
@@ -65,43 +48,19 @@ class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
         return -jnp.inf, jnp.inf
 
 
-CumulantGeneratingFunction.__init__.__doc__ = """**Arguments:**
-
-- `pred_mean`: The predicted mean for each observation.
-"""
-
-
-CumulantGeneratingFunction.__call__.__doc__ = """Alias for [giddyup.ExpFam.cgf][]"""
-
-
 class BasicCGFState(NamedTuple):
     pred_mean: Array
 
 
 class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
-    """The Poisson distribution family."""
-
     def init(self, glm_state: GLMState) -> BasicCGFState:
         return BasicCGFState(glm_state.mu)
 
     def cgf(self, t: Array, state: BasicCGFState) -> Array:
-        r"""Evaluates the Poisson cumulant generating function for each observation at `t`.
-
-        Namely, $K(t) := \mu \cdot (\exp(t) - 1)$ where
-        $\mu$ corresponds to `pred_mean`.
-
-        **Arguments:**
-
-        - `t`: Number at which to evaluate `cgf`.
-
-        **Returns:**
-
-        The CGF evaluated under distribution assumptions at `t`.
-        """
         return state.pred_mean * jnp.expm1(t)
 
     def get_score_bounds(self, g_resid: Array, state: BasicCGFState) -> tuple:
-        offset = jnp.sum(g_resid * state.pred_mean)  # Fixed: element-wise multiplication then sum
+        offset = jnp.sum(g_resid * state.pred_mean)
         ubound = jnp.sum(jnp.where(g_resid < 0, 0, g_resid)) - offset
         lbound = jnp.sum(jnp.where(g_resid > 0, 0, g_resid)) - offset
         return lbound, ubound
@@ -113,18 +72,14 @@ class NegBinCGFState(NamedTuple):
 
 
 class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
-    """The NegativeBinomial distribution family."""
-
     def init(self, glm_state: GLMState) -> NegBinCGFState:
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
     def cgf(self, t: Array, state: NegBinCGFState) -> Array:
         term = -(state.pred_mean / state.r) * jnp.expm1(t)
-
         return jspec.xlog1py(-state.r, term)
 
     def get_t_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
-        """Compute t boundaries for saddlepoint approximation under Negative Binomial."""
         u_max = jnp.log1p(state.r / state.pred_mean)
 
         rescaled = jnp.where(g_resid != 0, u_max / g_resid, 0.0)
@@ -146,28 +101,11 @@ class GaussianCGFState(NamedTuple):
     variance: Array
 
 
-# not sure why anyone would WANT to use this, but its here for completeness
-class GaussianCGF(CumulantGeneratingFunction):
-    """The Normal distribution family."""
-
+class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
     def init(self, glm_state: GLMState) -> GaussianCGFState:
-        # variance is just 1 / wgt for Gaussian
         return GaussianCGFState(glm_state.mu, jnp.reciprocal(glm_state.glm_wt))
 
     def cgf(self, t: Array, state: GaussianCGFState) -> Array:
-        r"""Evaluates the Normal cumulant generating function for each observation at `t`.
-
-        Namely, $K(t) := t \cdot \mu + \frac{1}{2}\sigma^2 t^2$
-        where $\mu$ corresponds to `pred_mean` and $\sigma^2$ to `variance`.
-
-        **Arguments:**
-
-        - `t`: Number at which to evaluate `cgf`.
-
-        **Returns:**
-
-        The CGF evaluated under distribution assumptions at `t`.
-        """
         return t * (state.pred_mean + 0.5 * t * state.variance)
 
 
@@ -183,46 +121,31 @@ def saddlepoint_pvalue(
     cutoff: float = 1.96,
     max_iter: int = 100,
 ) -> Array:
-    """
-    Compute p-values of a score test using a saddlepoint approximation.
-    This version ensures that either a two-sided SPA or a two-sided Normal approximation is used,
-    and includes debug prints for comparison.
-    """
     is_discrete = isinstance(cgf, (PoissonCGF, NegativeBinomialCGF))
 
-    # Convert inputs to JAX arrays
     g_resid = jnp.asarray(g_resid, dtype=float)
     score = jnp.asarray(score, dtype=float)
 
-    # Solver for root finding
     solver = optx.Newton(rtol=1e-8, atol=1e-8)
     t_bounds = cgf.get_t_bounds(g_resid, state)
     score_bounds = cgf.get_score_bounds(g_resid, state)
 
-    # pre-compute offset due to covariates, etc
     offset = g_resid.T @ state.pred_mean
 
-    # Our score function
     @eqx.filter_value_and_grad
     def _closure(t):
         rescale = t * scale
         return jnp.sum(cgf(rescale * g_resid, state)) - rescale * offset
 
-    # Wrapper around score function for root-finding
     def _fn(t, args):
         (current_score,) = args
-        val, deriv = _closure(t)
+        _val, deriv = _closure(t)
         return deriv - current_score
 
-    # This efficiently computes first and second order derivatives of our score function
     _, (_, score_var) = jax.jvp(_closure, (0.0,), (1.0,))
-
-    # Pre-calculate the normal approximation result as a fallback
     zscore = score / jnp.sqrt(score_var)
     log_p_normal_two_sided = jnp.log(2.0) + stats.norm.logsf(jnp.abs(zscore))
 
-    # If observed score is inside the theoretical bounds given the ExpFam model and score is big enough
-    # (ie beyond null), then perform SPA correction
     _lbound, _ubound = score_bounds
     is_valid = (_lbound < score) & (score < _ubound)
     should_attempt_spa = (jnp.fabs(zscore) > cutoff) & is_valid
@@ -242,29 +165,22 @@ def saddlepoint_pvalue(
         )
         t_bar = sol.value
 
-        (K_val, K_p), (_, K_pp) = jax.jvp(_closure, (t_bar,), (1.0,))
+        (K_val, _K_p), (_, K_pp) = jax.jvp(_closure, (t_bar,), (1.0,))
 
-        # for numerical reasons we may have negatives, so push up to a tiny value
         under_radical = 2 * (t_bar * current_score - K_val)
         w = jnp.sign(t_bar) * jnp.sqrt(under_radical)
 
-        # if we're in the discrete setting, use continuity adjustment
         scale_factor = -jnp.expm1(-t_bar) if is_discrete else t_bar
         v = scale_factor * jnp.sqrt(K_pp)
 
-        # Barndorff-Neilsen formula for right tail probabilities
-        # we can get diff 'bad' results depending on ratio being 0 (-inf) or negative (nan)
-        # so just bottom out to 'nan' here
         ratio = v / w
         r = w + jnp.log(ratio) / w
         r = jnp.where(ratio <= 0, jnp.nan, r)
 
-        # compute both tail probabilities and a two-sided assuming symmetry around appropriate tail
         t_result_lower = stats.norm.logcdf(r)
         t_result_upper = stats.norm.logsf(r)
         t_result_symm = jnp.log(2.0) + jnp.where(r <= 0.0, t_result_lower, t_result_upper)
 
-        # validity checks
         w_is_valid = ~jnp.isnan(w)
         r_is_valid = ~jnp.isnan(r)
         solver_success = sol.result == optx.RESULTS.successful
@@ -283,25 +199,62 @@ def saddlepoint_pvalue(
             log_tails = jnp.array([log_upper_pos, log_lower_neg])
             if two_sided_mode == "abs":
                 spa_result = logsumexp(log_tails)
-            elif two_sided_mode == "2min":
+            else:
                 spa_result = jnp.log(2.0) + jnp.min(log_tails)
 
-        # if SPA failed for any reason, fall back to the normal result
         return jnp.where(is_successful, spa_result, log_p_normal_two_sided)
 
     def compute_normal_p_value(_):
         return log_p_normal_two_sided
 
-    # primary branch check
     final_log_p = lax.cond(
         should_attempt_spa,
-        compute_spa_p_value,  # True branch: attempt the SPA path
-        compute_normal_p_value,  # False branch: use the Normal approximation path
+        compute_spa_p_value,
+        compute_normal_p_value,
         operand=None,
     )
 
-    if not log_p:
-        final_p = jnp.exp(final_log_p)
-        return final_p
-    else:
-        return final_log_p
+    return jnp.exp(final_log_p) if not log_p else final_log_p
+
+
+class SpaTest(HypothesisTest):
+    cgf: CumulantGeneratingFunction = NegativeBinomialCGF()
+
+    def test(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        offset: ArrayLike,
+    ) -> TestResult:
+        glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
+        cgf_state = self.cgf.init(glmstate_cov_only)
+
+        y_resid = glmstate_cov_only.resid
+        wgt = jnp.atleast_1d(glmstate_cov_only.glm_wt)
+        gprime = glmstate_cov_only.link_prime
+
+        g_resid = _residualize_genotypes(X, G, glmstate_cov_only.resid_covar, wgt)
+        beta, se, zscore, g_score, _ = _score_from_residuals(y_resid, g_resid, wgt)
+
+        spa_g_resid = g_resid * (wgt * gprime)[:, jnp.newaxis]
+
+        def _pval(args, idx):
+            pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, cgf_state, two_sided_mode="abs")
+            return args, pv
+
+        _, gupval = lax.scan(_pval, 0.0, jnp.arange(G.shape[1]))
+
+        return TestResult(
+            beta=beta,
+            se=se,
+            p=gupval,
+            z=zscore,
+            num_iters=glmstate_cov_only.num_iters,
+            converged=glmstate_cov_only.converged,
+            disp=glmstate_cov_only.disp,
+        )
+
+    @property
+    def name(self) -> str:
+        return "score.spa"

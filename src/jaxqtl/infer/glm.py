@@ -30,7 +30,7 @@ class GLMState(NamedTuple):
     link_prime: Array
     num_iters: Array
     converged: Array
-    infor_inv: Array  # for score test
+    resid_covar: Array  # covariance used to compute `se`
     resid: Array  # for score test, not the working resid!
     disp: Array  # dispersion parameter
 

@@ -15,10 +15,10 @@ import jax.numpy as jnp
 from jax import config
 
 from jaxqtl.families.distribution import Binomial, Gaussian, NegativeBinomial, Poisson
+from jaxqtl.hypothesis import ScoreTest
 from jaxqtl.infer.glm import GLM, LinearModel
 from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer.stderr import HuberError
-from jaxqtl.infer.utils import ScoreTest
 
 
 config.update("jax_enable_x64", True)

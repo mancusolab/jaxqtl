@@ -12,8 +12,7 @@ from jax import numpy as jnp
 from jaxtyping import ArrayLike, PRNGKeyArray
 
 from ..families.distribution import NegativeBinomial
-from ..infer.aggregate import AbstractAggregateTest, PermutationResult
-from ..infer.utils import HypothesisTest, TestResult
+from ..hypothesis import AbstractAggregateTest, HypothesisTest, PermutationResult, TestResult
 from ..log import get_log
 from .data import CisData, ReadyDataState
 

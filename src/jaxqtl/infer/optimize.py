@@ -146,7 +146,8 @@ def infer_beta_params(
         i_k = pg_1k + i_kn
         i_n = pg_1n + i_kn
 
-        info_mat = -len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
+        # Fisher information matrix; positive definite for valid parameter values.
+        info_mat = len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
 
         # first sub-matrix of the unscaled 2nd-order Christoffell symbol
         i_kkn = pg_1n * pg_2kn
@@ -177,10 +178,11 @@ def infer_beta_params(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param - step_size * direction - 0.5 * step_size**2 * adjustment
+        new_param = old_param + step_size * direction - 0.5 * step_size**2 * adjustment
+        new_param = jnp.clip(new_param, 1e-8, jnp.inf)
 
         new_lik = loglik(new_param, p_perm)
-        diff = old_lik - new_lik
+        diff = new_lik - old_lik
 
         return new_lik, diff, num_iter + 1, new_param
 
@@ -189,7 +191,8 @@ def infer_beta_params(
         cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
         return cond_l
 
-    init_tuple = (10000.0, 1000.0, 0, init)
+    init_lik = loglik(init, p_perm)
+    init_tuple = (init_lik, jnp.asarray(jnp.inf), 0, init)
     lik, diff, num_iters, params = lax.while_loop(cond_fun, body_fun, init_tuple)
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter).astype(float)
 

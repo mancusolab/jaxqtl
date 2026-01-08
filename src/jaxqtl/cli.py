@@ -10,12 +10,19 @@ import pyarrow.parquet as pq
 import jax
 
 from .families.distribution import Gaussian, NegativeBinomial, Poisson
-from .infer.aggregate import ACAT, BetaPermutation
+from .hypothesis import (
+    ACAT,
+    BetaPermutation,
+    GaussianCGF,
+    NegativeBinomialCGF,
+    PoissonCGF,
+    ScoreTest,
+    SpaTest,
+    WaldTest,
+)
 from .infer.glm import GLM, LinearModel
 from .infer.solve import CGSolve, CholeskySolve, QRSolve
-from .infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from .infer.stderr import FisherInfoError, HuberError
-from .infer.utils import ScoreTest, SpaTest, WaldTest
 from .io.geno import PlinkData, VCFData
 from .io.pheno import ExpressionData
 from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
