@@ -24,6 +24,9 @@ class _ResultsAggregator:
     def __init__(self):
         self.frames: list = []
 
+    def __len__(self) -> int:
+        return len(self.frames)
+
     def add_row(self, row: dict):
         # cheap 1-row DataFrame, but *only* created when needed
         self.frames.append(pl.DataFrame([row]))
@@ -122,12 +125,16 @@ def map_cis(
                 log.debug("Clearing JAX JIT-caches")
             jax.clear_caches()  # clear up caches
 
-    result_df = results.to_df()
+    if len(results) > 0:
+        result_df = results.to_df()
 
-    # if we didn't fit a negative binomial, just drop the alpha column as its const 0
-    # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
-    if not isinstance(snp_test.model.family, NegativeBinomial):
-        result_df = result_df.drop("nb_alpha")
+        # if we didn't fit a negative binomial, just drop the alpha column as its const 0
+        # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
+        if not isinstance(snp_test.model.family, NegativeBinomial):
+            result_df = result_df.drop("nb_alpha")
+    else:
+        log.warning("All genes were skipped!")
+        result_df = None
 
     return result_df
 

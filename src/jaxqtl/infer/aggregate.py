@@ -1,6 +1,5 @@
 from abc import abstractmethod
-from typing import Generic, TypeVar
-from typing_extensions import TypeAlias
+from typing import Generic, TypeAlias, TypeVar
 
 import optimistix as optx
 
@@ -77,7 +76,11 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
         def _func(key, x):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            glmstate = test(X, G, y[perm_idx], offset[perm_idx])
+            if offset.ndim > 0:
+                glmstate = test(X, G, y[perm_idx], offset[perm_idx])
+            else:
+                # const offset would break perm index
+                glmstate = test(X, G, y[perm_idx], offset)
             # Note: permute individual rows of G can still preserve LD of variants (columns)
 
             return key, jnp.nanmax(jnp.abs(glmstate.z))  # jnp.nanmin(glmstate.p)

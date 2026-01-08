@@ -167,22 +167,19 @@ def _create_common_subp(subp, name, help):
     )
 
     common_p.add_argument(
-        "--perm-pheno",
-        action="store_true",
-        default=False,
-        help="foo",
-    )
-    common_p.add_argument(
         "--min-indiv-expr-pct",
         type=float,
         default=None,
-        help="Exclude individuals that have fewer than specified percentage of genes with non-zero expression",
+        help=(
+            "Exclude individuals that have fewer than specified percentage of genes with "
+            "non-zero expression (e.g., '0.1')"
+        ),
     )
     common_p.add_argument(
         "--min-gene-expr-pct",
         type=float,
         default=0.0,
-        help="Exclude genes expressed in fewer than specified percentage of individuals",
+        help="Exclude genes expressed in fewer than specified percentage of individuals (e.g., '0.1')",
     )
     gene_group = common_p.add_mutually_exclusive_group()
     gene_group.add_argument(
@@ -260,7 +257,7 @@ def _create_common_subp(subp, name, help):
         default=False,
         help="Verbose for logger",
     )
-    common_p.add_argument("--out", "-o", type=str, help="out file prefix")
+    common_p.add_argument("--out", "-o", type=str, default="jaxqtl", help="out file prefix")
     return common_p
 
 
@@ -316,16 +313,17 @@ def _cis_scan(args, log):
         log=log,
         seed=args.seed,
     )
-    if args.q_value:
-        log.info("Computing q-values")
-        p_values = df_cis.get_column("pvalue_adj").to_numpy()
-        q_values, pi0 = calculate_qval(p_values, log)
-        df_cis = df_cis.with_columns(pl.Series("qval", q_values))
+    if df_cis is not None:
+        if args.q_value:
+            log.info("Computing q-values")
+            p_values = df_cis.get_column("pvalue_adj").to_numpy()
+            q_values, pi0 = calculate_qval(p_values, log)
+            df_cis = df_cis.with_columns(pl.Series("qval", q_values))
 
-    log.info("Finished cis-scan. Writing results.")
-    test_str = test.name
-    adj_name = perm_test.name
-    df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+        log.info("Finished cis-scan. Writing results.")
+        test_str = test.name
+        adj_name = perm_test.name
+        df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
 
     return 0
 
@@ -347,11 +345,11 @@ def _nominal_scan(args, log):
         log=log,
         seed=args.seed,
     )
-
-    log.info("Finished nominal cis-scan. Writing results.")
-    test_str = test.name
-    # ztd compression?
-    df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
+    if df_nominal is not None:
+        log.info("Finished nominal cis-scan. Writing results.")
+        test_str = test.name
+        # ztd compression?
+        df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
 
     return 0
 
@@ -515,38 +513,32 @@ def _common_setup(args, log):
     if args.min_indiv_expr_pct:
         expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
 
-    if args.covar is not None:
-        covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
+    covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
-        # perform one-hot encoding for string-based columns, if specified
-        if args.one_hot:
-            cat = pl.selectors.string().exclude("iid")
-            covar = covar.to_dummies(cat, drop_first=True).drop(cat)
+    # perform one-hot encoding for string-based columns, if specified
+    if args.one_hot:
+        cat = pl.selectors.string().exclude("iid")
+        covar = covar.to_dummies(cat, drop_first=True).drop(cat)
 
-        # normalize all numeric columns to have mean 0 and var 1
-        if args.normalize_covar:
-            num = pl.all().exclude("iid")
+    # normalize all numeric columns to have mean 0 and var 1
+    if args.normalize_covar:
+        num = pl.all().exclude("iid")
 
-            # let's make sure to not standardize the offset if it was provided, as we haven't yet extracted it
-            if args.offset_name_from_covar:
-                num = num.exclude(args.offset_name_from_covar)
+        # let's make sure to not standardize the offset if it was provided, as we haven't yet extracted it
+        if args.offset_name_from_covar:
+            num = num.exclude(args.offset_name_from_covar)
 
-            covar = covar.with_columns((num - num.mean()) / num.std())
+        covar = covar.with_columns((num - num.mean()) / num.std())
 
-        # we add an intercept column to the covariates by default if no normalization is performed
-        # but we allow users to disable this
-        if not args.no_intercept:
-            covar = covar.with_columns(pl.lit(1.0).alias("intercept"))
-
-    else:
-        covar = None
+    # we add an intercept column to the covariates by default if no normalization is performed
+    # but we allow users to disable this
+    if not args.no_intercept:
+        covar = covar.with_columns(pl.lit(1.0).alias("intercept"))
 
     # before filter gene list, calculate library size and set offset, or read in pre-computed offset
     if args.offset:
         offset = read_offset_tsvlike(args.offset)
     elif args.offset_name_from_covar:
-        if covar is None:
-            raise ValueError("Covariate file must be provided if `--offset-name-from-covar` is specified.")
         offset = covar.select(pl.col("iid"), pl.col(args.offset_name_from_covar))
         # drop the offset from the covariates data
         covar = covar.drop(args.offset_name_from_covar)
@@ -554,19 +546,6 @@ def _common_setup(args, log):
         offset = expr_data.offset_from_libsize
     else:
         offset = None
-
-    if args.perm_pheno:
-        import numpy as np
-
-        import jax.random as rdm
-
-        key = rdm.key(args.seed)
-        pidx = np.asarray(rdm.permutation(key, offset.height))
-        # permute pheno + offset
-        pheno = expr_data.pheno.with_columns(pl.all().exclude("iid").gather(pidx))
-        offset = offset.with_columns(pl.all().exclude("iid").gather(pidx))
-
-        expr_data = ExpressionData(pheno, expr_data.pheno_meta, None)
 
     # take the genotype, expression, covariates, and offset and align by iid for valid analyses
     # lump those into single object for easier passing around
@@ -619,7 +598,7 @@ def main(args):
         required=True,
         help="Number of principal components to compute",
     )
-    gepcs_p.add_argument("--covar", help="Path to covariate data. If included GE PCs will be appended.")
+    gepcs_p.add_argument("--covar", help="Path to covariate data", required=True)
     gepcs_p.add_argument(
         "--transform",
         choices=["tmm", "log1p"],
