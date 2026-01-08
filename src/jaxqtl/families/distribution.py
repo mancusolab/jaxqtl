@@ -2,6 +2,7 @@ from abc import abstractmethod
 from typing import ClassVar, TYPE_CHECKING
 
 
+# this is to fix a bug in type checking regarding AbstractClassVar and ClassVar
 if TYPE_CHECKING:
     from typing import ClassVar as AbstractClassVar
 else:
