@@ -112,8 +112,13 @@ plugins:
 nav:
     - 'index.md'
     - API:
-      - 'api/families.md'
-      - 'api/infer.md'
+      - Statistical Models:
+        - 'api/glm.md'
+        - 'api/families.md'
+        - 'api/links.md'
+      - Inference:
+        - 'api/infer.md'
+        - 'api/solvers.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'

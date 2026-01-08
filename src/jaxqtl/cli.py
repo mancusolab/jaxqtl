@@ -16,12 +16,12 @@ from .infer.solve import CGSolve, CholeskySolve, QRSolve
 from .infer.spa import GaussianCGF, NegativeBinomialCGF, PoissonCGF
 from .infer.stderr import FisherInfoError, HuberError
 from .infer.utils import ScoreTest, SpaTest, WaldTest
-from .io.data import ReadyDataState
 from .io.geno import PlinkData, VCFData
 from .io.pheno import ExpressionData
 from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
+from .map.data import ReadyDataState
 from .post.qvalue import calculate_qval
 
 

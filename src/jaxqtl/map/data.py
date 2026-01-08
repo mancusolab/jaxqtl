@@ -7,10 +7,10 @@ import polars as pl
 import equinox as eqx
 import jax.numpy as jnp
 
-from jaxtyping import Array, ArrayLike
+from jaxtyping import Array
 
-from .geno import GenotypeData
-from .pheno import ExpressionData
+from ..io.geno import GenotypeData
+from ..io.pheno import ExpressionData
 
 
 class SNPInfo(eqx.Module):
@@ -92,10 +92,10 @@ class CisData(eqx.Module):
 class ReadyDataState:
     """Aligned genotype, expression, covariates, and offsets ready for mapping."""
 
-    genotype: GenotypeData  # sample x genes
+    genotype: GenotypeData
     expression: ExpressionData
-    covar: Array  # sample x covariates
-    offset: ArrayLike
+    covar: Array
+    offset: Array
 
     @property
     def num_genes(self) -> int:
@@ -166,32 +166,6 @@ class ReadyDataState:
             covar=covar,
             offset=offset,
         )
-
-
-def align_pheno_covar(
-    pheno: pl.LazyFrame,
-    covar: pl.LazyFrame,
-    offset: pl.LazyFrame | None = None,
-):
-    """Align phenotype, covariate, and optional offset LazyFrames on shared IIDs."""
-    # store this once to avoid typos etc
-    IID = "iid"
-    iid_col = pl.col(IID)
-
-    # pull out common iids across pheno/covar
-    common_iids = pheno.select(iid_col).join(covar.select(iid_col), on=IID, how="inner")
-
-    # if offset is provided then repeat
-    if offset is not None:
-        common_iids = common_iids.join(offset.select(iid_col), on=IID, how="inner")
-
-    pheno = pheno.join(common_iids, on=IID, how="semi")
-    covar = covar.join(common_iids, on=IID, how="semi")
-
-    if offset is not None:
-        offset = offset.join(common_iids, on=IID, how="inner")
-
-    return pheno, covar, offset
 
 
 def align_on_iid(

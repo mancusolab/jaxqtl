@@ -12,8 +12,8 @@ from jax import numpy as jnp
 
 from ..families.distribution import NegativeBinomial
 from ..infer.utils import HypothesisTest
-from ..io.data import ReadyDataState
 from ..log import get_log
+from .data import ReadyDataState
 
 
 def map_trans(

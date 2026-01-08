@@ -14,8 +14,8 @@ from jaxtyping import ArrayLike, PRNGKeyArray
 from ..families.distribution import NegativeBinomial
 from ..infer.aggregate import AbstractAggregateTest, PermutationResult
 from ..infer.utils import HypothesisTest, TestResult
-from ..io.data import CisData, ReadyDataState
 from ..log import get_log
+from .data import CisData, ReadyDataState
 
 
 class _ResultsAggregator:
