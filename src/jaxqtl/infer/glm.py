@@ -16,7 +16,7 @@ from ..families.distribution import (
 from ..families.utils import t_cdf
 from .optimize import irls, lstsq
 from .solve import CholeskySolve, LinearSolve
-from .stderr import ErrVarEstimation, FisherInfoError
+from .stderr import AbstractVarianceEstimator, FisherInfoError
 
 
 class GLMState(NamedTuple):
@@ -132,7 +132,7 @@ class AbstractLinearModel(eqx.Module):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
-        std_err: ErrVarEstimation = FisherInfoError(),
+        std_err: AbstractVarianceEstimator = FisherInfoError(),
     ) -> GLMState:
         pass
 
@@ -156,7 +156,7 @@ class LinearModel(AbstractLinearModel):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
-        std_err: ErrVarEstimation = FisherInfoError(),
+        std_err: AbstractVarianceEstimator = FisherInfoError(),
     ) -> GLMState:
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
         df = jnp.maximum(X.shape[0] - X.shape[1], 1)
@@ -220,7 +220,7 @@ class GLM(AbstractLinearModel):
         X: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike = 0.0,
-        std_err: ErrVarEstimation = FisherInfoError(),
+        std_err: AbstractVarianceEstimator = FisherInfoError(),
     ) -> GLMState:
         """Fit GLM
 

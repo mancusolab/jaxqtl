@@ -8,7 +8,7 @@ from jax.numpy.linalg import multi_dot
 from jaxtyping import Array, ArrayLike
 
 from ..infer.glm import AbstractLinearModel
-from ..infer.stderr import ErrVarEstimation, FisherInfoError
+from ..infer.stderr import AbstractVarianceEstimator, FisherInfoError
 
 
 class TestResult(NamedTuple):
@@ -31,7 +31,7 @@ class AbstractHypothesisTest(eqx.Module):
     """
 
     model: AbstractLinearModel
-    std_err: ErrVarEstimation = FisherInfoError()
+    std_err: AbstractVarianceEstimator = FisherInfoError()
 
     def __call__(
         self,

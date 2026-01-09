@@ -14,6 +14,11 @@ from .solve import LinearSolve
 
 
 class IRLSState(NamedTuple):
+    r"""Container for IRLS solver outputs.
+
+    Stores fitted coefficients, dispersion, and basic convergence metadata from [`jaxqtl.infer.optimize.irls`][].
+    """
+
     beta: Array
     num_iters: int
     converged: Array
@@ -33,19 +38,24 @@ def irls(
     step_size: float = 1.0,
     disp_init: ScalarLike = 0.0,
 ) -> IRLSState:
-    """IRLS to solve GLM
+    r"""Solve a GLM with iteratively reweighted least squares (IRLS).
 
-    :param X: covariate data matrix (nxp)
-    :param y: outcome vector (nx1)
-    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
-    :param solver: linear equation solver
-    :param eta: linear component eta
-    :param max_iter: maximum iterations for fitting GLM, default to 1000
-    :param tol: tolerance for stopping, default to 0.001
-    :param step_size: step size to update the parameter at each step, default to 1.0
-    :param offset: offset (nx1)
-    :param disp_init: initial value for dispersion parameter
-    :return: IRLSState
+    **Arguments:**
+
+    - `X`: Covariate matrix with shape `(n, p)`.
+    - `y`: Outcome vector with shape `(n,)`.
+    - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+    - `eta`: Initial linear predictor $\eta$ with shape `(n,)`.
+    - `family`: GLM family implementing [`jaxqtl.families.distribution.ExponentialFamily`][].
+    - `solver`: Linear solver implementing [`jaxqtl.infer.solve.LinearSolve`][].
+    - `max_iter`: Maximum IRLS iterations.
+    - `tol`: Convergence tolerance on the change in objective value.
+    - `step_size`: Step size applied to the IRLS update.
+    - `disp_init`: Initial dispersion estimate.
+
+    **Returns:**
+
+    A [`jaxqtl.infer.optimize.IRLSState`][] containing fitted coefficients, dispersion, and convergence metadata.
     """
     n, p = X.shape
 
@@ -85,6 +95,20 @@ def lstsq(
     y: ArrayLike,
     solver: LinearSolve,
 ) -> IRLSState:
+    r"""Solve an unweighted least-squares problem.
+
+    This is used as a fast path for Gaussian models.
+
+    **Arguments:**
+
+    - `X`: Covariate matrix with shape `(n, p)`.
+    - `y`: Outcome vector with shape `(n,)`.
+    - `solver`: Linear solver implementing [`jaxqtl.infer.solve.LinearSolve`][].
+
+    **Returns:**
+
+    A [`jaxqtl.infer.optimize.IRLSState`][] with `disp` set to 1 and `num_iters` set to 1.
+    """
     beta = solver.lstsq(X, y)
     alpha = jnp.array(1)
     converged = jnp.array(True)
@@ -94,6 +118,12 @@ def lstsq(
 
 
 class BetaParams(NamedTuple):
+    r"""Container for fitted Beta approximation parameters.
+
+    Stores the fitted Beta shape parameters from [`jaxqtl.infer.optimize.infer_beta_params`][] along with a convergence
+    indicator.
+    """
+
     k: float
     n: float
     converged: bool
@@ -107,29 +137,31 @@ def infer_beta_params(
     tol=1e-3,
     max_iter=500,
 ) -> BetaParams:
-    """Infer shape and scale parameter for beta distribution
-    given p values from R permutations (strongest signals),
-    use newton's method to estimate beta distribution parameters:
-    p ~ Beta(k, n)
+    r"""Fit a Beta approximation to a collection of permutation p-values.
 
-    :param p_perm: permutation minimum p values
-    :param init: initial value for shape and scale
-    :param step_size: step size to update parameters at each step, default to 0.1
-    :param tol: tolerance for stopping, default to 0.001
-    :param max_iter: maximum iterations for fitting GLM, default to 500
-    :return:
+    Given permutation p-values $p_1, \dots, p_R$, this estimates parameters `k` and `n` such that
+    $p \sim \mathrm{Beta}(k, n)$. The implementation uses a natural-gradient/Newton-style iteration on the
+    positive parameter manifold.
+
+    **Arguments:**
+
+    - `p_perm`: Permutation p-values with shape `(R,)`.
+    - `init`: Initial parameter vector `(k, n)`.
+    - `step_size`: Update step size.
+    - `tol`: Convergence tolerance on the change in objective value.
+    - `max_iter`: Maximum number of iterations.
+
+    **Returns:**
+
+    A [`jaxqtl.infer.optimize.BetaParams`][] with fitted parameters and a convergence indicator.
     """
 
     def loglik(params, p: ArrayLike) -> Array:
         return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
 
     def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> tuple[Array, Array]:
-        """
-        We compute the FIM under the Beta(k, n) distribution as well as the Christoffel symbols of the 2nd kind.
-        We use the christoffel symbols to perform a 2nd-order natural gradient approach which keeps us on the positive
-        manifold. Fancy-shmancy way to do this rather than staying in log space, but here we leverage the underlying
-        geometry of the distribution rather than log<->exp for R<->R+.
-        """
+        # Compute the Fisher information matrix for Beta(k, n) and the Christoffel symbols of the second kind.
+        # These are used to take a second-order natural-gradient step while keeping parameters on R_+^2.
         k, n = params
 
         # reuse terms

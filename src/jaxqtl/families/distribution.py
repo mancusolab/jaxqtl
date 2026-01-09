@@ -258,6 +258,18 @@ class Gaussian(ExponentialFamily):
         return jnp.ones_like(mu) * disp
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Sample observations from the Gaussian model.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor `$\eta$`.
+        - `disp`: Dispersion parameter `$\phi$` controlling the variance.
+
+        **Returns:**
+
+        Samples with the same shape as `eta`.
+        """
         mu = self.glink.inverse(eta)
         return mu + rdm.normal(key, shape=mu.shape) * jnp.sqrt(disp)
 
@@ -306,6 +318,25 @@ class Gamma(ExponentialFamily):
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
         return disp * (mu**2)
+
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Sample observations from the Gamma model.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor `$\eta$`.
+        - `disp`: Dispersion parameter `$\phi$` controlling the variance `$\phi \mu^2$`.
+
+        **Returns:**
+
+        Samples with the same shape as `eta`.
+        """
+        mu = jnp.clip(self.glink.inverse(eta), self._bounds[0])
+        disp = jnp.clip(jnp.asarray(disp), self._bounds[0])
+        shape = jnp.reciprocal(disp)
+        scale = mu * disp
+        return rdm.gamma(key, shape, shape=mu.shape) * scale
 
 
 class Binomial(ExponentialFamily):
@@ -358,6 +389,22 @@ class Binomial(ExponentialFamily):
     def init_eta(self, y: ArrayLike) -> Array:
         return self.glink((y + 0.5) / 2.0)
 
+    def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Sample observations from the Bernoulli ($n=1$) model.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor `$\eta$`.
+        - `disp`: Unused dispersion parameter (kept for API consistency).
+
+        **Returns:**
+
+        Samples with the same shape as `eta`.
+        """
+        mu = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
+        return rdm.bernoulli(key, p=mu, shape=mu.shape).astype(float)
+
 
 class Poisson(ExponentialFamily):
     r"""Poisson exponential family with density $f(y \mid \mu) = \exp(-\mu) \mu^{y}/y!$ and unit dispersion.
@@ -398,6 +445,18 @@ class Poisson(ExponentialFamily):
         return mu
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        r"""Sample observations from the Poisson model.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor `$\eta$`.
+        - `disp`: Unused dispersion parameter (kept for API consistency).
+
+        **Returns:**
+
+        Samples with the same shape as `eta`.
+        """
         lam = self.glink.inverse(eta)
         return rdm.poisson(key, lam=lam)
 
@@ -507,7 +566,24 @@ class NegativeBinomial(ExponentialFamily):
         return disp
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 0.1) -> Array:
+        r"""Sample observations from the Negative Binomial model.
+
+        **Arguments:**
+
+        - `key`: JAX PRNG key.
+        - `eta`: Linear predictor `$\eta$`.
+        - `disp`: Dispersion parameter `$\alpha$` where `$\mathrm{Var}(Y)=\mu+\alpha\mu^2$`.
+
+        **Returns:**
+
+        Samples with the same shape as `eta`.
+        """
         mu = self.glink.inverse(eta)
-        r = 1.0 / disp
-        p = r / (r + mu)
-        return rdm.negative_binomial(key, total_count=r, p=p)
+        disp = jnp.asarray(disp)
+        r = jnp.reciprocal(disp)
+
+        # Gamma-Poisson mixture sampling for NB2:
+        # lambda ~ Gamma(shape=r, scale=mu/r), y ~ Poisson(lambda)
+        key_lam, key_y = rdm.split(key, 2)
+        lam = rdm.gamma(key_lam, r, shape=mu.shape) * (mu / r)
+        return rdm.poisson(key_y, lam=lam)
