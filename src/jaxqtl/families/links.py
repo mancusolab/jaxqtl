@@ -1,12 +1,12 @@
 from abc import abstractmethod
 
 import equinox as eqx
+import jax
+import jax.nn as nn
 import jax.numpy as jnp
 import jax.scipy.special as jspec
 
 from jaxtyping import Array, ArrayLike, Scalar
-
-from .utils import _clipped_expit, _grad_per_sample
 
 
 class Link(eqx.Module):
@@ -440,3 +440,17 @@ class NBlink(Link):
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
         return _grad_per_sample(self.inverse, eta)
+
+
+def _clipped_expit(x):
+    finfo = jnp.finfo(jnp.result_type(x))
+    return jnp.clip(nn.sigmoid(x), min=finfo.tiny, max=1.0 - finfo.eps)
+
+
+def _grad_per_sample(func, x):
+    """Get gradient for each sample
+    x.shape = (n,1), eg. x can be mu or eta
+    need to convert x to (n,) in order to apply vmap and grad
+    """
+    grad_fn = jax.vmap(jax.grad(func), 0)
+    return grad_fn(x)

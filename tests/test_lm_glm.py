@@ -39,7 +39,7 @@ def test_linear_model_matches_statsmodels(solver):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Log(), sm.families.links.log()),
+        (Log(), sm.families.links.Log()),
     ],
 )
 def test_glm_poisson_matches_statsmodels_glm_link(solver, link, sm_link):
@@ -81,7 +81,7 @@ def test_glm_poisson_identity_link_runs(solver):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Logit(), sm.families.links.logit()),
+        (Logit(), sm.families.links.Logit()),
     ],
 )
 def test_glm_binomial_matches_statsmodels_glm_link(solver, link, sm_link):
@@ -134,8 +134,8 @@ def test_glm_binomial_noncanonical_links_run(solver, link):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Identity(), sm.families.links.identity()),
-        (Log(), sm.families.links.log()),
+        (Identity(), sm.families.links.Identity()),
+        (Log(), sm.families.links.Log()),
     ],
 )
 def test_glm_gaussian_matches_statsmodels_glm_link(solver, link, sm_link):

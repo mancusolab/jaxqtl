@@ -7,7 +7,7 @@ name = "jaxqtl"
 dynamic = ["version"]
 description = "Add a short description here!"
 readme = "README.md"
-requires-python = ">=3.10"
+requires-python = "~=3.10"
 license = "MIT"
 keywords = [
     "jax",
@@ -16,8 +16,8 @@ keywords = [
     "machine-learning",
 ]
 authors = [
-    { name = "Nicholas Mancuso", email = "nmancuso@usc.edu"},
-    { name = "Eleanor Zhang", email = "zzhang39@usc.edu"}
+    { name = "Eleanor Zhang", email = "zzhang39@usc.edu"},
+    { name = "Nicholas Mancuso", email = "nmancuso@usc.edu"}
 ]
 classifiers = [
     "Development Status :: 4 - Beta",
@@ -63,6 +63,17 @@ jaxqtl = "jaxqtl.cli:run_cli"
 Documentation = "https://github.com/mancusolab/jaxqtl#readme"
 Issues = "https://github.com/mancusolab/jaxqtl/issues"
 Source = "https://github.com/mancusolab/jaxqtl"
+
+[project.optional-dependencies]
+docs = [
+  "hippogriffe==0.2.0",
+  "mkdocs==1.6.1",
+  "mkdocs-include-exclude-files==0.1.0",
+  "mkdocs-ipynb==0.1.0",
+  "mkdocs-material==9.6.7",
+  "mkdocstrings[python]==0.28.3",
+  "pymdown-extensions==10.14.3"
+]
 
 [tool.hatch.version]
 source = "vcs"
@@ -117,6 +128,7 @@ order-by-type = false
 jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "jaxopt"]
 
 [tool.ruff.lint.per-file-ignores]
+"__init__.py" = ["F401"]
 # Tests can use magic values, assertions, and relative imports
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 

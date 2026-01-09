@@ -10,9 +10,15 @@ from jaxtyping import Array, ArrayLike
 
 
 class LinearSolve(eqx.Module):
-    """
-    Define parent class for all solvers
-    eta = X @ beta, the linear component
+    r"""Base interface for linear solvers used inside IRLS/GLM fitting.
+
+    During iteratively reweighted least squares (IRLS), each iteration reduces to a (weighted) least-squares solve.
+    Implementations provide:
+
+    - `wgt_lstsq`: weighted least squares.
+    - `lstsq`: unweighted least squares.
+
+    These are used by [`jaxqtl.infer.optimize.irls`][] and [`jaxqtl.infer.optimize.lstsq`][].
     """
 
     @abstractmethod
@@ -22,11 +28,20 @@ class LinearSolve(eqx.Module):
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
-        """Linear equation solver
+        r"""Solve a weighted least-squares problem.
 
-        :param X: covariate data matrix (nxp)
-        :param r: residuals
-        :param weights: weights for each individual
+        This computes $\hat\beta$ solving:
+        $\hat\beta = \arg\min_\beta \sum_{i=1}^n w_i (r_i - x_i^\top \beta)^2$.
+
+        **Arguments:**
+
+        - `X`: Design matrix $X$ with shape `(n, p)`.
+        - `r`: Working response vector $r$ with shape `(n,)`.
+        - `weights`: Non-negative weights $w$ with shape `(n,)`.
+
+        **Returns:**
+
+        Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
         pass
 
@@ -36,15 +51,29 @@ class LinearSolve(eqx.Module):
         X: ArrayLike,
         r: ArrayLike,
     ) -> Array:
-        """Linear equation solver
+        r"""Solve an unweighted least-squares problem.
 
-        :param X: covariate data matrix (nxp)
-        :param r: residuals
+        This computes $\hat\beta$ solving:
+        $\hat\beta = \arg\min_\beta \lVert r - X\beta \rVert_2^2$.
+
+        **Arguments:**
+
+        - `X`: Design matrix $X$ with shape `(n, p)`.
+        - `r`: Response vector $r$ with shape `(n,)`.
+
+        **Returns:**
+
+        Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
         pass
 
 
 class QRSolve(LinearSolve):
+    r"""Solve least-squares problems using a QR decomposition.
+
+    QR-based solvers are typically more numerically stable than normal-equation solvers for ill-conditioned designs.
+    """
+
     def wgt_lstsq(
         self,
         X: ArrayLike,
@@ -69,6 +98,12 @@ class QRSolve(LinearSolve):
 
 
 class CholeskySolve(LinearSolve):
+    r"""Solve least-squares problems via normal equations and a Cholesky factorization.
+
+    This forms $(X^\top W X)\beta = X^\top W r$ (or $(X^\top X)\beta = X^\top r$) and solves using a Cholesky
+    factorization. It is often fast for well-conditioned designs.
+    """
+
     def wgt_lstsq(
         self,
         X: ArrayLike,
@@ -95,27 +130,34 @@ class CholeskySolve(LinearSolve):
 
 
 class CGSolve(LinearSolve):
+    r"""Solve least-squares problems using conjugate gradients (via `lineax`).
+
+    This is useful when forming $(X^\top W X)$ is expensive. The returned solution may be approximate depending on the
+    stopping criteria used by the CG solver.
+    """
+
     def wgt_lstsq(
         self,
         X: ArrayLike,
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
-        """not converged for some cases in real data;
-        Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol),
-        Now switch lineax
+        r"""Solve weighted least squares using a normal-equation CG method.
+
+        **Arguments:**
+
+        - `X`: Design matrix $X$ with shape `(n, p)`.
+        - `r`: Working response vector $r$ with shape `(n,)`.
+        - `weights`: Non-negative weights $w$ with shape `(n,)`.
+
+        **Returns:**
+
+        Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
         w_half = jnp.sqrt(weights)
         w_half_X = X * w_half[:, jnp.newaxis]
 
-        # Method 1: CG solve
-        # cg_solver = lx.CG(atol=1e-5, rtol=1e-5)
-        # XtWX = w_half_X.T @ w_half_X
-        # operator = lx.MatrixLinearOperator(XtWX, lx.positive_semidefinite_tag)
-        # b = (weights * X).T @ r
-        # sol = lx.linear_solve(operator, b.squeeze(), solver=cg_solver)
-
-        # Method 2 (faster): CG solve using normal equation which solve A^t A x = A^t b
+        # CG solve using normal equation which solve A^t A x = A^t b
         # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
         ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
         operator = lx.MatrixLinearOperator(w_half_X)
@@ -129,12 +171,18 @@ class CGSolve(LinearSolve):
         X: ArrayLike,
         r: ArrayLike,
     ) -> Array:
-        """not converged for some cases in real data;
-        Used jaxopt solve_normal_cg, not always gurantee convergence (not allow specify tol),
-        Now switch lineax
+        r"""Solve unweighted least squares using a normal-equation CG method.
+
+        **Arguments:**
+
+        - `X`: Design matrix $X$ with shape `(n, p)`.
+        - `r`: Response vector $r$ with shape `(n,)`.
+
+        **Returns:**
+
+        Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
-        # Method 2 (faster): CG solve using normal equation which solve A^t A x = A^t b
-        # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
+        # CG solve using normal equation which solve A^t A x = A^t b
         ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
         operator = lx.MatrixLinearOperator(X)
         sol = lx.linear_solve(operator, r, solver=ncg_solver)

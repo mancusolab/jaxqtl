@@ -1,23 +1,8 @@
-import jax
 import jax.numpy as jnp
 
 from jax import lax
-from jax.scipy.special import betainc, expit, gammaincc
+from jax.scipy.special import betainc, gammaincc
 from jax.typing import ArrayLike
-
-
-def _clipped_expit(x):
-    finfo = jnp.finfo(jnp.result_type(x))
-    return jnp.clip(expit(x), min=finfo.tiny, max=1.0 - finfo.eps)
-
-
-def _grad_per_sample(func, x):
-    """Get gradient for each sample
-    x.shape = (n,1), eg. x can be mu or eta
-    need to convert x to (n,) in order to apply vmap and grad
-    """
-    grad_fn = jax.vmap(jax.grad(func), 0)
-    return grad_fn(x)
 
 
 def t_cdf(value: ArrayLike, df: float, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0):

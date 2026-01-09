@@ -48,11 +48,11 @@ class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
 
         **Returns:**
 
-        A CGF state object used by [`jaxqtl.hypothesis.spa.saddlepoint_pvalue`][].
+        A CGF state object used by [`jaxqtl.hypothesis.saddlepoint_pvalue`][].
         """
         ...
 
@@ -137,7 +137,7 @@ class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.BasicCGFState`][].
+        A [`jaxqtl.hypothesis.BasicCGFState`][].
         """
         return BasicCGFState(glm_state.mu)
 
@@ -198,7 +198,7 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.NegBinCGFState`][].
+        A [`jaxqtl.hypothesis.NegBinCGFState`][].
         """
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
@@ -279,7 +279,7 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.GaussianCGFState`][].
+        A [`jaxqtl.hypothesis.GaussianCGFState`][].
         """
         return GaussianCGFState(glm_state.mu, jnp.reciprocal(glm_state.glm_wt))
 
@@ -316,7 +316,7 @@ def saddlepoint_pvalue(
 
     - `score`: Observed score statistic.
     - `g_resid`: Residualized genotype vector with shape `(n,)`.
-    - `cgf`: A [`jaxqtl.hypothesis.spa.CumulantGeneratingFunction`][] implementation.
+    - `cgf`: A [`jaxqtl.hypothesis.CumulantGeneratingFunction`][] implementation.
     - `state`: CGF state created by `cgf.init`.
     - `scale`: Scalar multiplier applied to the SPA root-finding parameter.
     - `two_sided_mode`: Strategy for two-sided p-values (`"rstar"`, `"abs"`, or `"2min"`).

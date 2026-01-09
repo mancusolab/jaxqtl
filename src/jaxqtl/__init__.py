@@ -10,11 +10,4 @@ except PackageNotFoundError:  # pragma: no cover
 finally:
     del version, PackageNotFoundError
 
-
-from jax import config
-
-
-config.update("jax_enable_x64", True)
-
-# Avoid eager subpackage imports here: importing `jaxqtl` should not pull in optional/heavy
-# dependencies from `io/` or `map/` (e.g. scanpy/decoupler), and users can import what they need.
+from . import families, hypothesis, infer, io, map

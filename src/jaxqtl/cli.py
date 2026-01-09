@@ -20,9 +20,15 @@ from .hypothesis import (
     SpaTest,
     WaldTest,
 )
-from .infer.glm import GLM, LinearModel
-from .infer.solve import CGSolve, CholeskySolve, QRSolve
-from .infer.stderr import FisherInfoError, HuberError
+from .infer import (
+    CGSolve,
+    CholeskySolve,
+    FisherInfoError,
+    GLM,
+    HuberError,
+    LinearModel,
+    QRSolve,
+)
 from .io.geno import PlinkData, VCFData
 from .io.pheno import ExpressionData
 from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
@@ -633,12 +639,14 @@ def main(args):
 
     args = argp.parse_args(args)
 
-    jax.config.update("jax_platform_name", args.platform)
-    if args.platform == "tpu":
+    # we need to set 64bit support before any other option
+    if args.platform != "tpu":
+        jax.config.update("jax_enable_x64", True)
+    else:
         # TPU not support complex 64, only 16 and 32
         jax.config.update("jax_enable_x64", False)
-    else:
-        jax.config.update("jax_enable_x64", True)
+
+    jax.config.update("jax_platform_name", args.platform)
 
     log = get_logger(__name__, args.out)
     if args.verbose:
