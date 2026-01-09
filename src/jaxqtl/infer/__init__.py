@@ -1,17 +1,22 @@
-from .glm import (
+from ._glm import (
     AbstractLinearModel,
     GLM,
     GLMState,
     LinearModel,
 )
-from .optimize import infer_beta_params, irls, lstsq
-from .solve import (
+from ._optimize import (
+    BetaParams,
+    infer_beta_params,
+    irls,
+    lstsq,
+)
+from ._solve import (
     CGSolve,
     CholeskySolve,
     LinearSolve,
     QRSolve,
 )
-from .stderr import (
+from ._stderr import (
     AbstractVarianceEstimator,
     FisherInfoError,
     HuberError,

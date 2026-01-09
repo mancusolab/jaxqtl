@@ -11,7 +11,7 @@ import jax.random as rdm
 from jax import numpy as jnp
 from jaxtyping import ArrayLike, PRNGKeyArray
 
-from ..families.distribution import NegativeBinomial
+from ..distribution import NegativeBinomial
 from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
 from ..log import get_log
 from .data import CisData, ReadyDataState

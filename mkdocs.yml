@@ -65,8 +65,7 @@ plugins:
         exclude:
           - "_overrides"
     - hippogriffe:
-        extra_public_objects:
-          - jax.ShapeDtypeStruct
+        show_bases: true
     - mkdocstrings:
         handlers:
             python:
@@ -95,23 +94,23 @@ nav:
         - 'guide/files.md'
     - API:
       - Statistical Models:
-        - 'api/glm.md'
-        - 'api/families.md'
-        - 'api/links.md'
+        - 'api/models/glm.md'
+        - 'api/models/distribution.md'
+        - 'api/models/links.md'
       - Inference:
-        - 'api/infer.md'
-        - 'api/solvers.md'
-        - 'api/stderr.md'
+        - 'api/inference/infer.md'
+        - 'api/inference/solvers.md'
+        - 'api/inference/stderr.md'
       - Hypothesis Testing:
-          - 'api/variant.md'
-          - 'api/gene.md'
+          - 'api/hypothesis/variant.md'
+          - 'api/hypothesis/gene.md'
       - Data Management:
-          - 'api/geno.md'
-          - 'api/pheno.md'
-          - 'api/other.md'
+          - 'api/data/geno.md'
+          - 'api/data/pheno.md'
+          - 'api/data/other.md'
       - molQTL Mapping:
-          - 'api/cis.md'
-          - 'api/trans.md'
+          - 'api/mapping/cis.md'
+          - 'api/mapping/trans.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'

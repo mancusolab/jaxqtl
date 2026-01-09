@@ -7,16 +7,16 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
-from ..families import (
+from ..distribution import (
     ExponentialFamily,
     Gaussian,
     NegativeBinomial,
     Poisson,
     t_cdf,
 )
-from .optimize import irls, lstsq
-from .solve import CholeskySolve, LinearSolve
-from .stderr import AbstractVarianceEstimator, FisherInfoError
+from ._optimize import irls, lstsq
+from ._solve import CholeskySolve, LinearSolve
+from ._stderr import AbstractVarianceEstimator, FisherInfoError
 
 
 class GLMState(NamedTuple):

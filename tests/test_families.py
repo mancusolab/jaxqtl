@@ -6,8 +6,8 @@ import jax.random as rdm
 
 from jax import config
 
-from jaxqtl.families.distribution import Binomial, Gamma, Gaussian, NegativeBinomial, Poisson
-from jaxqtl.families.links import Identity, Inverse, Log, Logit, NBlink, Power
+from jaxqtl.distribution._expfam import Binomial, Gamma, Gaussian, NegativeBinomial, Poisson
+from jaxqtl.distribution._links import IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
 
 
 config.update("jax_enable_x64", True)
@@ -16,13 +16,13 @@ config.update("jax_enable_x64", True)
 @pytest.mark.parametrize(
     ("link", "mu"),
     [
-        (Identity(), jnp.linspace(-2.0, 2.0, 101)),
-        (Log(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (Inverse(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (Logit(), jnp.linspace(0.05, 0.95, 101)),
-        (Power(0.5), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (Power(2.0), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (NBlink(0.3), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (IdentityLink(), jnp.linspace(-2.0, 2.0, 101)),
+        (LogLink(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (InverseLink(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (LogitLink(), jnp.linspace(0.05, 0.95, 101)),
+        (PowerLink(0.5), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (PowerLink(2.0), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (NBLink(0.3), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
     ],
 )
 def test_link_roundtrip_inverse(link, mu):
@@ -36,12 +36,12 @@ def test_link_roundtrip_inverse(link, mu):
 @pytest.mark.parametrize(
     ("link", "mu"),
     [
-        (Identity(), jnp.linspace(-2.0, 2.0, 101)),
-        (Log(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (Inverse(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (Logit(), jnp.linspace(0.05, 0.95, 101)),
-        (Power(1.5), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
-        (NBlink(0.3), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (IdentityLink(), jnp.linspace(-2.0, 2.0, 101)),
+        (LogLink(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (InverseLink(), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (LogitLink(), jnp.linspace(0.05, 0.95, 101)),
+        (PowerLink(1.5), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
+        (NBLink(0.3), jnp.exp(jnp.linspace(-2.0, 2.0, 101))),
     ],
 )
 def test_link_derivative_matches_autodiff(link, mu):
@@ -115,11 +115,11 @@ def test_family_sample_shapes_and_mean_approx(family, disp):
 @pytest.mark.parametrize(
     ("family_ctor", "bad_link"),
     [
-        (Gaussian, Logit()),
-        (Poisson, Logit()),
-        (Binomial, Inverse()),
-        (NegativeBinomial, Inverse()),
-        (Gamma, Logit()),
+        (Gaussian, LogitLink()),
+        (Poisson, LogitLink()),
+        (Binomial, InverseLink()),
+        (NegativeBinomial, InverseLink()),
+        (Gamma, LogitLink()),
     ],
 )
 def test_invalid_links_raise_value_error(family_ctor, bad_link):

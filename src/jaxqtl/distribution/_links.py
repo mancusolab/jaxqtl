@@ -9,7 +9,7 @@ import jax.scipy.special as jspec
 from jaxtyping import Array, ArrayLike, Scalar
 
 
-class Link(eqx.Module):
+class AbstractLink(eqx.Module):
     r"""Abstract base for GLM link functions mapping the mean parameter to the linear predictor
     $g: \mu \mapsto \eta$.
     """
@@ -71,7 +71,7 @@ class Link(eqx.Module):
         pass
 
 
-class Power(Link):
+class PowerLink(AbstractLink):
     r"""Power link with $g(\mu) = \mu^{p}$ on $\mu > 0$, configurable exponent $p$."""
 
     power: Scalar = eqx.field(converter=jnp.asarray, default=1.0)
@@ -142,7 +142,7 @@ class Power(Link):
         return _grad_per_sample(self.inverse, eta)
 
 
-class Identity(Link):
+class IdentityLink(AbstractLink):
     r"""Identity link with $g(\mu) = \mu$ for $\mu \in \mathbb{R}$."""
 
     def __call__(self, mu: ArrayLike) -> Array:
@@ -198,7 +198,7 @@ class Identity(Link):
         return jnp.ones_like(eta)
 
 
-class Logit(Link):
+class LogitLink(AbstractLink):
     r"""Logit link with $g(\mu) = \log(\mu / (1-\mu))$ on $\mu \in (0, 1)$."""
 
     def __call__(self, mu: ArrayLike) -> Array:
@@ -254,7 +254,7 @@ class Logit(Link):
         return _grad_per_sample(self.inverse, eta)
 
 
-class Inverse(Link):
+class InverseLink(AbstractLink):
     r"""Inverse link with $g(\mu) = 1/\mu$ on $\mu > 0$."""
 
     def __call__(self, mu: ArrayLike) -> Array:
@@ -310,7 +310,7 @@ class Inverse(Link):
         return _grad_per_sample(self.inverse, eta)
 
 
-class Log(Link):
+class LogLink(AbstractLink):
     r"""Log link with $g(\mu) = \log(\mu)$ on $\mu > 0$."""
 
     def __call__(self, mu: ArrayLike) -> Array:
@@ -366,7 +366,7 @@ class Log(Link):
         return _grad_per_sample(self.inverse, eta)
 
 
-class NBlink(Link):
+class NBLink(AbstractLink):
     r"""Negative Binomial-specific log link with
     $g(\mu) = \log(\mu \alpha / (\mu \alpha + 1))$ where $\alpha$ is dispersion.
 

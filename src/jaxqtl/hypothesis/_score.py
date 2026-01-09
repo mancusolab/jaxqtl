@@ -3,7 +3,7 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 from jaxtyping import ArrayLike
 
-from .base import (
+from ._base import (
     _residualize_genotypes,
     _score_from_residuals,
     AbstractHypothesisTest,

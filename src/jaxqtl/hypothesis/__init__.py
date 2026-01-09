@@ -1,12 +1,12 @@
-from .aggregate import (
+from ._aggregate import (
     AbstractAggregateTest,
     ACAT,
     BetaPermutation,
     PermutationResult,
 )
-from .base import AbstractHypothesisTest, TestResult
-from .score import ScoreTest
-from .spa import (
+from ._base import AbstractHypothesisTest, TestResult
+from ._score import ScoreTest
+from ._spa import (
     CumulantGeneratingFunction,
     GaussianCGF,
     NegativeBinomialCGF,
@@ -14,4 +14,4 @@ from .spa import (
     saddlepoint_pvalue,
     SpaTest,
 )
-from .wald import WaldTest
+from ._wald import WaldTest

@@ -9,8 +9,8 @@ from jax.scipy import stats as jaxstats
 from jax.scipy.special import polygamma
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..families.distribution import ExponentialFamily
-from .solve import LinearSolve
+from ..distribution._expfam import ExponentialFamily
+from ._solve import LinearSolve
 
 
 class IRLSState(NamedTuple):
@@ -46,7 +46,7 @@ def irls(
     - `y`: Outcome vector with shape `(n,)`.
     - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
     - `eta`: Initial linear predictor $\eta$ with shape `(n,)`.
-    - `family`: GLM family implementing [`jaxqtl.families.ExponentialFamily`][].
+    - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
     - `solver`: Linear solver implementing [`jaxqtl.infer.LinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.
     - `tol`: Convergence tolerance on the change in objective value.

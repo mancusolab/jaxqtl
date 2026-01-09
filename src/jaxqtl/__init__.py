@@ -10,4 +10,10 @@ except PackageNotFoundError:  # pragma: no cover
 finally:
     del version, PackageNotFoundError
 
-from . import families, hypothesis, infer, io, map
+from . import (
+    distribution,
+    hypothesis,
+    infer,
+    io,
+    map,
+)

@@ -5,8 +5,8 @@ import jax.numpy as jnp
 
 from jaxtyping import ArrayLike
 
-from ..families import Gaussian
-from .base import _residualize_genotypes, AbstractHypothesisTest, TestResult
+from ..distribution import Gaussian
+from ._base import _residualize_genotypes, AbstractHypothesisTest, TestResult
 
 
 class WaldTest(AbstractHypothesisTest):

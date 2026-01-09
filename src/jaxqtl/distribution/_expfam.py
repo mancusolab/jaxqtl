@@ -18,11 +18,11 @@ from jax import lax
 from jax.scipy.special import gammaln
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from .links import Identity, Inverse, Link, Log, Logit, NBlink, Power
+from ._links import AbstractLink, IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
 
 
 class ExponentialFamily(eqx.Module):
-    r"""Base interface for one-parameter exponential families and their GLM link. A natural exponential family has
+    r"""Base interface for one-parameter exponential distribution and their GLM link. A natural exponential family has
     density $f(y \mid \theta, \phi) = \exp\left((y \theta - b(\theta))/\phi + c(y, \phi)\right)$,
     where $\theta$ is the natural parameter, $\phi$ is the dispersion/scale, $b(\theta)$ is the cumulant
     (log-partition) function, and $c(y, \phi)$ is the log base measure.
@@ -39,8 +39,8 @@ class ExponentialFamily(eqx.Module):
 
     """
 
-    glink: eqx.AbstractVar[Link]
-    _valid_links: AbstractClassVar[list[type[Link]]]
+    glink: eqx.AbstractVar[AbstractLink]
+    _valid_links: AbstractClassVar[list[type[AbstractLink]]]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def __check_init__(self):
@@ -203,18 +203,20 @@ class Gaussian(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.Power`][].
+        Valid links: [`jaxqtl.distribution.IdentityLink`][], [`jaxqtl.distribution.LogLink`][],
+        [`jaxqtl.distribution.PowerLink`][].
 
     """
 
-    glink: Link
-    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log, Power]
+    glink: AbstractLink
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, LogLink, PowerLink]
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
-    def __init__(self, glink: Link = Identity()):
+    def __init__(self, glink: AbstractLink = IdentityLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Identity`][]).
+        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.distribution.IdentityLink`][]).
         """
         self.glink = glink
 
@@ -279,18 +281,20 @@ class Gamma(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Inverse`][], [`jaxqtl.families.Log`][].
+        Valid links: [`jaxqtl.distribution.IdentityLink`][], [`jaxqtl.distribution.InverseLink`][],
+        [`jaxqtl.distribution.LogLink`][].
 
     """
 
-    glink: Link
-    _valid_links: ClassVar[list[type[Link]]] = [Identity, Inverse, Log]
+    glink: AbstractLink
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, InverseLink, LogLink]
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
-    def __init__(self, glink: Link = Inverse()):
+    def __init__(self, glink: AbstractLink = InverseLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Inverse`][]).
+        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.distribution.InverseLink`][]).
         """
         self.glink = glink
 
@@ -341,22 +345,24 @@ class Binomial(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.Logit`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.Identity`][].
+        Valid links: [`jaxqtl.distribution.LogitLink`][], [`jaxqtl.distribution.LogLink`][],
+        [`jaxqtl.distribution.IdentityLink`][].
 
     """
 
-    glink: Link
-    _valid_links: ClassVar[list[type[Link]]] = [
-        Logit,
-        Log,
-        Identity,
+    glink: AbstractLink
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [
+        LogitLink,
+        LogLink,
+        IdentityLink,
     ]  # Probit, Cauchy, LogC, CLogLog, LogLog
     _bounds: ClassVar[tuple[float, float]] = (0.0, 1.0)
 
-    def __init__(self, glink: Link = Logit()):
+    def __init__(self, glink: AbstractLink = LogitLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Logit`][]).
+        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.distribution.LogitLink`][]).
         """
         self.glink = glink
 
@@ -406,18 +412,19 @@ class Poisson(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][].
+        Valid links: [`jaxqtl.distribution.IdentityLink`][], [`jaxqtl.distribution.LogLink`][].
 
     """
 
-    glink: Link = Log()
-    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log]  # Sqrt
+    glink: AbstractLink = LogLink()
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, LogLink]  # Sqrt
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
-    def __init__(self, glink: Link = Log()):
+    def __init__(self, glink: AbstractLink = LogLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Log`][]).
+        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.distribution.LogLink`][]).
         """
         self.glink = glink
 
@@ -462,19 +469,20 @@ class NegativeBinomial(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.NBlink`][],
-        [`jaxqtl.families.Power`][].
+        Valid links: [`jaxqtl.distribution.IdentityLink`][], [`jaxqtl.distribution.LogLink`][],
+        [`jaxqtl.distribution.NBLink`][], [`jaxqtl.distribution.PowerLink`][].
 
     """
 
-    glink: Link = Log()
-    _valid_links: ClassVar[list[type[Link]]] = [Identity, Log, NBlink, Power]  # CLogLog
+    glink: AbstractLink = LogLink()
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, LogLink, NBLink, PowerLink]  # CLogLog
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
-    def __init__(self, glink: Link = Log()):
+    def __init__(self, glink: AbstractLink = LogLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Log`][]).
+        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+            (defaults to [`jaxqtl.distribution.LogLink`][]).
         """
         self.glink = glink
 

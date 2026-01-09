@@ -9,9 +9,9 @@ import optimistix as optx
 from jax import lax, numpy as jnp
 from jaxtyping import Array, ArrayLike, PRNGKeyArray, Scalar
 
-from ..families.utils import ncx2_sf, t_cdf
-from ..infer.optimize import BetaParams, infer_beta_params
-from .base import AbstractHypothesisTest, TestResult
+from ..distribution import ncx2_sf, t_cdf
+from ..infer import BetaParams, infer_beta_params
+from ._base import AbstractHypothesisTest, TestResult
 
 
 Aux = TypeVar("Aux")

@@ -6,7 +6,7 @@ import jax.numpy as jnp
 from jax.numpy import linalg as jnpla
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..families.distribution import ExponentialFamily
+from ..distribution._expfam import ExponentialFamily
 
 
 class AbstractVarianceEstimator(eqx.Module):
@@ -31,7 +31,7 @@ class AbstractVarianceEstimator(eqx.Module):
 
         **Arguments:**
 
-        - `family`: GLM family implementing [`jaxqtl.families.ExponentialFamily`][].
+        - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)`.
         - `eta`: Linear predictor `$\eta$` with shape `(n,)`.
@@ -67,7 +67,7 @@ class FisherInfoError(AbstractVarianceEstimator):
 
         **Arguments:**
 
-        - `family`: GLM family implementing [`jaxqtl.families.ExponentialFamily`][] (unused).
+        - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][] (unused).
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)` (unused).
         - `eta`: Linear predictor `$\eta$` with shape `(n,)` (unused).
@@ -107,7 +107,7 @@ class HuberError(AbstractVarianceEstimator):
 
         **Arguments:**
 
-        - `family`: GLM family implementing [`jaxqtl.families.ExponentialFamily`][].
+        - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)`.
         - `eta`: Linear predictor `$\eta$` with shape `(n,)`.

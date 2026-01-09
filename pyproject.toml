@@ -47,8 +47,6 @@ dependencies = [
     "lineax",
     "optimistix",
     "typing_extensions",
-    "scanpy",
-    "decoupler",
     "pandas_plink",
     "polars",
     "qtl",

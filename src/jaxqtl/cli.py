@@ -9,7 +9,7 @@ import pyarrow.parquet as pq
 
 import jax
 
-from .families.distribution import Gaussian, NegativeBinomial, Poisson
+from .distribution._expfam import Gaussian, NegativeBinomial, Poisson
 from .hypothesis import (
     ACAT,
     BetaPermutation,
@@ -29,9 +29,9 @@ from .infer import (
     LinearModel,
     QRSolve,
 )
-from .io.geno import PlinkData, VCFData
-from .io.pheno import ExpressionData
-from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
+from .io._geno import PlinkData, VCFData
+from .io._pheno import ExpressionData
+from .io._utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single_column_file
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState

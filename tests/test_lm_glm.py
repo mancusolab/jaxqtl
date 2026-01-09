@@ -7,11 +7,11 @@ import jax.numpy as jnp
 
 from jax import config
 
-from jaxqtl.families.distribution import Binomial, Gaussian, Poisson
-from jaxqtl.families.links import Identity, Log, Logit, Power
-from jaxqtl.infer.glm import GLM, LinearModel
-from jaxqtl.infer.solve import CGSolve, CholeskySolve, QRSolve
-from jaxqtl.infer.stderr import HuberError
+from jaxqtl.distribution._expfam import Binomial, Gaussian, Poisson
+from jaxqtl.distribution._links import IdentityLink, LogitLink, LogLink, PowerLink
+from jaxqtl.infer._glm import GLM, LinearModel
+from jaxqtl.infer._solve import CGSolve, CholeskySolve, QRSolve
+from jaxqtl.infer._stderr import HuberError
 
 
 config.update("jax_enable_x64", True)
@@ -39,7 +39,7 @@ def test_linear_model_matches_statsmodels(solver):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Log(), sm.families.links.Log()),
+        (LogLink(), sm.families.links.Log()),
     ],
 )
 def test_glm_poisson_matches_statsmodels_glm_link(solver, link, sm_link):
@@ -69,7 +69,7 @@ def test_glm_poisson_identity_link_runs(solver):
     eta = X @ beta
     y = rng.poisson(lam=np.clip(eta, 1e-3, np.inf))
 
-    model = GLM(family=Poisson(glink=Identity()), solver=solver, max_iter=300, step_size=1.0)
+    model = GLM(family=Poisson(glink=IdentityLink()), solver=solver, max_iter=300, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     assert jnp.all(jnp.isfinite(glm_state.beta))
@@ -81,7 +81,7 @@ def test_glm_poisson_identity_link_runs(solver):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Logit(), sm.families.links.Logit()),
+        (LogitLink(), sm.families.links.Logit()),
     ],
 )
 def test_glm_binomial_matches_statsmodels_glm_link(solver, link, sm_link):
@@ -101,7 +101,7 @@ def test_glm_binomial_matches_statsmodels_glm_link(solver, link, sm_link):
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
-@pytest.mark.parametrize("link", (Log(), Identity()))
+@pytest.mark.parametrize("link", (LogLink(), IdentityLink()))
 def test_glm_binomial_noncanonical_links_run(solver, link):
     rng = np.random.default_rng(0)
     n, p = 400, 3
@@ -109,7 +109,7 @@ def test_glm_binomial_noncanonical_links_run(solver, link):
     X = sm.add_constant(X, prepend=True)
     beta = rng.normal(size=(p + 1,)) * 0.2
 
-    if isinstance(link, Log):
+    if isinstance(link, LogLink):
         # Ensure eta <= 0 so mu = exp(eta) in (0, 1].
         beta[0] = -1.0
         eta = X @ beta
@@ -134,8 +134,8 @@ def test_glm_binomial_noncanonical_links_run(solver, link):
 @pytest.mark.parametrize(
     ("link", "sm_link"),
     [
-        (Identity(), sm.families.links.Identity()),
-        (Log(), sm.families.links.Log()),
+        (IdentityLink(), sm.families.links.Identity()),
+        (LogLink(), sm.families.links.Log()),
     ],
 )
 def test_glm_gaussian_matches_statsmodels_glm_link(solver, link, sm_link):
@@ -145,7 +145,7 @@ def test_glm_gaussian_matches_statsmodels_glm_link(solver, link, sm_link):
     X = sm.add_constant(X, prepend=True)
     beta = rng.normal(size=(p + 1,))
 
-    if isinstance(link, Log):
+    if isinstance(link, LogLink):
         eta = X @ beta
         mu = np.exp(eta)
         y = np.clip(mu + rng.normal(scale=0.1, size=(n,)), 1e-6, np.inf)
@@ -162,7 +162,7 @@ def test_glm_gaussian_matches_statsmodels_glm_link(solver, link, sm_link):
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
-@pytest.mark.parametrize("link", (Power(0.5), Power(2.0)))
+@pytest.mark.parametrize("link", (PowerLink(0.5), PowerLink(2.0)))
 def test_glm_gaussian_power_link_runs(solver, link):
     rng = np.random.default_rng(0)
     n = 300

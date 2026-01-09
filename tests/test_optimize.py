@@ -5,9 +5,9 @@ import jax.numpy as jnp
 
 from jax import config, random
 
-from jaxqtl.families.distribution import Poisson
-from jaxqtl.infer.optimize import infer_beta_params, irls, lstsq
-from jaxqtl.infer.solve import CholeskySolve, QRSolve
+from jaxqtl.distribution._expfam import Poisson
+from jaxqtl.infer._optimize import infer_beta_params, irls, lstsq
+from jaxqtl.infer._solve import CholeskySolve, QRSolve
 
 
 config.update("jax_enable_x64", True)

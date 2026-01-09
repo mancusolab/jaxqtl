@@ -3,7 +3,7 @@ import pytest
 import jax.numpy as jnp
 import jax.random as rdm
 
-from jaxqtl.families.distribution import Gaussian, Poisson
+from jaxqtl.distribution._expfam import Gaussian, Poisson
 from jaxqtl.sim import simulate_pheno
 
 

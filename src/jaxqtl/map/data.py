@@ -9,8 +9,8 @@ import jax.numpy as jnp
 
 from jaxtyping import Array
 
-from ..io.geno import GenotypeData
-from ..io.pheno import ExpressionData
+from ..io._geno import GenotypeData
+from ..io._pheno import ExpressionData
 
 
 class SNPInfo(eqx.Module):

@@ -13,8 +13,8 @@ from jax.scipy import stats
 from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..infer.glm import GLMState
-from .base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
+from ..infer import GLMState
+from ._base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
 
 
 class HasPredMean(Protocol):
@@ -434,7 +434,7 @@ class SpaTest(AbstractHypothesisTest):
 
     !!! info
 
-        For discrete families a continuity correction term is included, such that
+        For discrete distribution a continuity correction term is included, such that
         $v = (1 - \exp(-\hat t))\sqrt{K''(\hat t)}$.
     """
 

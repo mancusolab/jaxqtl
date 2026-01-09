@@ -10,7 +10,7 @@ import equinox as eqx
 
 from jax import numpy as jnp
 
-from ..families.distribution import NegativeBinomial
+from ..distribution._expfam import NegativeBinomial
 from ..hypothesis import AbstractHypothesisTest
 from ..log import get_log
 from .data import ReadyDataState
