@@ -22,7 +22,6 @@ def test_simulate_shapes_and_eta(family, gamma, dispersion):
     result = simulate_pheno(
         key,
         n=n,
-        p=p,
         family=family,
         beta=beta,
         gamma=gamma,
@@ -47,7 +46,6 @@ def test_simulate_poisson_mean_matches_mu():
     data = simulate_pheno(
         key,
         n=2000,
-        p=2,
         family=Poisson(),
         beta=beta,
         gamma=0.0,
