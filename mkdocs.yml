@@ -88,7 +88,7 @@ plugins:
                     # general options
                     allow_inspection: true
                     show_bases: true
-                    show_source: false
+                    show_source: true
                     # heading options
                     heading_level: 4
                     show_root_heading: true
@@ -110,6 +110,12 @@ plugins:
 
 nav:
     - 'index.md'
+    - User Guide:
+        - 'guide/model.md'
+        - 'guide/cis.md'
+        - 'guide/trans.md'
+        - 'guide/util.md'
+        - 'guide/files.md'
     - API:
       - Statistical Models:
         - 'api/glm.md'

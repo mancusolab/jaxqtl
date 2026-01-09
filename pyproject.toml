@@ -122,6 +122,7 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "jaxopt"]
 
 [tool.mypy]
 allow_redefinition = true
+exclude = ["docs/"]
 
 [tool.coverage.run]
 source_pkgs = ["jaxqtl", "tests"]
