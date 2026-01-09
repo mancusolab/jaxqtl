@@ -432,6 +432,11 @@ class SpaTest(AbstractHypothesisTest):
     A root $\hat t$ is found such that $K'(\hat t) = S$, then the Barndorff-Nielsen approximation is used via
     $r^* = w + \log(v/w)/w$ with $w = \mathrm{sign}(\hat t)\sqrt{2(\hat t S - K(\hat t))}$ and
     $v = \hat t\sqrt{K''(\hat t)}$, yielding a two-sided p-value via a Normal tail approximation.
+
+    !!! info
+
+        For discrete families a continuity correction term is included, such that
+        $v = (1 - \exp(-\hat t))\sqrt{K''(\hat t)}$.
     """
 
     cgf: CumulantGeneratingFunction = NegativeBinomialCGF()

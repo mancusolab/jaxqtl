@@ -14,7 +14,7 @@ class WaldTest(AbstractHypothesisTest):
 
     For each variant, this fits a full model including the variant (optionally using a fast path for Gaussian models)
     and reports a Wald statistic of the form $z = \hat\beta / \mathrm{se}(\hat\beta)$ with
-    two-sided p-value $p = 2\Phi(-|z|)$.
+    two-sided p-value $p = 2\Phi(-|z|)$ where $\Phi(\cdot)$ is the Normal CDF.
     """
 
     _is_linear: bool = eqx.field(static=True, init=False)

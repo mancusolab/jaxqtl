@@ -12,7 +12,7 @@ class ScoreTest(AbstractHypothesisTest):
     For a null (covariate-only) fit, let $r_y$ be the working residuals and let $g$ be a variant genotype vector.
     After residualizing $g$ against covariates, the per-variant score statistic is
     $U = g^{\top} W r_y$, with variance $V = g^{\top} W g$, and the reported z-statistic is
-    $z = U / \sqrt{V}$ with two-sided p-value $p = 2\Phi(-|z|)$.
+    $z = U / \sqrt{V}$ with two-sided p-value $p = 2\Phi(-|z|)$ where $\Phi(\cdot)$ is the Normal CDF.
     """
 
     def test(
