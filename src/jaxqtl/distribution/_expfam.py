@@ -18,7 +18,15 @@ from jax import lax
 from jax.scipy.special import gammaln
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ._links import AbstractLink, IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
+from ._links import (
+    AbstractLink,
+    IdentityLink,
+    InverseLink,
+    LogitLink,
+    LogLink,
+    NBLink,
+    PowerLink,
+)
 
 
 class ExponentialFamily(eqx.Module):
