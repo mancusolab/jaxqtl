@@ -15,12 +15,24 @@ from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ..infer.glm import GLMState
-from .base import _residualize_genotypes, _score_from_residuals, HypothesisTest, TestResult
+from .base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
 
 
 class HasPredMean(Protocol):
+    r"""Protocol for SPA state objects exposing a predicted mean."""
+
     @property
     def pred_mean(self) -> Array:
+        r"""Return the per-sample predicted mean.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A 1D array of predicted means.
+        """
         ...
 
 
@@ -28,38 +40,133 @@ CGFStateT = TypeVar("CGFStateT", bound=HasPredMean)
 
 
 class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
-    """Abstract base for cumulant generating functions used by SPA."""
+    r"""Abstract base for cumulant generating functions used by SPA."""
 
     @abstractmethod
     def init(self, glm_state: GLMState) -> CGFStateT:
+        r"""Construct CGF state from a fitted model.
+
+        **Arguments:**
+
+        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+
+        **Returns:**
+
+        A CGF state object used by [`jaxqtl.hypothesis.spa.saddlepoint_pvalue`][].
+        """
         ...
 
     def __call__(self, t: Array, state: CGFStateT) -> Array:
+        r"""Evaluate the cumulant generating function.
+
+        **Arguments:**
+
+        - `t`: Evaluation point(s).
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        CGF value(s) evaluated at `t`.
+        """
         return self.cgf(t, state)
 
     @abstractmethod
     def cgf(self, t: Array, state: CGFStateT) -> Array:
+        r"""Evaluate the cumulant generating function.
+
+        **Arguments:**
+
+        - `t`: Evaluation point(s).
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        CGF value(s) evaluated at `t`.
+        """
         ...
 
     def get_t_bounds(self, g_resid: Array, state: CGFStateT) -> tuple:
+        r"""Return bounds on the root-finding parameter `t`.
+
+        **Arguments:**
+
+        - `g_resid`: Residualized genotype vector with shape `(n,)`.
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        A `(lower, upper)` tuple of bounds for `t`.
+        """
         return -jnp.inf, jnp.inf
 
     def get_score_bounds(self, g_resid: Array, state: CGFStateT) -> tuple:
+        r"""Return bounds on the score statistic under the CGF model.
+
+        **Arguments:**
+
+        - `g_resid`: Residualized genotype vector with shape `(n,)`.
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        A `(lower, upper)` tuple of score bounds.
+        """
         return -jnp.inf, jnp.inf
 
 
 class BasicCGFState(NamedTuple):
+    r"""CGF state containing only the predicted mean."""
+
     pred_mean: Array
 
 
 class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
+    r"""CGF implementation for a Poisson mean model.
+
+    For $Y \sim \mathrm{Poisson}(\mu)$, the cumulant generating function is
+    $K(t) = \log \mathbb{E}[\exp(tY)] = \mu(\exp(t) - 1)$.
+    In this implementation, $\mu$ is taken from the fitted model mean.
+    """
+
     def init(self, glm_state: GLMState) -> BasicCGFState:
+        r"""Initialize CGF state from a fitted model.
+
+        **Arguments:**
+
+        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.spa.BasicCGFState`][].
+        """
         return BasicCGFState(glm_state.mu)
 
     def cgf(self, t: Array, state: BasicCGFState) -> Array:
+        r"""Evaluate the Poisson CGF.
+
+        **Arguments:**
+
+        - `t`: Evaluation point(s).
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        CGF value(s) evaluated at `t`.
+        """
         return state.pred_mean * jnp.expm1(t)
 
     def get_score_bounds(self, g_resid: Array, state: BasicCGFState) -> tuple:
+        r"""Compute score bounds for SPA under a Poisson model.
+
+        **Arguments:**
+
+        - `g_resid`: Residualized genotype vector with shape `(n,)`.
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        A `(lower, upper)` tuple of score bounds.
+        """
         offset = jnp.sum(g_resid * state.pred_mean)
         ubound = jnp.sum(jnp.where(g_resid < 0, 0, g_resid)) - offset
         lbound = jnp.sum(jnp.where(g_resid > 0, 0, g_resid)) - offset
@@ -67,19 +174,61 @@ class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
 
 
 class NegBinCGFState(NamedTuple):
+    r"""CGF state for Negative Binomial SPA."""
+
     pred_mean: Array
     r: Array
 
 
 class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
+    r"""CGF implementation for a Negative Binomial mean/dispersion model.
+
+    For $Y \sim \mathrm{NegBin}(\mu, r)$ parameterized by mean $\mu$ and shape $r$,
+    the cumulant generating function can be written as
+    $K(t) = -r\log\left(1 - \frac{\mu}{r}(\exp(t) - 1)\right)$.
+    This implementation uses $r = 1/\alpha$ where $\alpha$ is the fitted dispersion.
+    """
+
     def init(self, glm_state: GLMState) -> NegBinCGFState:
+        r"""Initialize CGF state from a fitted model.
+
+        **Arguments:**
+
+        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.spa.NegBinCGFState`][].
+        """
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
     def cgf(self, t: Array, state: NegBinCGFState) -> Array:
+        r"""Evaluate the Negative Binomial CGF.
+
+        **Arguments:**
+
+        - `t`: Evaluation point(s).
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        CGF value(s) evaluated at `t`.
+        """
         term = -(state.pred_mean / state.r) * jnp.expm1(t)
         return jspec.xlog1py(-state.r, term)
 
     def get_t_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
+        r"""Compute bounds on `t` for Negative Binomial SPA.
+
+        **Arguments:**
+
+        - `g_resid`: Residualized genotype vector with shape `(n,)`.
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        A `(lower, upper)` tuple of bounds for `t`.
+        """
         u_max = jnp.log1p(state.r / state.pred_mean)
 
         rescaled = jnp.where(g_resid != 0, u_max / g_resid, 0.0)
@@ -89,6 +238,17 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
         return t_lower, t_upper
 
     def get_score_bounds(self, g_resid: Array, state: NegBinCGFState) -> tuple:
+        r"""Compute score bounds for Negative Binomial SPA.
+
+        **Arguments:**
+
+        - `g_resid`: Residualized genotype vector with shape `(n,)`.
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        A `(lower, upper)` tuple of score bounds.
+        """
         offset = jnp.sum(g_resid * state.pred_mean)
         lbound = jnp.where(jnp.all(g_resid >= 0), -offset, -jnp.inf)
         ubound = jnp.where(jnp.all(g_resid <= 0), -offset, jnp.inf)
@@ -97,15 +257,44 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
 
 
 class GaussianCGFState(NamedTuple):
+    r"""CGF state for Gaussian SPA."""
+
     pred_mean: Array
     variance: Array
 
 
 class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
+    r"""CGF implementation for a Gaussian mean/variance model.
+
+    For $Y \sim \mathcal{N}(\mu, \sigma^2)$, the cumulant generating function is
+    $K(t) = \mu t + \frac{1}{2}\sigma^2 t^2$.
+    """
+
     def init(self, glm_state: GLMState) -> GaussianCGFState:
+        r"""Initialize CGF state from a fitted model.
+
+        **Arguments:**
+
+        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.spa.GaussianCGFState`][].
+        """
         return GaussianCGFState(glm_state.mu, jnp.reciprocal(glm_state.glm_wt))
 
     def cgf(self, t: Array, state: GaussianCGFState) -> Array:
+        r"""Evaluate the Gaussian CGF.
+
+        **Arguments:**
+
+        - `t`: Evaluation point(s).
+        - `state`: CGF state created by `init`.
+
+        **Returns:**
+
+        CGF value(s) evaluated at `t`.
+        """
         return t * (state.pred_mean + 0.5 * t * state.variance)
 
 
@@ -121,6 +310,24 @@ def saddlepoint_pvalue(
     cutoff: float = 1.96,
     max_iter: int = 100,
 ) -> Array:
+    r"""Compute an SPA-corrected p-value for a score statistic.
+
+    **Arguments:**
+
+    - `score`: Observed score statistic.
+    - `g_resid`: Residualized genotype vector with shape `(n,)`.
+    - `cgf`: A [`jaxqtl.hypothesis.spa.CumulantGeneratingFunction`][] implementation.
+    - `state`: CGF state created by `cgf.init`.
+    - `scale`: Scalar multiplier applied to the SPA root-finding parameter.
+    - `two_sided_mode`: Strategy for two-sided p-values (`"rstar"`, `"abs"`, or `"2min"`).
+    - `log_p`: Whether to return the log p-value.
+    - `cutoff`: Threshold on the normal z-score above which SPA is attempted.
+    - `max_iter`: Maximum number of root-finding steps.
+
+    **Returns:**
+
+    A scalar p-value (or log p-value) for the observed score statistic.
+    """
     is_discrete = isinstance(cgf, (PoissonCGF, NegativeBinomialCGF))
 
     g_resid = jnp.asarray(g_resid, dtype=float)
@@ -217,7 +424,16 @@ def saddlepoint_pvalue(
     return jnp.exp(final_log_p) if not log_p else final_log_p
 
 
-class SpaTest(HypothesisTest):
+class SpaTest(AbstractHypothesisTest):
+    r"""Saddlepoint approximation (SPA) score test.
+
+    This starts from a score statistic $S$ for each variant under the null model, then computes a
+    saddlepoint approximation based on the cumulant generating function $K(t)$ implied by the fitted mean model.
+    A root $\hat t$ is found such that $K'(\hat t) = S$, then the Barndorff-Nielsen approximation is used via
+    $r^* = w + \log(v/w)/w$ with $w = \mathrm{sign}(\hat t)\sqrt{2(\hat t S - K(\hat t))}$ and
+    $v = \hat t\sqrt{K''(\hat t)}$, yielding a two-sided p-value via a Normal tail approximation.
+    """
+
     cgf: CumulantGeneratingFunction = NegativeBinomialCGF()
 
     def test(
@@ -227,6 +443,19 @@ class SpaTest(HypothesisTest):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
+        r"""Compute SPA-corrected p-values for each variant in `G`.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant SPA p-values.
+        """
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         cgf_state = self.cgf.init(glmstate_cov_only)
 
@@ -257,4 +486,14 @@ class SpaTest(HypothesisTest):
 
     @property
     def name(self) -> str:
+        r"""Return the test name.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string identifier for the test.
+        """
         return "score.spa"

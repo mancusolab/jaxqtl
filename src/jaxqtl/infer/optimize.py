@@ -147,7 +147,7 @@ def infer_beta_params(
         i_n = pg_1n + i_kn
 
         # Fisher information matrix; positive definite for valid parameter values.
-        info_mat = len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
+        info_mat = -len(p) * jnp.array([[i_k, i_kn], [i_kn, i_n]])
 
         # first sub-matrix of the unscaled 2nd-order Christoffell symbol
         i_kkn = pg_1n * pg_2kn
@@ -178,7 +178,7 @@ def infer_beta_params(
 
         # take second order approx to RGD
         adjustment = jnp.einsum("cab,a,b->c", gamma, direction, direction)
-        new_param = old_param + step_size * direction - 0.5 * step_size**2 * adjustment
+        new_param = old_param - step_size * direction - 0.5 * step_size**2 * adjustment
         new_param = jnp.clip(new_param, 1e-8, jnp.inf)
 
         new_lik = loglik(new_param, p_perm)

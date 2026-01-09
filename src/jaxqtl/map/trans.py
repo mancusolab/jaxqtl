@@ -11,14 +11,14 @@ import equinox as eqx
 from jax import numpy as jnp
 
 from ..families.distribution import NegativeBinomial
-from ..hypothesis import HypothesisTest
+from ..hypothesis import AbstractHypothesisTest
 from ..log import get_log
 from .data import ReadyDataState
 
 
 def map_trans(
     data: ReadyDataState,
-    test: HypothesisTest,
+    test: AbstractHypothesisTest,
     chunk_size: int = 5000,
     verbose: bool = True,
     log: Logger | None = None,

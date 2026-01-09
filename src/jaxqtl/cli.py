@@ -29,7 +29,6 @@ from .io.utils import read_offset_tsvlike, read_plink_style_tsvlike, read_single
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState
-from .post.qvalue import calculate_qval
 
 
 class _SplitAction(ap.Action):
@@ -154,12 +153,6 @@ def _create_common_subp(subp, name, help):
             "Whether to perform SPA correction for p-values computed from score statistics."
             " Not applicable for `--test wald` and not necessary for `--model gaussian`.",
         ),
-    )
-    common_p.add_argument(
-        "--q-value",
-        action="store_true",
-        default=False,
-        help="Compute Storey's q value",
     )
 
     # filtering arguments
@@ -321,16 +314,12 @@ def _cis_scan(args, log):
         seed=args.seed,
     )
     if df_cis is not None:
-        if args.q_value:
-            log.info("Computing q-values")
-            p_values = df_cis.get_column("pvalue_adj").to_numpy()
-            q_values, pi0 = calculate_qval(p_values, log)
-            df_cis = df_cis.with_columns(pl.Series("qval", q_values))
-
         log.info("Finished cis-scan. Writing results.")
         test_str = test.name
         adj_name = perm_test.name
         df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    else:
+        log.warning("Finished cis-scan. No results to ouput!")
 
     return 0
 

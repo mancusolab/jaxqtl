@@ -3,10 +3,18 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 from jaxtyping import ArrayLike
 
-from .base import _residualize_genotypes, _score_from_residuals, HypothesisTest, TestResult
+from .base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
 
 
-class ScoreTest(HypothesisTest):
+class ScoreTest(AbstractHypothesisTest):
+    r"""Score test for association between a variant and an outcome.
+
+    For a null (covariate-only) fit, let $r_y$ be the working residuals and let $g$ be a variant genotype vector.
+    After residualizing $g$ against covariates, the per-variant score statistic is
+    $U = g^{\top} W r_y$, with variance $V = g^{\top} W g$, and the reported z-statistic is
+    $z = U / \sqrt{V}$ with two-sided p-value $p = 2\Phi(-|z|)$.
+    """
+
     def test(
         self,
         X: ArrayLike,
@@ -14,6 +22,19 @@ class ScoreTest(HypothesisTest):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
+        r"""Compute score-test statistics for each variant in `G`.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant score-test statistics.
+        """
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         y_resid = glmstate_cov_only.resid
 
@@ -33,4 +54,14 @@ class ScoreTest(HypothesisTest):
 
     @property
     def name(self) -> str:
+        r"""Return the test name.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string identifier for the test.
+        """
         return "score"

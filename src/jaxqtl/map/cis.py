@@ -12,7 +12,7 @@ from jax import numpy as jnp
 from jaxtyping import ArrayLike, PRNGKeyArray
 
 from ..families.distribution import NegativeBinomial
-from ..hypothesis import AbstractAggregateTest, HypothesisTest, PermutationResult, TestResult
+from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
 from ..log import get_log
 from .data import CisData, ReadyDataState
 
@@ -39,7 +39,7 @@ class _ResultsAggregator:
 
 def map_cis(
     data: ReadyDataState,
-    snp_test: HypothesisTest,
+    snp_test: AbstractHypothesisTest,
     gene_test: AbstractAggregateTest,
     mode: Literal["cis", "nominal"] = "cis",
     window: int = 500_000,
@@ -144,7 +144,7 @@ def map_cis_single(
     G: ArrayLike,
     y: ArrayLike,
     offset: ArrayLike,
-    snp_test: HypothesisTest,
+    snp_test: AbstractHypothesisTest,
     gene_test: AbstractAggregateTest,
     key: PRNGKeyArray,
 ) -> tuple[TestResult, PermutationResult]:

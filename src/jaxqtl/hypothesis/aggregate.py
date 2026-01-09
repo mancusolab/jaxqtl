@@ -12,7 +12,7 @@ from jaxtyping import Array, ArrayLike, PRNGKeyArray, Scalar
 
 from ..families.utils import ncx2_sf, t_cdf
 from ..infer.optimize import BetaParams, infer_beta_params
-from .base import HypothesisTest, TestResult
+from .base import AbstractHypothesisTest, TestResult
 
 
 Aux = TypeVar("Aux")
@@ -20,7 +20,7 @@ PermutationResult: TypeAlias = tuple[Scalar, Aux]
 
 
 class AbstractAggregateTest(eqx.Module, Generic[Aux]):
-    """Aggregate per-variant results to a gene-level p-value in cis mapping."""
+    r"""Abstract base class for gene-level aggregation in cis mapping."""
 
     @abstractmethod
     def aggregate(
@@ -30,9 +30,25 @@ class AbstractAggregateTest(eqx.Module, Generic[Aux]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        test: HypothesisTest,
+        test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, Aux]:
+        r"""Aggregate per-variant test results into a gene-level statistic.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+        - `result`: Per-variant statistics from a single scan.
+        - `test`: Hypothesis test used to generate `result`.
+        - `key`: PRNG key for stochastic aggregation procedures.
+
+        **Returns:**
+
+        A tuple `(pvalue, aux)` where `aux` contains method-specific diagnostics.
+        """
         ...
 
     def __call__(
@@ -42,18 +58,52 @@ class AbstractAggregateTest(eqx.Module, Generic[Aux]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        test: HypothesisTest,
+        test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, Aux]:
+        r"""Alias for [`jaxqtl.hypothesis.aggregate.AbstractAggregateTest.aggregate`][].
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+        - `result`: Per-variant statistics from a single scan.
+        - `test`: Hypothesis test used to generate `result`.
+        - `key`: PRNG key for stochastic aggregation procedures.
+
+        **Returns:**
+
+        A tuple `(pvalue, aux)` where `aux` contains method-specific diagnostics.
+        """
         return self.aggregate(X, G, y, offset, result, test, key)
 
     @property
     @abstractmethod
     def name(self) -> str:
+        r"""Return a short identifier for the aggregation method.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string name for display and downstream metadata.
+        """
         ...
 
 
 class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
+    r"""Permutation-based gene-level p-values via a Beta approximation.
+
+    This method generates permutation statistics $T_1, \dots, T_B$ (here based on a max score/z statistic across
+    variants), converts them to permutation p-values $p_b$, then fits a Beta approximation
+    $p_b \sim \mathrm{Beta}(k, n)$. The observed gene-level p-value is computed by mapping the observed statistic
+    through the same calibration and applying the fitted Beta CDF.
+    """
+
     max_perm_direct: int = 1000
     max_iter_beta: int = 1000
 
@@ -65,9 +115,25 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
         G: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike,
-        test: HypothesisTest,
+        test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ):
+        r"""Run direct permutations and return a vector of max statistics.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)`.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+        - `test`: Hypothesis test to apply per permutation.
+        - `key`: PRNG key.
+
+        **Returns:**
+
+        A 1D array of permutation max statistics.
+        """
+
         def _func(key, x):
             key, p_key = rdm.split(key)
             perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
@@ -89,9 +155,25 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        test: HypothesisTest,
+        test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, tuple[BetaParams, float, bool]]:
+        r"""Compute a gene-level p-value using direct permutations and a Beta approximation.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+        - `result`: Per-variant statistics from a single scan.
+        - `test`: Hypothesis test used to generate `result`.
+        - `key`: PRNG key.
+
+        **Returns:**
+
+        A tuple `(pvalue, aux)` where `aux` includes fitted Beta parameters and diagnostics.
+        """
         z_stats_perm = self._run_permutations(X, G, y, offset, test, key)
 
         n = X.shape[0]
@@ -146,10 +228,27 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
     @property
     def name(self) -> str:
+        r"""Return the aggregation name.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string identifier for the method.
+        """
         return "perm"
 
 
 class ACAT(AbstractAggregateTest[None]):
+    r"""Aggregate p-values using ACAT.
+
+    Given per-variant p-values $p_1, \dots, p_m$ and weights $w_i = 1/m$, the Cauchy combination statistic is
+    $T = \sum_i w_i \tan\left(\left(\frac{1}{2} - p_i\right)\pi\right)$, with p-value
+    $p = 1 - F_{\mathrm{Cauchy}(0,1)}(T)$.
+    """
+
     def aggregate(
         self,
         X: ArrayLike,
@@ -157,9 +256,25 @@ class ACAT(AbstractAggregateTest[None]):
         y: ArrayLike,
         offset: ArrayLike,
         result: TestResult,
-        test: HypothesisTest,
+        test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, None]:
+        r"""Compute a gene-level p-value using ACAT.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+        - `result`: Per-variant statistics from a single scan.
+        - `test`: Hypothesis test used to generate `result`.
+        - `key`: PRNG key (unused).
+
+        **Returns:**
+
+        A tuple `(pvalue, None)` containing the ACAT gene-level p-value.
+        """
         obs_p = result.p
         any_ones = jnp.any(obs_p == 1.0)
         any_zeros = jnp.any(obs_p == 0.0)
@@ -185,4 +300,14 @@ class ACAT(AbstractAggregateTest[None]):
 
     @property
     def name(self) -> str:
+        r"""Return the aggregation name.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string identifier for the method.
+        """
         return "acat"

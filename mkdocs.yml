@@ -119,6 +119,17 @@ nav:
       - Inference:
         - 'api/infer.md'
         - 'api/solvers.md'
+        - 'api/stderr.md'
+      - Hypothesis Testing:
+          - 'api/variant.md'
+          - 'api/gene.md'
+      - Data Management:
+          - 'api/geno.md'
+          - 'api/pheno.md'
+          - 'api/other.md'
+      - molQTL Mapping:
+          - 'api/cis.md'
+          - 'api/trans.md'
     - Misc:
         - 'authors.md'
         - 'versions.md'

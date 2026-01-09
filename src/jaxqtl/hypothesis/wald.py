@@ -6,13 +6,30 @@ import jax.numpy as jnp
 from jaxtyping import ArrayLike
 
 from ..families.distribution import Gaussian
-from .base import _residualize_genotypes, HypothesisTest, TestResult
+from .base import _residualize_genotypes, AbstractHypothesisTest, TestResult
 
 
-class WaldTest(HypothesisTest):
+class WaldTest(AbstractHypothesisTest):
+    r"""Wald test for association between a variant and an outcome.
+
+    For each variant, this fits a full model including the variant (optionally using a fast path for Gaussian models)
+    and reports a Wald statistic of the form $z = \hat\beta / \mathrm{se}(\hat\beta)$ with
+    two-sided p-value $p = 2\Phi(-|z|)$.
+    """
+
     _is_linear: bool = eqx.field(static=True, init=False)
 
     def __post_init__(self):
+        r"""Initialize cached flags for dispatch.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        `None`
+        """
         self._is_linear = isinstance(self.model.family, Gaussian)
 
     def test(
@@ -22,6 +39,19 @@ class WaldTest(HypothesisTest):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
+        r"""Compute Wald-test statistics for each variant in `G`.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant Wald-test statistics.
+        """
         if self._is_linear:
             result = self.model.fit(X, y, offset, self.std_err)
             y_resid = result.resid
@@ -63,4 +93,14 @@ class WaldTest(HypothesisTest):
 
     @property
     def name(self) -> str:
+        r"""Return the test name.
+
+        **Arguments:**
+
+        `None`
+
+        **Returns:**
+
+        A short string identifier for the test.
+        """
         return "wald"
