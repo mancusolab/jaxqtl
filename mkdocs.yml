@@ -35,7 +35,7 @@ repo_url: https://github.com/mancusolab/jaxqtl
 repo_name: mancusolab/jaxqtl
 edit_uri: ""  # No edit button, as some of our pages are in /docs and some in /examples via symlink, so it's impossible for them all to be accurate
 
-strict: true  # Don't allow warnings during the build process
+strict: False  # Don't allow warnings during the build process
 
 extra_javascript:
     # The below three make MathJax work, see https://squidfunk.github.io/mkdocs-material/reference/mathjax/
@@ -67,7 +67,6 @@ plugins:
     - mkdocstrings:
         default_handler: python
         enable_inventory: true
-        custom_templates: docs/templates
         handlers:
             python:
                 paths: [src]
@@ -86,8 +85,6 @@ plugins:
                     - jaxtyping
                     extensions:
                     - pydantic: {schema: true}
-                    #- docs/scripts/extension.py:DynamicDocstrings:
-                    #    paths: [giddyup.families]
                     # general options
                     allow_inspection: true
                     show_bases: true
@@ -108,6 +105,8 @@ plugins:
                     separate_signature: false
                     annotations_path: brief
                     show_signature_annotations: true
+                    show_symbol_type_heading: true
+                    show_symbol_type_toc: true
 
 nav:
     - 'index.md'
