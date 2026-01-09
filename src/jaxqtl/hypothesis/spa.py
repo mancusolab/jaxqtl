@@ -1,14 +1,13 @@
 from abc import abstractmethod
 from typing import Generic, Literal, NamedTuple, Protocol, TypeVar
 
-import optimistix as optx
-
 import equinox as eqx
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 import jax.scipy.special as jspec
 import lineax as lx
+import optimistix as optx
 
 from jax.scipy import stats
 from jax.scipy.special import logsumexp
@@ -133,11 +132,11 @@ class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.BasicCGFState`][].
+        A [`jaxqtl.hypothesis.spa.BasicCGFState`][].
         """
         return BasicCGFState(glm_state.mu)
 
@@ -194,11 +193,11 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.NegBinCGFState`][].
+        A [`jaxqtl.hypothesis.spa.NegBinCGFState`][].
         """
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
@@ -275,11 +274,11 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.glm.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.GaussianCGFState`][].
+        A [`jaxqtl.hypothesis.spa.GaussianCGFState`][].
         """
         return GaussianCGFState(glm_state.mu, jnp.reciprocal(glm_state.glm_wt))
 
@@ -459,7 +458,7 @@ class SpaTest(AbstractHypothesisTest):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant SPA p-values.
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant SPA p-values.
         """
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         cgf_state = self.cgf.init(glmstate_cov_only)

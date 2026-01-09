@@ -2,7 +2,7 @@ import jax.numpy as jnp
 
 from jax import lax
 from jax.scipy.special import betainc, gammaincc
-from jax.typing import ArrayLike
+from jaxtyping import ArrayLike
 
 
 def t_cdf(value: ArrayLike, df: float, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0):

@@ -2,18 +2,18 @@ from abc import abstractmethod
 from typing import NamedTuple
 
 import equinox as eqx
+import jax.numpy as jnp
 
-from jax import Array, numpy as jnp
 from jax.scipy.stats import norm
-from jaxtyping import ArrayLike
+from jaxtyping import Array, ArrayLike
 
-from ..families.distribution import (
+from ..families import (
     ExponentialFamily,
     Gaussian,
     NegativeBinomial,
     Poisson,
+    t_cdf,
 )
-from ..families.utils import t_cdf
 from .optimize import irls, lstsq
 from .solve import CholeskySolve, LinearSolve
 from .stderr import AbstractVarianceEstimator, FisherInfoError
@@ -22,8 +22,8 @@ from .stderr import AbstractVarianceEstimator, FisherInfoError
 class GLMState(NamedTuple):
     r"""Container for fitted model outputs.
 
-    This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.glm.LinearModel.fit`][] and
-    [`jaxqtl.infer.glm.GLM.fit`][]. These outputs are consumed by downstream hypothesis tests and mapping routines.
+    This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.LinearModel.fit`][] and
+    [`jaxqtl.infer.GLM.fit`][]. These outputs are consumed by downstream hypothesis tests and mapping routines.
     """
 
     beta: Array
@@ -145,11 +145,11 @@ class AbstractLinearModel(eqx.Module):
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)`.
         - `offset`: Offset broadcastable to `y` (either scalar or `(n,)`).
-        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.stderr.AbstractVarianceEstimator`][].
+        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.AbstractVarianceEstimator`][].
 
         **Returns:**
 
-        A [`jaxqtl.infer.glm.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
         pass
 
@@ -182,11 +182,11 @@ class LinearModel(AbstractLinearModel):
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)`.
         - `offset`: Offset broadcastable to `y` (either scalar or `(n,)`).
-        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.stderr.AbstractVarianceEstimator`][].
+        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.AbstractVarianceEstimator`][].
 
         **Returns:**
 
-        A [`jaxqtl.infer.glm.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
         df = jnp.maximum(X.shape[0] - X.shape[1], 1)
@@ -261,11 +261,11 @@ class GLM(AbstractLinearModel):
         - `X`: Design matrix with shape `(n, p)`.
         - `y`: Response vector with shape `(n,)`.
         - `offset`: Offset broadcastable to `y` (either scalar or `(n,)`).
-        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.stderr.AbstractVarianceEstimator`][].
+        - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.AbstractVarianceEstimator`][].
 
         **Returns:**
 
-        A [`jaxqtl.infer.glm.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
 
         # initialize eta and alpha

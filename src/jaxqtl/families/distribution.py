@@ -203,8 +203,7 @@ class Gaussian(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][],
-        [`jaxqtl.families.links.Power`][].
+        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.Power`][].
 
     """
 
@@ -215,8 +214,7 @@ class Gaussian(ExponentialFamily):
     def __init__(self, glink: Link = Identity()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
-            (defaults to [`jaxqtl.families.links.Identity`][]).
+        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Identity`][]).
         """
         self.glink = glink
 
@@ -281,8 +279,7 @@ class Gamma(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Inverse`][],
-        [`jaxqtl.families.links.Log`][].
+        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Inverse`][], [`jaxqtl.families.Log`][].
 
     """
 
@@ -293,8 +290,7 @@ class Gamma(ExponentialFamily):
     def __init__(self, glink: Link = Inverse()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
-            (defaults to [`jaxqtl.families.links.Inverse`][]).
+        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Inverse`][]).
         """
         self.glink = glink
 
@@ -345,8 +341,7 @@ class Binomial(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.links.Logit`][], [`jaxqtl.families.links.Log`][],
-        [`jaxqtl.families.links.Identity`][].
+        Valid links: [`jaxqtl.families.Logit`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.Identity`][].
 
     """
 
@@ -361,8 +356,7 @@ class Binomial(ExponentialFamily):
     def __init__(self, glink: Link = Logit()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
-            (defaults to [`jaxqtl.families.links.Logit`][]).
+        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Logit`][]).
         """
         self.glink = glink
 
@@ -412,7 +406,7 @@ class Poisson(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][].
+        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][].
 
     """
 
@@ -423,8 +417,7 @@ class Poisson(ExponentialFamily):
     def __init__(self, glink: Link = Log()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
-            (defaults to [`jaxqtl.families.links.Log`][]).
+        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Log`][]).
         """
         self.glink = glink
 
@@ -469,8 +462,8 @@ class NegativeBinomial(ExponentialFamily):
 
     !!! info
 
-        Valid links: [`jaxqtl.families.links.Identity`][], [`jaxqtl.families.links.Log`][],
-        [`jaxqtl.families.links.NBlink`][], [`jaxqtl.families.links.Power`][].
+        Valid links: [`jaxqtl.families.Identity`][], [`jaxqtl.families.Log`][], [`jaxqtl.families.NBlink`][],
+        [`jaxqtl.families.Power`][].
 
     """
 
@@ -481,8 +474,7 @@ class NegativeBinomial(ExponentialFamily):
     def __init__(self, glink: Link = Log()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.families.links.Link`][] mapping $\mu \mapsto \eta$
-            (defaults to [`jaxqtl.families.links.Log`][]).
+        - `glink`: [`jaxqtl.families.Link`][] mapping $\mu \mapsto \eta$ (defaults to [`jaxqtl.families.Log`][]).
         """
         self.glink = glink
 

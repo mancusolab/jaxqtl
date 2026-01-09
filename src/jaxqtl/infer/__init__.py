@@ -4,7 +4,7 @@ from .glm import (
     GLMState,
     LinearModel,
 )
-from .optimize import infer_beta_params, irls
+from .optimize import infer_beta_params, irls, lstsq
 from .solve import (
     CGSolve,
     CholeskySolve,

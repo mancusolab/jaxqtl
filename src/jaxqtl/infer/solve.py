@@ -18,7 +18,7 @@ class LinearSolve(eqx.Module):
     - `wgt_lstsq`: weighted least squares.
     - `lstsq`: unweighted least squares.
 
-    These are used by [`jaxqtl.infer.optimize.irls`][] and [`jaxqtl.infer.optimize.lstsq`][].
+    These are used by [`jaxqtl.infer.irls`][] and [`jaxqtl.infer.lstsq`][].
     """
 
     @abstractmethod

@@ -34,7 +34,7 @@ def simulate_pheno(
     offset: ArrayLike | None = None,
     dispersion: float | None = None,
 ) -> SimulatedData:
-    r"""Simulate phenotype data under a GLM with a supplied [`jaxqtl.families.distribution.ExponentialFamily`][].
+    r"""Simulate phenotype data under a GLM with a supplied [`jaxqtl.families.ExponentialFamily`][].
 
     This simulates covariates $X$, a single genotype vector $g \in \{0,1,2\}$, and an optional offset, then forms
     a linear predictor $\eta$ and mean $\mu = g^{-1}(\eta)$ using the family link.
@@ -49,7 +49,7 @@ def simulate_pheno(
     - `maf`: Minor allele frequency used for genotype simulation.
     - `offset`: Optional offset with shape `(n,)`. If `None`, zeros are used.
     - `dispersion`: Optional dispersion/scale parameter. If `None`, defaults to `0.1` for
-      [`jaxqtl.families.distribution.NegativeBinomial`][] and `1.0` otherwise.
+      [`jaxqtl.families.NegativeBinomial`][] and `1.0` otherwise.
 
     **Returns:**
 

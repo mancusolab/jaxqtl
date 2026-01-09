@@ -3,7 +3,12 @@ import jax.numpy as jnp
 from jax.scipy.stats import norm
 from jaxtyping import ArrayLike
 
-from .base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
+from .base import (
+    _residualize_genotypes,
+    _score_from_residuals,
+    AbstractHypothesisTest,
+    TestResult,
+)
 
 
 class ScoreTest(AbstractHypothesisTest):
@@ -33,7 +38,7 @@ class ScoreTest(AbstractHypothesisTest):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant score-test statistics.
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant score-test statistics.
         """
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         y_resid = glmstate_cov_only.resid

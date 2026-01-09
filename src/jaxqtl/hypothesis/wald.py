@@ -5,7 +5,7 @@ import jax.numpy as jnp
 
 from jaxtyping import ArrayLike
 
-from ..families.distribution import Gaussian
+from ..families import Gaussian
 from .base import _residualize_genotypes, AbstractHypothesisTest, TestResult
 
 
@@ -50,7 +50,7 @@ class WaldTest(AbstractHypothesisTest):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant Wald-test statistics.
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant Wald-test statistics.
         """
         if self._is_linear:
             result = self.model.fit(X, y, offset, self.std_err)

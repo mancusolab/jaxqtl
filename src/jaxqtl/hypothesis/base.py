@@ -7,8 +7,11 @@ import jax.numpy as jnp
 from jax.numpy.linalg import multi_dot
 from jaxtyping import Array, ArrayLike
 
-from ..infer.glm import AbstractLinearModel
-from ..infer.stderr import AbstractVarianceEstimator, FisherInfoError
+from ..infer import (
+    AbstractLinearModel,
+    AbstractVarianceEstimator,
+    FisherInfoError,
+)
 
 
 class TestResult(NamedTuple):
@@ -51,7 +54,7 @@ class AbstractHypothesisTest(eqx.Module):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant statistics.
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant statistics.
         """
         return self.test(X, G, y, offset)
 
@@ -74,7 +77,7 @@ class AbstractHypothesisTest(eqx.Module):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.base.TestResult`][] containing per-variant statistics.
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant statistics.
         """
         pass
 

@@ -1,11 +1,10 @@
 from abc import abstractmethod
 from typing import Generic, TypeAlias, TypeVar
 
-import optimistix as optx
-
 import equinox as eqx
 import jax.random as rdm
 import jax.scipy.stats as jaxstats
+import optimistix as optx
 
 from jax import lax, numpy as jnp
 from jaxtyping import Array, ArrayLike, PRNGKeyArray, Scalar
@@ -61,7 +60,7 @@ class AbstractAggregateTest(eqx.Module, Generic[Aux]):
         test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, Aux]:
-        r"""Alias for [`jaxqtl.hypothesis.aggregate.AbstractAggregateTest.aggregate`][].
+        r"""Alias for [`jaxqtl.hypothesis.AbstractAggregateTest.aggregate`][].
 
         **Arguments:**
 

@@ -163,7 +163,7 @@ def map_cis_single(
     **Returns:**
 
     Per-variant stats plus permutation-adjusted p-values as a tuple of
-        ([`jaxqtl.TestResult`][], [`jaxqtl.PermutationResult`][]).
+        ([`jaxqtl.hypothesis.TestResult`][], [`jaxqtl.hypothesis.PermutationResult`][]).
     """
     test_result = snp_test(X, G, y, offset)
     perm_result = gene_test(X, G, y, offset, test_result, snp_test, key)

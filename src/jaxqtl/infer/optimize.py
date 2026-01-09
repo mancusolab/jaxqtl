@@ -16,7 +16,7 @@ from .solve import LinearSolve
 class IRLSState(NamedTuple):
     r"""Container for IRLS solver outputs.
 
-    Stores fitted coefficients, dispersion, and basic convergence metadata from [`jaxqtl.infer.optimize.irls`][].
+    Stores fitted coefficients, dispersion, and basic convergence metadata from [`jaxqtl.infer.irls`][].
     """
 
     beta: Array
@@ -46,8 +46,8 @@ def irls(
     - `y`: Outcome vector with shape `(n,)`.
     - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
     - `eta`: Initial linear predictor $\eta$ with shape `(n,)`.
-    - `family`: GLM family implementing [`jaxqtl.families.distribution.ExponentialFamily`][].
-    - `solver`: Linear solver implementing [`jaxqtl.infer.solve.LinearSolve`][].
+    - `family`: GLM family implementing [`jaxqtl.families.ExponentialFamily`][].
+    - `solver`: Linear solver implementing [`jaxqtl.infer.LinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.
     - `tol`: Convergence tolerance on the change in objective value.
     - `step_size`: Step size applied to the IRLS update.
@@ -103,7 +103,7 @@ def lstsq(
 
     - `X`: Covariate matrix with shape `(n, p)`.
     - `y`: Outcome vector with shape `(n,)`.
-    - `solver`: Linear solver implementing [`jaxqtl.infer.solve.LinearSolve`][].
+    - `solver`: Linear solver implementing [`jaxqtl.infer.LinearSolve`][].
 
     **Returns:**
 
@@ -120,7 +120,7 @@ def lstsq(
 class BetaParams(NamedTuple):
     r"""Container for fitted Beta approximation parameters.
 
-    Stores the fitted Beta shape parameters from [`jaxqtl.infer.optimize.infer_beta_params`][] along with a convergence
+    Stores the fitted Beta shape parameters from [`jaxqtl.infer.infer_beta_params`][] along with a convergence
     indicator.
     """
 
