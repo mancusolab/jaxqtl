@@ -12,8 +12,9 @@ from ..distribution._expfam import ExponentialFamily
 class AbstractVarianceEstimator(eqx.Module):
     r"""Base interface for LM/GLM coefficient covariance estimators.
 
-    Concrete implementations are passed into [`jaxqtl.infer.GLM.fit`][] (and similar entrypoints) to compute the
-    coefficient covariance matrix used for Wald-style standard errors and test statistics.
+    Concrete implementations are passed into [`jaxqtl.infer.LinearModel.fit`][] and
+    [`jaxqtl.infer.GeneralizedLinearModel.fit`][] to compute the coefficient covariance matrix used for Wald-style
+    standard errors and test statistics.
     """
 
     @abstractmethod

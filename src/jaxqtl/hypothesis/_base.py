@@ -43,19 +43,7 @@ class AbstractHypothesisTest(eqx.Module):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
-        r"""Run the association test for variants in `G`.
-
-        **Arguments:**
-
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-
-        **Returns:**
-
-        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant statistics.
-        """
+        r"""Alias for [`jaxqtl.hypothesis.AbstractHypothesisTest.test`]."""
         return self.test(X, G, y, offset)
 
     @abstractmethod

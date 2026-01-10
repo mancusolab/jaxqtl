@@ -223,7 +223,7 @@ class Gaussian(ExponentialFamily):
     def __init__(self, glink: AbstractLink = IdentityLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+        - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.IdentityLink`][]).
         """
         self.glink = glink
@@ -301,7 +301,7 @@ class Gamma(ExponentialFamily):
     def __init__(self, glink: AbstractLink = InverseLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+        - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.InverseLink`][]).
         """
         self.glink = glink
@@ -369,7 +369,7 @@ class Binomial(ExponentialFamily):
     def __init__(self, glink: AbstractLink = LogitLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+        - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogitLink`][]).
         """
         self.glink = glink
@@ -431,7 +431,7 @@ class Poisson(ExponentialFamily):
     def __init__(self, glink: AbstractLink = LogLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+        - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogLink`][]).
         """
         self.glink = glink
@@ -489,7 +489,7 @@ class NegativeBinomial(ExponentialFamily):
     def __init__(self, glink: AbstractLink = LogLink()):
         r"""** Arguments: **
 
-        - `glink`: [`jaxqtl.distribution.Link`][] mapping $\mu \mapsto \eta$
+        - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogLink`][]).
         """
         self.glink = glink

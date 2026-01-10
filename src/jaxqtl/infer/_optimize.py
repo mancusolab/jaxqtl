@@ -9,11 +9,11 @@ from jax.scipy import stats as jaxstats
 from jax.scipy.special import polygamma
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..distribution._expfam import ExponentialFamily
-from ._solve import LinearSolve
+from ..distribution import ExponentialFamily
+from ._solve import AbstractLinearSolve
 
 
-class IRLSState(NamedTuple):
+class SolveResult(NamedTuple):
     r"""Container for IRLS solver outputs.
 
     Stores fitted coefficients, dispersion, and basic convergence metadata from [`jaxqtl.infer.irls`][].
@@ -32,12 +32,12 @@ def irls(
     offset: ArrayLike,
     eta: ArrayLike,
     family: ExponentialFamily,
-    solver: LinearSolve,
+    solver: AbstractLinearSolve,
     max_iter: int = 1000,
     tol: float = 1e-3,
     step_size: float = 1.0,
     disp_init: ScalarLike = 0.0,
-) -> IRLSState:
+) -> SolveResult:
     r"""Solve a GLM with iteratively reweighted least squares (IRLS).
 
     **Arguments:**
@@ -47,7 +47,7 @@ def irls(
     - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
     - `eta`: Initial linear predictor $\eta$ with shape `(n,)`.
     - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
-    - `solver`: Linear solver implementing [`jaxqtl.infer.LinearSolve`][].
+    - `solver`: Linear solver implementing [`jaxqtl.infer.AbstractLinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.
     - `tol`: Convergence tolerance on the change in objective value.
     - `step_size`: Step size applied to the IRLS update.
@@ -55,7 +55,7 @@ def irls(
 
     **Returns:**
 
-    A [`jaxqtl.infer.optimize.IRLSState`][] containing fitted coefficients, dispersion, and convergence metadata.
+    A [`jaxqtl.infer.SolveResult`][] containing fitted coefficients, dispersion, and convergence metadata.
     """
     n, p = X.shape
 
@@ -86,15 +86,15 @@ def irls(
     likelihood_n, diff, num_iters, beta, eta, disp = lax.while_loop(cond_fun, body_fun, init_tuple)
     converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
 
-    return IRLSState(beta, num_iters, converged, disp)
+    return SolveResult(beta, num_iters, converged, disp)
 
 
 @eqx.filter_jit
 def lstsq(
     X: ArrayLike,
     y: ArrayLike,
-    solver: LinearSolve,
-) -> IRLSState:
+    solver: AbstractLinearSolve,
+) -> SolveResult:
     r"""Solve an unweighted least-squares problem.
 
     This is used as a fast path for Gaussian models.
@@ -103,18 +103,18 @@ def lstsq(
 
     - `X`: Covariate matrix with shape `(n, p)`.
     - `y`: Outcome vector with shape `(n,)`.
-    - `solver`: Linear solver implementing [`jaxqtl.infer.LinearSolve`][].
+    - `solver`: Linear solver implementing [`jaxqtl.infer.AbstractLinearSolve`][].
 
     **Returns:**
 
-    A [`jaxqtl.infer.optimize.IRLSState`][] with `disp` set to 1 and `num_iters` set to 1.
+    A [`jaxqtl.infer.SolveResult`][] with `disp` set to 1 and `num_iters` set to 1.
     """
     beta = solver.lstsq(X, y)
     alpha = jnp.array(1)
     converged = jnp.array(True)
     num_iters = 1
 
-    return IRLSState(beta, num_iters, converged, alpha)
+    return SolveResult(beta, num_iters, converged, alpha)
 
 
 class BetaParams(NamedTuple):
@@ -153,7 +153,7 @@ def infer_beta_params(
 
     **Returns:**
 
-    A [`jaxqtl.infer.optimize.BetaParams`][] with fitted parameters and a convergence indicator.
+    A [`jaxqtl.infer.BetaParams`][] with fitted parameters and a convergence indicator.
     """
 
     def loglik(params, p: ArrayLike) -> Array:

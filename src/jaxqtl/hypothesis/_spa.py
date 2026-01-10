@@ -13,7 +13,7 @@ from jax.scipy import stats
 from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..infer import GLMState
+from ..infer import ModelResult
 from ._base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
 
 
@@ -42,12 +42,12 @@ class CumulantGeneratingFunction(eqx.Module, Generic[CGFStateT]):
     r"""Abstract base for cumulant generating functions used by SPA."""
 
     @abstractmethod
-    def init(self, glm_state: GLMState) -> CGFStateT:
+    def init(self, glm_state: ModelResult) -> CGFStateT:
         r"""Construct CGF state from a fitted model.
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.ModelResult`][].
 
         **Returns:**
 
@@ -127,12 +127,12 @@ class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
     In this implementation, $\mu$ is taken from the fitted model mean.
     """
 
-    def init(self, glm_state: GLMState) -> BasicCGFState:
+    def init(self, glm_state: ModelResult) -> BasicCGFState:
         r"""Initialize CGF state from a fitted model.
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.ModelResult`][].
 
         **Returns:**
 
@@ -188,12 +188,12 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
     This implementation uses $r = 1/\alpha$ where $\alpha$ is the fitted dispersion.
     """
 
-    def init(self, glm_state: GLMState) -> NegBinCGFState:
+    def init(self, glm_state: ModelResult) -> NegBinCGFState:
         r"""Initialize CGF state from a fitted model.
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.ModelResult`][].
 
         **Returns:**
 
@@ -269,12 +269,12 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
     $K(t) = \mu t + \frac{1}{2}\sigma^2 t^2$.
     """
 
-    def init(self, glm_state: GLMState) -> GaussianCGFState:
+    def init(self, glm_state: ModelResult) -> GaussianCGFState:
         r"""Initialize CGF state from a fitted model.
 
         **Arguments:**
 
-        - `glm_state`: A fitted [`jaxqtl.infer.GLMState`][].
+        - `glm_state`: A fitted [`jaxqtl.infer.ModelResult`][].
 
         **Returns:**
 

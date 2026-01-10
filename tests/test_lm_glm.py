@@ -9,7 +9,7 @@ from jax import config
 
 from jaxqtl.distribution._expfam import Binomial, Gaussian, Poisson
 from jaxqtl.distribution._links import IdentityLink, LogitLink, LogLink, PowerLink
-from jaxqtl.infer._glm import GLM, LinearModel
+from jaxqtl.infer._glm import GeneralizedLinearModel, LinearModel
 from jaxqtl.infer._solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer._stderr import HuberError
 
@@ -51,7 +51,7 @@ def test_glm_poisson_matches_statsmodels_glm_link(solver, link, sm_link):
 
     sm_state = sm.GLM(y, X, family=sm.families.Poisson(link=sm_link)).fit(disp=0)
 
-    model = GLM(family=Poisson(glink=link), solver=solver, max_iter=200, step_size=1.0)
+    model = GeneralizedLinearModel(family=Poisson(glink=link), solver=solver, max_iter=200, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     np.testing.assert_allclose(np.asarray(glm_state.beta), sm_state.params, rtol=1e-4, atol=1e-4)
@@ -69,7 +69,7 @@ def test_glm_poisson_identity_link_runs(solver):
     eta = X @ beta
     y = rng.poisson(lam=np.clip(eta, 1e-3, np.inf))
 
-    model = GLM(family=Poisson(glink=IdentityLink()), solver=solver, max_iter=300, step_size=1.0)
+    model = GeneralizedLinearModel(family=Poisson(glink=IdentityLink()), solver=solver, max_iter=300, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     assert jnp.all(jnp.isfinite(glm_state.beta))
@@ -93,7 +93,7 @@ def test_glm_binomial_matches_statsmodels_glm_link(solver, link, sm_link):
 
     sm_state = sm.GLM(y, X, family=sm.families.Binomial(link=sm_link)).fit(disp=0)
 
-    model = GLM(family=Binomial(glink=link), solver=solver, max_iter=200, step_size=1.0)
+    model = GeneralizedLinearModel(family=Binomial(glink=link), solver=solver, max_iter=200, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     np.testing.assert_allclose(np.asarray(glm_state.beta), sm_state.params, rtol=1e-4, atol=1e-4)
@@ -122,7 +122,7 @@ def test_glm_binomial_noncanonical_links_run(solver, link):
 
     y = rng.binomial(n=1, p=mu)
 
-    model = GLM(family=Binomial(glink=link), solver=solver, max_iter=300, step_size=1.0)
+    model = GeneralizedLinearModel(family=Binomial(glink=link), solver=solver, max_iter=300, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     assert jnp.all(jnp.isfinite(glm_state.beta))
@@ -154,7 +154,7 @@ def test_glm_gaussian_matches_statsmodels_glm_link(solver, link, sm_link):
 
     sm_state = sm.GLM(y, X, family=sm.families.Gaussian(link=sm_link)).fit()
 
-    model = GLM(family=Gaussian(glink=link), solver=solver, max_iter=200, step_size=1.0)
+    model = GeneralizedLinearModel(family=Gaussian(glink=link), solver=solver, max_iter=200, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     np.testing.assert_allclose(np.asarray(glm_state.beta), sm_state.params, rtol=1e-4, atol=1e-4)
@@ -170,7 +170,7 @@ def test_glm_gaussian_power_link_runs(solver, link):
     mu = np.clip(np.exp(0.1 * rng.normal(size=(n,))) + 1.0, 1e-3, np.inf)
     y = np.clip(mu + rng.normal(scale=0.05, size=(n,)), 1e-3, np.inf)
 
-    model = GLM(family=Gaussian(glink=link), solver=solver, max_iter=200, step_size=1.0)
+    model = GeneralizedLinearModel(family=Gaussian(glink=link), solver=solver, max_iter=200, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y))
 
     assert jnp.all(jnp.isfinite(glm_state.beta))
@@ -199,7 +199,7 @@ def test_huber_error_matches_statsmodels_white_cov(family):
 
     white_cov = sw.cov_white_simple(sm_model, use_correction=False)
 
-    model = GLM(family=family, solver=CholeskySolve(), max_iter=200, step_size=1.0)
+    model = GeneralizedLinearModel(family=family, solver=CholeskySolve(), max_iter=200, step_size=1.0)
     glm_state = model.fit(jnp.asarray(X), jnp.asarray(y), offset=jnp.asarray(offset), std_err=HuberError())
 
     np.testing.assert_allclose(np.asarray(glm_state.se**2), np.diag(white_cov), rtol=1e-2, atol=1e-2)

@@ -15,15 +15,16 @@ from ..distribution import (
     t_cdf,
 )
 from ._optimize import irls, lstsq
-from ._solve import CholeskySolve, LinearSolve
+from ._solve import AbstractLinearSolve, CholeskySolve
 from ._stderr import AbstractVarianceEstimator, FisherInfoError
 
 
-class GLMState(NamedTuple):
+class ModelResult(NamedTuple):
     r"""Container for fitted model outputs.
 
     This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.LinearModel.fit`][] and
-    [`jaxqtl.infer.GLM.fit`][]. These outputs are consumed by downstream hypothesis tests and mapping routines.
+    [`jaxqtl.infer.GeneralizedLinearModel.fit`][]. These outputs are consumed by downstream hypothesis tests
+    and mapping routines.
     """
 
     beta: Array
@@ -47,7 +48,7 @@ class _AbstractInit(eqx.Module):
     """
 
     family: eqx.AbstractVar[ExponentialFamily]
-    solver: eqx.AbstractVar[LinearSolve]
+    solver: eqx.AbstractVar[AbstractLinearSolve]
 
     def __call__(
         self,
@@ -75,7 +76,7 @@ class _AbstractInit(eqx.Module):
 
 class _NBInit(_AbstractInit):
     family: ExponentialFamily
-    solver: LinearSolve
+    solver: AbstractLinearSolve
 
     def __post_init__(self):
         if not isinstance(self.family, NegativeBinomial):
@@ -93,7 +94,9 @@ class _NBInit(_AbstractInit):
     ):
         n, p = X.shape
 
-        jaxqtl_pois = GLM(family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size)
+        jaxqtl_pois = GeneralizedLinearModel(
+            family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size
+        )
         glm_state_pois = jaxqtl_pois.fit(X, y, offset)
 
         # fit covariate-only model (null)
@@ -109,7 +112,7 @@ class _NBInit(_AbstractInit):
 
 class _SimpleInit(_AbstractInit):
     family: ExponentialFamily
-    solver: LinearSolve
+    solver: AbstractLinearSolve
 
     def init(
         self,
@@ -128,7 +131,7 @@ class AbstractLinearModel(eqx.Module):
     r"""Abstract base class for linear and generalized linear models."""
 
     family: eqx.AbstractVar[ExponentialFamily]
-    solver: eqx.AbstractVar[LinearSolve]
+    solver: eqx.AbstractVar[AbstractLinearSolve]
 
     @abstractmethod
     def fit(
@@ -137,7 +140,7 @@ class AbstractLinearModel(eqx.Module):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: AbstractVarianceEstimator = FisherInfoError(),
-    ) -> GLMState:
+    ) -> ModelResult:
         r"""Fit a model and return a summary state.
 
         **Arguments:**
@@ -149,7 +152,7 @@ class AbstractLinearModel(eqx.Module):
 
         **Returns:**
 
-        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
         pass
 
@@ -161,7 +164,7 @@ class LinearModel(AbstractLinearModel):
     """
 
     family: ExponentialFamily = Gaussian()
-    solver: LinearSolve = CholeskySolve()
+    solver: AbstractLinearSolve = CholeskySolve()
 
     def __post_init__(self):
         if not isinstance(self.family, Gaussian):
@@ -174,7 +177,7 @@ class LinearModel(AbstractLinearModel):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: AbstractVarianceEstimator = FisherInfoError(),
-    ) -> GLMState:
+    ) -> ModelResult:
         r"""Fit a Gaussian linear model and return a summary state.
 
         **Arguments:**
@@ -186,7 +189,7 @@ class LinearModel(AbstractLinearModel):
 
         **Returns:**
 
-        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
         df = jnp.maximum(X.shape[0] - X.shape[1], 1)
@@ -204,7 +207,7 @@ class LinearModel(AbstractLinearModel):
         stat = beta / beta_se
         pval_wald = 2 * t_cdf(-jnp.abs(stat), df)
 
-        return GLMState(
+        return ModelResult(
             beta,
             beta_se,
             stat,
@@ -221,7 +224,7 @@ class LinearModel(AbstractLinearModel):
         )
 
 
-class GLM(AbstractLinearModel):
+class GeneralizedLinearModel(AbstractLinearModel):
     r"""Generalized linear model (GLM) fitted via IRLS.
 
     This class wraps a family (distribution + link) and a linear solver, and fits coefficients using
@@ -229,7 +232,7 @@ class GLM(AbstractLinearModel):
     """
 
     family: ExponentialFamily = Gaussian()
-    solver: LinearSolve = CholeskySolve()
+    solver: AbstractLinearSolve = CholeskySolve()
 
     max_iter: int = 1000
     tol: float = 1e-3
@@ -253,7 +256,7 @@ class GLM(AbstractLinearModel):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: AbstractVarianceEstimator = FisherInfoError(),
-    ) -> GLMState:
+    ) -> ModelResult:
         r"""Fit a GLM with IRLS and return a summary state.
 
         **Arguments:**
@@ -265,7 +268,7 @@ class GLM(AbstractLinearModel):
 
         **Returns:**
 
-        A [`jaxqtl.infer.GLMState`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+        A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
 
         # initialize eta and alpha
@@ -282,7 +285,7 @@ class GLM(AbstractLinearModel):
         stat = beta / beta_se
         pval_wald = 2 * norm.sf(jnp.abs(stat))
 
-        return GLMState(
+        return ModelResult(
             beta,
             beta_se,
             stat,

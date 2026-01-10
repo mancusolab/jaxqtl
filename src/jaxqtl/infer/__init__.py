@@ -1,19 +1,20 @@
 from ._glm import (
     AbstractLinearModel,
-    GLM,
-    GLMState,
+    GeneralizedLinearModel,
     LinearModel,
+    ModelResult,
 )
 from ._optimize import (
     BetaParams,
     infer_beta_params,
     irls,
     lstsq,
+    SolveResult,
 )
 from ._solve import (
+    AbstractLinearSolve,
     CGSolve,
     CholeskySolve,
-    LinearSolve,
     QRSolve,
 )
 from ._stderr import (

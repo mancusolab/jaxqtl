@@ -9,7 +9,7 @@ import lineax as lx
 from jaxtyping import Array, ArrayLike
 
 
-class LinearSolve(eqx.Module):
+class AbstractLinearSolve(eqx.Module):
     r"""Base interface for linear solvers used inside IRLS/GLM fitting.
 
     During iteratively reweighted least squares (IRLS), each iteration reduces to a (weighted) least-squares solve.
@@ -68,7 +68,7 @@ class LinearSolve(eqx.Module):
         pass
 
 
-class QRSolve(LinearSolve):
+class QRSolve(AbstractLinearSolve):
     r"""Solve least-squares problems using a QR decomposition.
 
     QR-based solvers are typically more numerically stable than normal-equation solvers for ill-conditioned designs.
@@ -97,7 +97,7 @@ class QRSolve(LinearSolve):
         return jspla.solve_triangular(R, Q.T @ r)
 
 
-class CholeskySolve(LinearSolve):
+class CholeskySolve(AbstractLinearSolve):
     r"""Solve least-squares problems via normal equations and a Cholesky factorization.
 
     This forms $(X^\top W X)\beta = X^\top W r$ (or $(X^\top X)\beta = X^\top r$) and solves using a Cholesky
@@ -129,7 +129,7 @@ class CholeskySolve(LinearSolve):
         return jspla.cho_solve(factor, Xty)
 
 
-class CGSolve(LinearSolve):
+class CGSolve(AbstractLinearSolve):
     r"""Solve least-squares problems using conjugate gradients (via `lineax`).
 
     This is useful when forming $(X^\top W X)$ is expensive. The returned solution may be approximate depending on the
