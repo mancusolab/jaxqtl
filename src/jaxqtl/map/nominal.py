@@ -354,7 +354,7 @@ def map_nominal_GxE(
     X = dat.covar  # assuming the last column is processed as Environmental variable to test
     n, k = X.shape
 
-    gene_info = dat.pheno_meta
+    gene_info = list(dat.pheno_meta)
 
     # append genotype as the last column
     if standardize:
@@ -363,7 +363,7 @@ def map_nominal_GxE(
     if append_intercept:
         X = jnp.hstack((jnp.ones((n, 1)), X))
 
-    var_df_all = pd.DataFrame()
+    var_df_parts = []
 
     # slope, slope_se, nominal_p, converged, alpha
     out_columns = [
@@ -396,21 +396,42 @@ def map_nominal_GxE(
     af_list = []
     ma_count_list = []
 
-    slope = jnp.array([]).reshape(0, 5)
-    slope_se = jnp.array([]).reshape(0, 5)
-    nominal_p = jnp.array([]).reshape(0, 5)
-    converged = jnp.array([]).reshape(0, 2)  # whether full model converged
-    alpha = jnp.array([]).reshape(0, 2)
+    slope_parts = []
+    slope_se_parts = []
+    nominal_p_parts = []
+    converged_parts = []  # whether full model converged
+    alpha_parts = []
 
     se_estimator = HuberError() if robust_se else FisherInfoError()
+
+    trans_G = None
+    trans_var_df_out = None
+    trans_g_info = None
+    if mode == "trans" and len(gene_info) > 0:
+        first_gene_name, first_chrom, first_start_min, first_end_max = gene_info[0]
+        first_lstart = max(0, first_start_min - window)
+        first_rend = first_end_max + window
+        trans_G, _, trans_var_df = _setup_G_y(dat, first_gene_name, str(first_chrom), first_lstart, first_rend, mode)
+        trans_var_df_out = trans_var_df[["chrom", "snp", "pos", "a0", "a1"]]
+        trans_g_info = _get_geno_info(trans_G)
 
     for gene in gene_info:
         gene_name, chrom, start_min, end_max = gene
         lstart = max(0, start_min - window)  # a placeholder for mode="trans"
         rend = end_max + window
 
-        # pull cis G (nxM) and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
+        if mode == "trans":
+            # In trans mode the genotype panel is identical across genes.
+            if trans_G is None or trans_var_df_out is None or trans_g_info is None:
+                raise RuntimeError("trans mode cache is not initialized")
+            G = trans_G
+            var_df_out = trans_var_df_out
+            g_info = trans_g_info
+        else:
+            # pull cis G (nxM) and y for this gene
+            G, _, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend, mode)
+            var_df_out = var_df[["chrom", "snp", "pos", "a0", "a1"]]
+            g_info = _get_geno_info(G)
 
         # skip if no cis SNPs found
         if G.shape[1] == 0:
@@ -424,7 +445,7 @@ def map_nominal_GxE(
                 )
             continue
 
-        # pull cis G (sample x gene) and y for this gene
+        # pull phenotype for this gene
         y = dat.pheno[gene_name]  # __getitem__
 
         # skip if no cis SNPs found
@@ -459,7 +480,6 @@ def map_nominal_GxE(
         if verbose:
             log.info("Finished cis-qtl scan for %s", gene_name)
 
-        g_info = _get_geno_info(G)
         af_list.extend(g_info.af.tolist())
         ma_count_list.extend(g_info.ma_count.tolist())
 
@@ -473,14 +493,25 @@ def map_nominal_GxE(
         express_percent.extend([(y > 0).mean().item()] * paddle_len)
         mean_count.extend([y.mean().item()] * paddle_len)
 
-        var_df_all = pd.concat([var_df_all, var_df[['chrom', 'snp', 'pos', 'a0', 'a1']]], ignore_index=True)
+        var_df_parts.append(var_df_out)
 
         # concatenate numerical results
-        slope = jnp.vstack([slope, state.beta])
-        slope_se = jnp.vstack([slope_se, state.se])
-        nominal_p = jnp.vstack([nominal_p, state.p])
-        converged = jnp.vstack([converged, state.converged])
-        alpha = jnp.vstack([alpha, state.alpha])
+        slope_parts.append(state.beta)
+        slope_se_parts.append(state.se)
+        nominal_p_parts.append(state.p)
+        converged_parts.append(state.converged)
+        alpha_parts.append(state.alpha)
+
+    if var_df_parts:
+        var_df_all = pd.concat(var_df_parts, ignore_index=True)
+    else:
+        var_df_all = pd.DataFrame(columns=["chrom", "snp", "pos", "a0", "a1"])
+
+    slope = jnp.vstack(slope_parts) if slope_parts else jnp.array([]).reshape(0, 5)
+    slope_se = jnp.vstack(slope_se_parts) if slope_se_parts else jnp.array([]).reshape(0, 5)
+    nominal_p = jnp.vstack(nominal_p_parts) if nominal_p_parts else jnp.array([]).reshape(0, 5)
+    converged = jnp.vstack(converged_parts) if converged_parts else jnp.array([]).reshape(0, 2)
+    alpha = jnp.vstack(alpha_parts) if alpha_parts else jnp.array([]).reshape(0, 2)
 
     # write result
     gene_out = pd.DataFrame(
