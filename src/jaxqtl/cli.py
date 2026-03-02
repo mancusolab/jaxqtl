@@ -552,9 +552,9 @@ def main(args):
             standardize=args.standardize,
             offset_eta=offset_eta,
             robust_se=args.robust,
-            mode="trans",
+            mode="cis",
         )
-        out_df.to_csv(args.out + ".trans.GE.tsv.gz", sep="\t", index=False)
+        out_df.to_csv(args.out + ".cis.GE.tsv.gz", sep="\t", index=False)
 
     elif args.mode == "covar":
         if args.test_method == "score":

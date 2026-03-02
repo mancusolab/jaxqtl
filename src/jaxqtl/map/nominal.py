@@ -330,7 +330,7 @@ def map_nominal_GxE(
     robust_se: bool = False,
     max_iter: int = 1000,
     start_idx: int = -2,
-    mode: str = "trans",
+    mode: str = "cis",
     window: int = 500000,
 ):
     """test association between gene expression and other covariates
