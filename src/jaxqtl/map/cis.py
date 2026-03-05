@@ -1,396 +1,274 @@
-from dataclasses import dataclass
-from typing import List, Optional, Tuple
+from logging import Logger
+from typing import Any, Literal
 
 import numpy as np
-import pandas as pd
+import polars as pl
 
+import equinox as eqx
 import jax
 import jax.random as rdm
 
 from jax import numpy as jnp
-from jax.typing import ArrayLike
-from jaxtyping import Array
+from jaxtyping import ArrayLike, PRNGKeyArray
 
-from ..families.distribution import ExponentialFamily
-from ..infer.glm import GLM
-from ..infer.permutation import BetaPerm, InferBeta, InferBetaGLM
-from ..infer.stderr import ErrVarEstimation, FisherInfoError, HuberError
-from ..infer.utils import CisGLMState, HypothesisTest, ScoreTest
-from ..io.readfile import ReadyDataState
+from ..distribution import NegativeBinomial
+from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
 from ..log import get_log
-from ..post.qvalue import add_qvalues
-from .utils import _get_geno_info, _setup_G_y
+from .data import CisData, ReadyDataState
 
 
-@dataclass
-class MapCisSingleState:
-    cisglm: CisGLMState
-    pval_beta: Array
-    beta_param: Array
-    opt_status: Array
-    true_nc: Array
+class _ResultsAggregator:
+    """Accumulate per-gene or per-variant result frames into a single DataFrame."""
 
-    def get_lead(self, key: rdm.PRNGKey, random_tiebreak: bool = False) -> Tuple[List, int]:
-        """Get lead SNP result for each gene
+    def __init__(self):
+        self.frames: list = []
 
-        :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=True
-        :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
-        :return: lead SNP results and lead SNP index
-        """
-        # call lead eQTL
-        if random_tiebreak:
-            # randomly break tie
-            key, split_key = rdm.split(key)
-            ties_ind = jnp.argwhere(self.cisglm.p == jnp.nanmin(self.cisglm.p))  # return (k, 1)
-            vdx = rdm.choice(split_key, ties_ind, (1,), replace=False)
-        else:
-            # take first occurrence
-            vdx = int(jnp.nanargmin(self.cisglm.p))
+    def __len__(self) -> int:
+        return len(self.frames)
 
-        beta_1, beta_2, beta_converged = self.beta_param
-        result = [
-            beta_1,
-            beta_2,
-            beta_converged,
-            jnp.array(self.opt_status),
-            jnp.array(self.true_nc),
-            self.cisglm.p[vdx],
-            self.cisglm.beta[vdx],
-            self.cisglm.se[vdx],
-            self.pval_beta,
-            self.cisglm.alpha[vdx],
-            self.cisglm.converged[vdx],  # if wald test, this full model converged or not; if score, then cov-model
-        ]
+    def add_row(self, row: dict):
+        # cheap 1-row DataFrame, but *only* created when needed
+        self.frames.append(pl.DataFrame([row]))
 
-        result = [element.tolist() for element in result]
+    def add_df(self, df: pl.DataFrame):
+        self.frames.append(df)
 
-        return result, vdx
+    def to_df(self):
+        return pl.concat(self.frames, how="vertical")
 
 
 def map_cis(
-    dat: ReadyDataState,
-    family: ExponentialFamily,
-    test: HypothesisTest = ScoreTest(),
-    beta_estimator: InferBeta = InferBetaGLM(),
-    append_intercept: bool = True,
-    standardize: bool = True,
-    seed: int = 123,
-    window: int = 500000,
-    random_tiebreak: bool = False,
-    sig_level: float = 0.05,
-    fdr_level: float = 0.05,
-    pi0: Optional[float] = None,
-    qvalue_lambda: Optional[np.ndarray] = None,
-    offset_eta: ArrayLike = 0.0,
-    n_perm: int = 1000,
-    robust_se: bool = False,
-    compute_qvalue: bool = False,
-    max_iter: int = 1000,
+    data: ReadyDataState,
+    snp_test: AbstractHypothesisTest,
+    gene_test: AbstractAggregateTest,
+    mode: Literal["cis", "nominal"] = "cis",
+    window: int = 500_000,
     verbose: bool = True,
-    log=None,
-) -> pd.DataFrame:
-    """Cis eQTL mapping for each gene, report lead variant
+    log: Logger | None = None,
+    seed: int = 123,
+) -> pl.DataFrame:
+    r"""Run cis or nominal eQTL mapping per gene and return summary statistics.
 
-    Run cis-eQTL mapping by fitting specified GLM model, such as Poisson and Negative Binomial.
-    To test association between each SNP and gene expression, choose either score test (much faster) or
-    wald test.
-    For each gene, calculate the corrected p value using permutation to estimate the null distribution of
-    minimum p values.
+    **Arguments:**
 
-    :param dat: data input containing genotype array, bim, gene count data, gene meta data (tss), and covariates
-    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
-    :param test: approach for hypothesis test, default to ScoreTest()
-    :param append_intercept: `True` if want to append intercept, `False` otherwise
-    :param standardize: `True` if want to standardize covariates data
-    :param seed: seed for permutation, default to 123
-    :param window: window size (bp) of one side for cis scope, default to 500000, meaning in total 1Mb from left to right
-    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
-    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
-    :param fdr_level: FDR level specified for across genes, default to 0.05 (not used if compute_qvalue=`False`)
-    :param pi0: specified probability of null (optional) when compute_qvalue=`True`
-    :param qvalue_lambda: an array of lambda value to fit a smooth spline (Optional)
-    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param n_perm: number of permutation to estimate min p distribution for each gene using beta approximation approach, default to 1000
-    :param robust_se: `True` if use huber white robust estimator for standard errors for nominal mapping (not used here), default to `False`
-    :param compute_qvalue: `True` if add qvalue for genes, default to `False`
-    :param max_iter: maximum iterations for fitting GLM, default to 500
-    :param verbose: `True` if report QTL mapping progress in log file, default to `True`
-    :param log: logger for QTL progress
-    :return: data frame of QTL mapping results
+    - `data`: Genotype/expression/covariate bundle aligned on IID.
+    - `snp_test`: Hypothesis test to apply per variant (score or Wald).
+    - `gene_test`: Gene-level multiple testing adjustment for the cis mode.
+    - `mode`: `"cis"` (per-gene lead SNP with multiple testing adjustment) or `"nominal"` (all variant stats).
+    - `window`: Cis window size in base pairs on each side of a gene TSS/stop.
+    - `verbose`: Whether to emit progress logging.
+    - `log`: Optional logger to use; defaults to module logger.
+    - `seed`: PRNG seed for permutation and tie-breaking.
+
+    **Returns:**
+
+    A `pl.DataFrame` of concatenated cis or nominal results.
     """
     if log is None:
         log = get_log()
 
-    # TODO: we need to do some validation here...
-    X = dat.covar
-    n, k = X.shape
+    if mode not in ["cis", "nominal"]:
+        raise ValueError("`mode` must be 'cis' or 'nominal'")
 
-    gene_info = dat.pheno_meta
-
-    # append genotype as the last column
-    if standardize:
-        X = X / jnp.std(X, axis=0)
-
-    if append_intercept:
-        X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    key = rdm.PRNGKey(seed)
-
-    out_columns = [
-        "phenotype_id",
-        "chrom",
-        "num_var",
-        "variant_id",
-        "pos",
-        "tss_distance",
-        "ma_count",
-        "af",
-        "beta_shape1",
-        "beta_shape2",
-        "beta_converged",
-        "opt_status",
-        "true_nc",
-        "pval_nominal",
-        "slope",
-        "slope_se",
-        "pval_beta",
-        "alpha_cov",
-        "model_converged",
-    ]
-
-    results = []
-    se_estimator = HuberError() if robust_se else FisherInfoError()
-
-    i = 0
-    for gene in gene_info:
-        gene_name, chrom, start_min, end_max = gene
-        lstart = max(0, start_min - window)
-        rend = end_max + window
-
-        # pull cis G and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
+    key = rdm.key(seed)
+    results = _ResultsAggregator()
+    for i, cis_data in enumerate(data.iter_cis(window)):
+        gene_name = cis_data.gene_name
+        chrom = cis_data.chrom
+        lstart = cis_data.start
+        rend = cis_data.end
 
         # skip if no cis SNPs found
-        if G.shape[1] == 0:
+        if cis_data.num_snps == 0:
             if verbose:
-                log.info(
-                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
-                    gene_name,
-                    str(chrom),
-                    str(lstart),
-                    str(rend),
-                )
+                log.warning(f"No cis-SNPs found for {gene_name} over region {chrom}:{lstart}-{rend}. Skipping.")
             continue
 
-        key, g_key = rdm.split(key, 2)
-        if verbose:
-            log.info(
-                "Performing cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
+        # skip if no variation in y
+        y_var = jnp.var(cis_data.y)
+        if y_var == 0 or jnp.isnan(y_var):
+            if verbose:
+                log.warning(f"No variation found in for {gene_name}. Skipping.")
+            continue
 
-        result = map_cis_single(
-            X,
-            G,
-            y,
-            family,
-            g_key,
-            sig_level,
-            offset_eta,
-            se_estimator,
-            n_perm,
-            test,
-            beta_estimator,
-            max_iter,
-        )
         if verbose:
-            log.info(
-                "Finished cis-qtl scan for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
+            log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
+
+        if mode == "cis":
+            # cis-mode tests each variant, and then performs either permutations or ACAT to compute a gene-level
+            # calibrated p-value
+            key, p_key, s_key = rdm.split(key, 3)
+            test_result, perm_result = map_cis_single(
+                cis_data.X,
+                cis_data.G,
+                cis_data.y,
+                cis_data.offset,
+                snp_test,
+                gene_test,
+                p_key,
             )
+            result = _process_cis_result(cis_data, test_result, perm_result, s_key)
+            results.add_row(result)
+        else:
+            # nominal mode only performs variant-level testing
+            test_result = eqx.filter_jit(snp_test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
+            result = _process_nominal_result(cis_data, test_result)
+            results.add_df(result)
+
+        if verbose:
+            log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         # clear caches every 50 genes
-        i += 1
         if (i + 1) % 50 == 0:
+            if verbose:
+                log.debug("Clearing JAX JIT-caches")
             jax.clear_caches()  # clear up caches
 
-        result_out = _prepare_cis_result(
-            G,
-            chrom,
-            gene_name,
-            key,
-            random_tiebreak,
-            result,
-            start_min,
-            var_df,
-            X,
-            y,
-            family,
-            offset_eta,
-            se_estimator,
-            max_iter,
-        )
-        results.append(result_out)
+    if len(results) > 0:
+        result_df = results.to_df()
 
-    # filter results based on user specification (e.g., report all, report top, etc)
-    result_df = pd.DataFrame.from_records(results, columns=out_columns)
-
-    if compute_qvalue:
-        result_df = add_qvalues(result_df, log, fdr_level, pi0, qvalue_lambda)
+        # if we didn't fit a negative binomial, just drop the alpha column as its const 0
+        # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
+        if not isinstance(snp_test.model.family, NegativeBinomial):
+            result_df = result_df.drop("nb_alpha")
+    else:
+        log.warning("All genes were skipped!")
+        result_df = None
 
     return result_df
 
 
-def _prepare_cis_result(
-    G,
-    chrom,
-    gene_name,
-    key,
-    random_tiebreak,
-    result,
-    start_min,
-    var_df,
-    X,
-    y,
-    family,
-    offset_eta,
-    se_estimator,
-    max_iter,
-):
-    """Get lead SNPs and their information
-
-    :param G: genotype array
-    :param chrom: chromosome number
-    :param gene_name: gene name
-    :param key: randomly pick a SNP as lead SNP if there is tie when random_tiebreak=`True`
-    :param random_tiebreak: `True` if randomly pick a lead SNP when there is tie, `False` if pick the first occurrence, default to `False`
-    :param result: data frame of QTL mapping result
-    :param start_min: TSS start (0-based)
-    :param var_df: data frame of variant information (bim)
-    :return:
-    """
-    g_info = _get_geno_info(G)
-    # get info at lead hit, and lead hit index
-    row, vdx = result.get_lead(key, random_tiebreak)
-    # pull SNP info at lead hit index
-    af = g_info.af[vdx]
-    ma_count = g_info.ma_count[vdx]
-    snp_id = var_df.iloc[vdx].snp
-    snp_pos = var_df.iloc[vdx].pos
-    tss_distance = snp_pos - start_min
-    # combine lead hit info and gene meta data
-    num_var_cis = G.shape[1]
-
-    # fit full eQTL model for lead SNP
-    glm = GLM(family=family, max_iter=max_iter)
-    g = G[:, vdx]
-    M = jnp.hstack((X, g[:, jnp.newaxis]))
-    eta, alpha_n = glm.calc_eta_and_dispersion(M, y, offset_eta)
-    glmstate = glm.fit(
-        M,
-        y,
-        offset_eta=offset_eta,
-        init=eta,
-        alpha_init=alpha_n,
-        se_estimator=se_estimator,
-    )
-
-    row[6] = glmstate.beta[-1].item()
-    row[7] = glmstate.se[-1].item()
-
-    result_out = [
-        gene_name,
-        chrom,
-        num_var_cis,
-        snp_id,
-        snp_pos,
-        tss_distance,
-        ma_count,
-        af,
-    ] + row
-    return result_out
-
-
+@eqx.filter_jit
 def map_cis_single(
     X: ArrayLike,
     G: ArrayLike,
     y: ArrayLike,
-    family: ExponentialFamily,
-    key_init: rdm.PRNGKey,
-    sig_level: float = 0.05,
-    offset_eta: ArrayLike = 0.0,
-    se_estimator: ErrVarEstimation = FisherInfoError(),
-    n_perm: int = 1000,
-    test: HypothesisTest = ScoreTest(),
-    beta_estimator: InferBeta = InferBetaGLM(),
-    max_iter: int = 1000,
-) -> MapCisSingleState:
-    """Fit GLM for SNP-gene pairs and report results
+    offset: ArrayLike,
+    snp_test: AbstractHypothesisTest,
+    gene_test: AbstractAggregateTest,
+    key: PRNGKeyArray,
+) -> tuple[TestResult, PermutationResult]:
+    r"""Fit GLM, test variants, and compute gene-level permutation adjustment.
 
-    :rtype: MapCisSingleState
-    :param X: array of covariates
-    :param G: genotype array
-    :param y: gene expression array
-    :param family: GLM model for running eQTL mapping, eg. Negative Binomial, Poisson
-    :param key_init: key for jax RNG
-    :param sig_level: alpha significance level at each SNP level (not used), default to 0.05
-    :param offset_eta: offset values when fitting regression for Negative Bionomial and Poisson, deault to 0s
-    :param se_estimator: SE estimator using HuberError() or FisherInfoError()
-    :param n_perm: number of permutation to estimate min p distribution for each gene using beta approximation approach, default to 1000
-    :param test: approach for hypothesis test, default to ScoreTest()
-    :param max_iter: maximum iterations for fitting GLM, default to 500
-    :return: cis mapping results for a single gene
+    **Arguments:**
+
+    - `X`: Covariate matrix of shape ``(n, p)``.
+    - `G`: Genotype matrix of shape ``(n, m)``.
+    - `y`: Response vector of length ``n``.
+    - `offset`: Offset vector broadcastable to ``y``.
+    - `test`: Hypothesis test callable producing per-variant statistics.
+    - `perm`: Aggregate permutation test for multiple-testing correction.
+    - `key`: PRNG key for permutation randomness.
+
+    **Returns:**
+
+    Per-variant stats plus permutation-adjusted p-values as a tuple of
+        ([`jaxqtl.hypothesis.TestResult`][], [`jaxqtl.hypothesis.PermutationResult`][]).
     """
-    cisglmstate = test(X, G, y, family, offset_eta, se_estimator, max_iter)
+    test_result = snp_test(X, G, y, offset)
+    perm_result = gene_test(X, G, y, offset, test_result, snp_test, key)
 
-    beta_key, direct_key = rdm.split(key_init)
+    return test_result, perm_result
 
-    # if we -always- use BetaPerm now, we may as well drop the class aspect and
-    # call function directly...
-    # note: set max_perm_direct will change the parent class parameter
-    perm = BetaPerm(max_perm_direct=n_perm)
-    obs_p = jnp.nanmin(cisglmstate.p)
-    obs_z = cisglmstate.z[int(jnp.nanargmin(cisglmstate.p))]
 
-    pval_beta, beta_param, true_nc, opt_status = perm(
-        X,
-        y,
-        G,
-        obs_p,
-        obs_z,
-        family,
-        beta_key,
-        sig_level,
-        offset_eta,
-        test,
-        se_estimator,
-        beta_estimator,
-        max_iter,
+def _process_cis_result(
+    cis_data: CisData,
+    test_result: TestResult,
+    perm_result: tuple[ArrayLike, Any],
+    key: PRNGKeyArray,
+):
+    """Process the results for a gene under the cis-scan and format for output"""
+
+    # get info at lead hit, and lead snp
+    minp = jnp.nanmin(test_result.p)
+    ties_ind = jnp.argwhere(test_result.p == minp).squeeze()  # why does this add extra axis?
+    if ties_ind.ndim > 0:
+        vdx = rdm.choice(key, ties_ind, replace=False)
+    else:
+        vdx = ties_ind
+
+    adj_pvalue, aux = perm_result
+
+    # this is kind of hacky but if aux is not None we did a beta-approximation
+    if aux is not None:
+        beta_params, nc_estimate, opt_status = aux
+        shape_k = float(beta_params.k)
+        shape_n = float(beta_params.n)
+        nc_estimate = float(nc_estimate)
+        perm_converged = bool(beta_params.converged) and bool(opt_status)
+        lead_adj_pvalue = float(adj_pvalue[vdx])
+        method = "BETA"
+    else:
+        shape_k = float("nan")
+        shape_n = float("nan")
+        nc_estimate = float("nan")
+        perm_converged = True
+        lead_adj_pvalue = float(adj_pvalue)
+        method = "ACAT"
+
+    snp = cis_data.get_snp_info(vdx)
+    if jnp.ndim(test_result.disp) > 0:
+        nb_alpha = float(test_result.disp[vdx])
+    else:
+        nb_alpha = float(test_result.disp)
+
+    if jnp.ndim(test_result.converged) > 0:
+        glm_converged = bool(test_result.converged[vdx])
+    else:
+        glm_converged = bool(test_result.converged)
+
+    result = {
+        "phenotype_id": cis_data.gene_name,
+        "chrom": cis_data.chrom,
+        "num_var": cis_data.num_snps,
+        "snp": snp.id,
+        "a1": snp.a1,
+        "a0": snp.a0,
+        "pos": snp.pos,
+        "tss_distance": snp.tss_distance,
+        "af": snp.af,
+        "ma_count": snp.ma_count,
+        "shape1": shape_k,
+        "shape2": shape_n,
+        "nc_estimate": nc_estimate,
+        "perm_converged": perm_converged,
+        "beta": float(test_result.beta[vdx]),
+        "se": float(test_result.se[vdx]),
+        "pvalue": float(test_result.p[vdx]),
+        "pvalue_adj": lead_adj_pvalue,
+        "adj_method": method,
+        "nb_alpha": nb_alpha,
+        "model_converged": glm_converged,
+    }
+    # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
+    if aux is None:
+        for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
+            result.pop(beta_perm_col, None)
+
+    return result
+
+
+def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
+    region_df = cis_data.get_cis_info()
+
+    if jnp.ndim(test_result.disp) > 0:
+        nb_alpha = np.asarray(test_result.disp)
+    else:
+        nb_alpha = np.full_like(test_result.beta, test_result.disp)
+
+    if jnp.ndim(test_result.converged) > 0:
+        glm_converged = np.asarray(test_result.converged)
+    else:
+        glm_converged = np.full_like(test_result.beta, test_result.converged)
+
+    region_df = region_df.with_columns(
+        pl.lit(cis_data.gene_name).alias("phenotype_id"),
+        pl.Series("beta", np.asarray(test_result.beta)),
+        pl.Series("se", np.asarray(test_result.se)),
+        pl.Series("pvalue", np.asarray(test_result.p)),
+        pl.Series("nb_alpha", nb_alpha),
+        pl.Series("model_converged", glm_converged),
     )
-
-    return MapCisSingleState(
-        cisglm=cisglmstate, pval_beta=pval_beta, beta_param=beta_param, opt_status=opt_status, true_nc=true_nc
-    )
-
-
-def write_parqet(outdf: pd.DataFrame, method: str, out_path: str):
-    """write parquet file for nominal scan (split by chr)
-
-    :param outdf: data frame of full cis nominal mapping
-    :param method: wald or score
-    :param out_path: output path
-    :return: None
-    """
-    # split by chrom
-    for chrom in outdf["chrom"].unique().tolist():
-        one_chrom_df = outdf.loc[outdf["chrom"] == chrom]
-        one_chrom_df.drop("i", axis=1, inplace=True)  # remove index i
-        one_chrom_df.to_parquet(out_path + f".cis_qtl_pairs.{chrom}.{method}.parquet")
-
-    return
+    # put pheno id in front
+    region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))
+    return region_df

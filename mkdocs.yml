@@ -1,0 +1,122 @@
+theme:  # pulled from optimistix
+    name: material
+    features:
+        - navigation.sections  # Sections are included in the navigation on the left.
+        - toc.integrate  # Table of contents is integrated on the left; does not appear separately on the right.
+        - header.autohide  # header disappears as you scroll
+    palette:
+        # Light mode / dark mode
+        # We deliberately don't automatically use `media` to check a user's preferences. We default to light mode as
+        # (a) it looks more professional, and (b) is more obvious about the fact that it offers a (dark mode) toggle.
+        - scheme: default
+          primary: white
+          accent: amber
+          toggle:
+             icon: material/weather-night
+             name: Switch to dark mode
+        - scheme: slate
+          primary: black
+          accent: amber
+          toggle:
+             icon: material/weather-sunny
+             name: Switch to light mode
+    icon:
+        repo: fontawesome/brands/github               # GitHub logo in top right
+        logo: "material/chart-bell-curve-cumulative"  # giddyup logo in top left
+    favicon: "_static/favicon.png"
+    custom_dir: "docs/_overrides"  # Overriding part of the HTML
+
+
+site_name: jaxQTL
+site_description: The documentation for the jaxQTL software library.
+site_url: https://mancusolab.github.io/jaxqtl
+
+repo_url: https://github.com/mancusolab/jaxqtl
+repo_name: mancusolab/jaxqtl
+edit_uri: ""  # No edit button, as some of our pages are in /docs and some in /examples via symlink, so it's impossible for them all to be accurate
+
+strict: false  # Don't allow warnings during the build process
+
+extra_javascript:
+    # The below three make MathJax work, see https://squidfunk.github.io/mkdocs-material/reference/mathjax/
+    - _static/mathjax.js
+    - https://polyfill.io/v3/polyfill.min.js?features=es6
+    - https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js
+
+extra_css:
+    - _static/custom_css.css
+
+markdown_extensions:
+    - pymdownx.arithmatex:      # Render LaTeX via MathJax
+        generic: true
+    - pymdownx.superfences      # Seems to enable syntax highlighting when used with the Material theme.
+    - pymdownx.details          # Allowing hidden expandable regions denoted by ???
+    - pymdownx.snippets:        # Include one Markdown file into another
+        base_path: docs
+    - admonition
+    - toc:
+        permalink: "¤"  # Adds a clickable permalink to each section heading
+        toc_depth: 4
+
+plugins:
+    - search:
+        separator: '[\s\-,:!=\[\]()"/]+|(?!\b)(?=[A-Z][a-z])|\.(?!\d)|&[lg]t;'
+    - include_exclude_files:
+        exclude:
+          - "_overrides"
+    - hippogriffe:
+        show_bases: true
+        show_source_links: all
+        extra_public_objects:
+          - equinox.Module
+    - mkdocstrings:
+        handlers:
+            python:
+                paths: [src]
+                options:
+                  force_inspection: true
+                  heading_level: 4
+                  inherited_members: true
+                  members_order: source
+                  show_bases: false
+                  show_if_no_docstring: true
+                  show_overloads: false
+                  show_root_heading: true
+                  show_signature_annotations: true
+                  show_source: false
+                  show_symbol_type_heading: true
+                  show_symbol_type_toc: true
+
+nav:
+    - 'index.md'
+    - User Guide:
+        - 'guide/model.md'
+        - 'guide/cis.md'
+        - 'guide/trans.md'
+        - 'guide/util.md'
+        - 'guide/files.md'
+    - API:
+      - Statistical Models:
+        - 'api/models/glm.md'
+        - 'api/models/families.md'
+        - 'api/models/links.md'
+      - Inference:
+        - 'api/inference/infer.md'
+        - 'api/inference/solvers.md'
+        - 'api/inference/stderr.md'
+      - Hypothesis Testing:
+          - 'api/hypothesis/variant.md'
+          - 'api/hypothesis/gene.md'
+      - Data Management:
+          - 'api/data/geno.md'
+          - 'api/data/pheno.md'
+          - 'api/data/other.md'
+      - molQTL Mapping:
+          - 'api/mapping/cis.md'
+          - 'api/mapping/trans.md'
+    - Misc:
+        - 'authors.md'
+        - 'versions.md'
+        - 'license.md'
+        - 'conduct.md'
+        - 'cite.md'

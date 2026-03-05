@@ -1,5 +1,6 @@
 # auto-gen version file
 src/jaxqtl/_version.py
+run.sh
 
 # Temporary and binary files
 *~

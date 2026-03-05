@@ -1,305 +1,657 @@
-#!/usr/bin/env python3
 import argparse as ap
 import logging
+import re
 import sys
 
-import numpy as np
-import pandas as pd
-import statsmodels.api as sm
+import polars as pl
+import pyarrow as pa
+import pyarrow.parquet as pq
 
 import jax
-import jax.numpy as jnp
 
-from jaxtyping import ArrayLike
+from .distribution import Gaussian, NegativeBinomial, Poisson
+from .hypothesis import (
+    ACAT,
+    BetaPermutation,
+    GaussianCGF,
+    NegativeBinomialCGF,
+    PoissonCGF,
+    ScoreTest,
+    SpaTest,
+    WaldTest,
+)
+from .infer import (
+    CGSolve,
+    CholeskySolve,
+    FisherInfoError,
+    GeneralizedLinearModel,
+    HuberError,
+    LinearModel,
+    QRSolve,
+)
+from .io import (
+    ExpressionData,
+    PlinkData,
+    read_offset_tsvlike,
+    read_plink_style_tsvlike,
+    read_single_column_file,
+    VCFData,
+)
+from .log import get_logger
+from .map import get_trans_schemas, map_cis, map_trans
+from .map.data import ReadyDataState
 
-from jaxqtl.families.distribution import Gaussian, NegativeBinomial, Poisson
-from jaxqtl.infer.permutation import InferBetaGLM, InferBetaLM
-from jaxqtl.infer.utils import CommonTest, ScoreTest, WaldTest, WaldTest_lm  # , RareTest
-from jaxqtl.io.covar import covar_reader
-from jaxqtl.io.geno import PlinkReader
-from jaxqtl.io.pheno import PheBedReader
-from jaxqtl.io.readfile import create_readydata, ReadyDataState
-from jaxqtl.log import get_log, get_logger
-from jaxqtl.map.cis import map_cis, write_parqet
-from jaxqtl.map.nominal import fit_intercept_only, map_nominal, map_nominal_covar
-from jaxqtl.map.utils import _ACAT, _get_geno_info, _setup_G_y
 
+class _SplitAction(ap.Action):
+    """Parse comma or space delimited command args into a list.
+    Useful for pheno/pheno-col-num covar/covar-col-num.
 
-def cis_scan_score_sm(X: ArrayLike, G: ArrayLike, y: ArrayLike, offset_eta: ArrayLike = 0.0):
     """
-    run GLM across variants in a flanking window of given gene
-    cis-widow: plus and minus W base pairs, total length 2*cis_window
-    """
-    # statsmodel result
-    sm_glm = sm.GLM(
-        np.array(y),
-        np.array(X),
-        family=sm.families.Poisson(),
-        offset=np.array(offset_eta).squeeze(),
+
+    def __init__(self, *, type=str, **kwargs):
+        super().__init__(**kwargs)
+        self.cast = type
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        if isinstance(values, list):
+            raw = " ".join(values)
+        else:
+            raw = values
+        # split on commas or whitespace
+        items = re.split(r"[\s,]+", raw.strip())
+        # drop empties
+        final = []
+        for it in items:
+            if not it:
+                continue
+            try:
+                final.append(self.cast(it))
+            except ValueError:
+                raise ap.ArgumentError(self, f"invalid {self.cast.__name__!r} value: {it!r}")
+
+        setattr(namespace, self.dest, final)
+
+
+def _create_common_subp(subp, name, help):
+    common_p = subp.add_parser(name, help=help)
+
+    # geno arguments
+    geno_group = common_p.add_mutually_exclusive_group(required=True)
+    geno_group.add_argument("--geno", help="Prefix to PLINK triplet")
+    geno_group.add_argument("--bfile", help="Prefix to PLINK triplet")
+    geno_group.add_argument("--vcf", help="Path to VCF data")
+
+    # pheno / covariate arguments
+    common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
+    common_p.add_argument("--covar", help="Path to covariate data", required=True)
+    covar_group = common_p.add_mutually_exclusive_group()
+    covar_group.add_argument(
+        "--covar-name",
+        nargs="+",
+        action=_SplitAction,
+        help="Covariate name(s) to include (comma/space delimited). All other covariates are discarded during analysis",
     )
-    sm_res = sm_glm.fit()
-
-    chi2_vec = []
-    p_vec = []
-
-    # print(sm_res.summary())
-    for snp in G.T:
-        chi2, sm_p, _ = sm_res.score_test(params_constrained=sm_res.params, exog_extra=snp)
-        chi2_vec.append(chi2)
-        p_vec.append(sm_p)
-
-    return chi2_vec, p_vec
-
-
-def map_cis_nominal_score_sm(
-    dat: ReadyDataState,
-    log=None,
-    append_intercept: bool = True,
-    standardize: bool = True,
-    window: int = 500000,
-    verbose: bool = True,
-    offset_eta: ArrayLike = 0.0,
-):
-    """eQTL Mapping for all cis-SNP gene pairs
-
-    append_intercept: add a column of ones in front for intercepts in design matrix
-    standardize: on covariates
-
-    Returns:
-        score test statistics and p value (no effect estimates)
-        write out parquet file by chrom for efficient data storage and retrieval
-    """
-
-    if log is None:
-        log = get_log()
-
-    # TODO: we need to do some validation here...
-    X = dat.covar
-    n, k = X.shape
-
-    gene_info = dat.pheno_meta
-
-    # append genotype as the last column
-    if standardize:
-        X = X / jnp.std(X, axis=0)
-
-    if append_intercept:
-        X = jnp.hstack((jnp.ones((n, 1)), X))
-
-    af = []
-    ma_count = []
-    Z = []
-    nominal_p = []
-    num_var_cis = []
-    gene_mapped_list = pd.DataFrame(columns=["gene_name", "chrom", "tss"])
-    var_df_all = pd.DataFrame(columns=["chrom", "snp", "cm", "pos", "a0", "a1", "i", "phenotype_id", "tss"])
-
-    for gene in gene_info:
-        gene_name, chrom, start_min, end_max = gene
-        lstart = max(0, start_min - window)
-        rend = end_max + window
-
-        # pull cis G and y for this gene
-        G, y, var_df = _setup_G_y(dat, gene_name, str(chrom), lstart, rend)
-
-        # skip if no cis SNPs found
-        if G.shape[1] == 0:
-            if verbose:
-                log.info(
-                    "No cis-SNPs found for %s over region %s:%s-%s. Skipping.",
-                    gene_name,
-                    str(chrom),
-                    str(lstart),
-                    str(rend),
-                )
-            continue
-
-        if verbose:
-            log.info(
-                "Performing cis-qtl scan (statsmodel) for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
-
-        chi2, sm_p = cis_scan_score_sm(X, G, y, offset_eta)
-        g_info = _get_geno_info(G)
-
-        if verbose:
-            log.info(
-                "Finished cis-qtl scan (statsmodel) for %s over region %s:%s-%s",
-                gene_name,
-                str(chrom),
-                str(lstart),
-                str(rend),
-            )
-
-        var_df["phenotype_id"] = gene_name
-        var_df["tss"] = start_min
-        var_df_all = pd.concat([var_df_all, var_df], ignore_index=True)
-        gene_mapped_list.loc[len(gene_mapped_list)] = [gene_name, chrom, start_min]
-
-        # combine results
-        af.append(g_info.af)
-        ma_count.append(g_info.ma_count)
-
-        nominal_p.append(sm_p)
-        Z.append(chi2)
-        num_var_cis.append(var_df.shape[0])
-
-    # write result
-    start_row = 0
-    end_row = 0
-    outdf = var_df_all
-    outdf["tss_distance"] = outdf["pos"] - outdf["tss"]
-    outdf = outdf.drop(["cm"], axis=1)
-
-    # add additional columns
-    outdf["af"] = np.NaN
-    outdf["ma_count"] = np.NaN
-    outdf["pval_nominal"] = np.NaN
-    outdf["Z"] = np.NaN
-
-    for idx, _ in gene_mapped_list.iterrows():
-        end_row += num_var_cis[idx]
-        outdf.loc[np.arange(start_row, end_row), "af"] = af[idx]
-        outdf.loc[np.arange(start_row, end_row), "ma_count"] = ma_count[idx]
-        outdf.loc[np.arange(start_row, end_row), "pval_nominal"] = nominal_p[idx]
-        outdf.loc[np.arange(start_row, end_row), "Z"] = Z[idx]
-        start_row = end_row
-
-    return outdf
-
-
-def main(args):
-    argp = ap.ArgumentParser(description="")  # create an instance
-    argp.add_argument("--geno", type=str, help="Genotype prefix, eg. chr1")
-    argp.add_argument("--covar", type=str, help="Covariate path")
-    argp.add_argument("--add-covar", type=str, help="Covariate path for additional covariates")
-    argp.add_argument("--covar-test", type=str, help="Covariate to test")
-    argp.add_argument("--rm-covar", type=str, help="Covariate to remove")
-    argp.add_argument("--pheno", type=str, help="Pheno path")
-    argp.add_argument("--model", type=str, choices=["gaussian", "poisson", "NB"], help="eQTL model")
-    argp.add_argument(
-        "--genelist",
-        type=str,
-        default=None,
-        help="""Path to gene list (no header);
-                      if not provided, jaxQTL will run for all genes in pheno file""",
+    covar_group.add_argument(
+        "--rm-covar",
+        nargs="+",
+        action=_SplitAction,
+        help="Covariate name(s) to exclude (comma/space delimited). All other covariates are included during analysis",
     )
-    argp.add_argument(
+    common_p.add_argument(
+        "--normalize-covar",
+        action="store_true",
+        default=False,
+        help="Normalize covariates to have zero mean and unit variance.",
+    )
+    common_p.add_argument(
+        "--one-hot",
+        action="store_true",
+        default=False,
+        help=(
+            "Encode string/categorical covariates using one-hot encoding."
+            " The category corresponding to the first observation will be dropped for co-linearity reasons.",
+        ),
+    )
+    common_p.add_argument(
+        "--no-intercept",
+        action="store_true",
+        default=False,
+        help=(
+            "By default jaxQTL appends an intercept to the covariates to handle a shared mean term in the response."
+            " Set `--no-intercept` to disable this behavior."
+        ),
+    )
+
+    # offset options. can only select one; otherwse we don't have an offset
+    offset_group = common_p.add_mutually_exclusive_group()
+    offset_group.add_argument(
         "--offset",
-        type=str,
+        help=(
+            "Path to offset file in tsv format."
+            "Expects exactly two columns (with header). The first should be iid-like and second the offset name"
+        ),
+    )
+    offset_group.add_argument(
+        "--offset-name-from-covar",
+        help="Covariate name to use as fixed offset",
+    )
+    offset_group.add_argument(
+        "--set-offset-from-libsize",
+        action="store_true",
+        default=False,
+        help="Compute log(library size) on the fly and use as fixed as fixed offset",
+    )
+
+    # statistical test arguments
+    common_p.add_argument("--model", choices=["gaussian", "poisson", "nb"], default="nb", help="eQTL model")
+    common_p.add_argument(
+        "--test",
+        choices=["wald", "score"],
+        default="score",
+        help="Test to perform during scan. We recommend 'score' for cis mapping and 'wald' for nominal mapping",
+    )
+    common_p.add_argument(
+        "--robust-se",
+        action="store_true",
+        default=False,
+        help="Compute Robust/Huber standard errors for GLM rather than Fisher Information",
+    )
+    common_p.add_argument(
+        "--spa",
+        action="store_true",
+        default=False,
+        help=(
+            "Whether to perform SPA correction for p-values computed from score statistics."
+            " Not applicable for `--test wald` and not necessary for `--model gaussian`.",
+        ),
+    )
+
+    # filtering arguments
+    sample_group = common_p.add_mutually_exclusive_group()
+    sample_group.add_argument(
+        "--keep",
+        help="Path to file of iids to analyze. All other iids are discarded during current analysis.",
+    )
+    sample_group.add_argument(
+        "--exclude",
+        help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
+    )
+
+    common_p.add_argument(
+        "--min-indiv-expr-pct",
+        type=float,
         default=None,
-        help="Path to log offset in tsv format (no header) with two columns: iid and log(library size)",
+        help=(
+            "Exclude individuals that have fewer than specified percentage of genes with "
+            "non-zero expression (e.g., '0.1')"
+        ),
     )
-    argp.add_argument("--indlist", type=str, help="Path to individual list (no header); default is all")
-    argp.add_argument(
-        "--mode",
-        type=str,
-        choices=["nominal", "cis", "cis_acat", "fitnull", "covar", "trans", "estimate_ld_only"],
-        help="""cis: eQTL mapping to identify genes with at least one eQTL (default uses permutation to calibrate pvals);
-                nominal: provides association statistics for all pairs of cis-SNP-gene""",
+    common_p.add_argument(
+        "--min-gene-expr-pct",
+        type=float,
+        default=0.0,
+        help="Exclude genes expressed in fewer than specified percentage of individuals (e.g., '0.1')",
     )
-    argp.add_argument(
-        "--ld-type",
-        type=str,
-        choices=["raw", "glm_wt", "no_glm_wt"],
-        default="glm_wt",
-        help="""type of LD matrix""",
+    gene_group = common_p.add_mutually_exclusive_group()
+    gene_group.add_argument(
+        "--gene-list",
+        help="Path to gene list (no header). All other genes will be discarded during analysis",
     )
-    argp.add_argument(
-        "--platform",
+    gene_group.add_argument(
+        "--genes",
+        nargs="+",
+        action=_SplitAction,
+        help="Gene name(s) to analyze (comma/space delimited). All other genes will be discarded during analysis",
+    )
+    """
+    gene_group.add_argument(
+        "--rm-genes",
+        nargs="+",
+        action=_SplitAction,
+        help="Gene name(s) to exclude (comma/space delimited). All other genes will be included during analysis",
+    )
+    """
+    # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
+
+    """
+    # functionality not supported yet
+    chrom_group = common_p.add_mutually_exclusive_group()
+    chrom_group.add_argument(
+        "--chr",
+        help="Excludes all variants (and pheno) not on specified chromosome",
+    )
+    chrom_group.add_argument(
+        "--autosome",
+        action="store_true",
+        default=False,
+        help="Excludes all unplaced and non-autosomal variants",
+    )
+    """
+    common_p.add_argument("--window", type=int, default=500_000, help="One sided window size (bps) with respect to TSS")
+
+    # inference/runtime arguments
+    common_p.add_argument(
+        "--acat",
+        default=False,
+        action="store_true",
+        help="Perform ACAT for gene-level p-values rather than Beta approximation to permutation testing",
+    )
+    common_p.add_argument(
+        "--nperm",
+        type=int,
+        default=1000,
+        help="Number of permutations to perform to bootstrap Beta approximation to permutation testing",
+    )
+    common_p.add_argument("--max-iter", type=int, default=1000, help="Maximum number of iterations for GLM inference")
+    common_p.add_argument("--tol", type=float, default=1e-3, help="Tolerance for termination during GLM inference")
+    common_p.add_argument("--step-size", type=float, default=1.0, help="Initial step-size during GLM inference")
+
+    common_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization")
+    common_p.add_argument(
+        "--solver",
+        choices=["cholesky", "cg", "qr"],
+        default="cholesky",
+        help="The linear solver to use during model fitting",
+    )
+
+    common_p.add_argument(
         "-p",
+        "--platform",
         type=str,
         choices=["cpu", "gpu", "tpu"],
         default="cpu",
-        help="platform: cpu, gpu or tpu",
+        help="Machine platform: cpu, gpu or tpu",
     )
-    argp.add_argument(
-        "--test-method",
-        type=str,
-        choices=["wald", "score"],
-        help="""Wald or score test;
-                              We recommend score test for cis mapping and wald for nominal mapping """,
-    )
-    argp.add_argument("--window", type=int, default=500000, help="one sided window size (bps) with respect to TSS")
-    argp.add_argument("--nperm", type=int, default=1000)
-    argp.add_argument("--max-iter", type=int, default=1000)
-    argp.add_argument("--perm-seed", type=int, default=1)
-    argp.add_argument(
-        "--addpc", type=int, default=2, help="Add expression PCs; set this to 0 to disable PC calculation"
-    )
-    argp.add_argument(
-        "--prop-cutoff", type=float, help="keep individual with gene expression below this proportion threshold"
-    )
-    argp.add_argument(
-        "--express-percent",
-        type=float,
-        default=0.0,
-        help="keep genes with gene expression above (>) this threshold; default will exclude genes not expressed at all.",
-    )
-    argp.add_argument("--cond-snp", type=str, default=None, help="conditional SNP id")
-    argp.add_argument(
-        "--robust",
-        action="store_true",
-        default=False,
-        help="Robust SE for GLM",
-    )
-    argp.add_argument(
-        "--rare-snp",
-        action="store_true",
-        default=False,
-        help="Test for rare variants using SPA method",
-    )
-    argp.add_argument("--autosomal-only", action="store_true", default=False, help="Test for only autosomal chr")
-    argp.add_argument(
-        "--perm-pheno",
-        action="store_true",
-        default=False,
-        help="Permute phenotype for type I error calibration",
-    )
-    argp.add_argument(
-        "--qvalue",
-        action="store_true",
-        default=False,
-        help="Add q value",
-    )
-    argp.add_argument(
-        "--no-offset",
-        action="store_true",
-        default=False,
-        help="remove offset for count-based models",
-    )
-    argp.add_argument(
-        "--standardize",
-        action="store_true",
-        default=False,
-        help="Standardize covariates",
-    )
-    argp.add_argument(
-        "--statsmodel",
-        action="store_true",
-        default=False,
-        help="Run statsmodel",
-    )
-    argp.add_argument(
+    common_p.add_argument(
         "--verbose",
         action="store_true",
         default=False,
         help="Verbose for logger",
     )
-    argp.add_argument("--out", "-o", type=str, help="out file prefix")
+    common_p.add_argument("--out", "-o", type=str, default="jaxqtl", help="out file prefix")
+    return common_p
 
-    args = argp.parse_args(args)  # a list a strings
 
-    jax.config.update("jax_platform_name", args.platform)
-    if args.platform == "tpu":
+def _compute_expression_pcs(args, log):
+    log.info("Reading phenotype and filtering")
+    expr_data = ExpressionData.from_bedfile(args.pheno)
+    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
+
+    # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
+    # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
+    if args.num_pcs < 1:
+        raise ValueError("Number of PCS must be at least 1")
+
+    """
+    if args.offset:
+        offset = read_offset_tsvlike(args.offset)
+    else:
+        offset = None
+    """
+    import jax.random as rdm
+
+    key = rdm.key(args.seed)
+    log.info(f"Computing {args.num_pcs} gene expression principal components")
+    df_pcs = expr_data.compute_pcs(args.num_pcs, key, args.transform)
+    log.info(f"Finished computing {args.num_pcs} gene expression principal components")
+
+    if args.covar:
+        log.info("Reading covariate data and appending principal components")
+        covar = read_plink_style_tsvlike(args.covar)
+        df_pcs = covar.join(df_pcs, on="iid", how="left")
+
+    log.info("Writing results.")
+    df_pcs.write_csv(args.out, separator="\t")
+
+    return 0
+
+
+def _cis_scan(args, log):
+    dat, family, glm, test, perm_test = _common_setup(args, log)
+
+    if dat.num_genes < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
+
+    log.info("Starting cis-scan.")
+    df_cis = map_cis(
+        dat,
+        snp_test=test,
+        gene_test=perm_test,
+        mode="cis",
+        window=args.window,
+        verbose=args.verbose,
+        log=log,
+        seed=args.seed,
+    )
+    if df_cis is not None:
+        log.info("Finished cis-scan. Writing results.")
+        test_str = test.name
+        adj_name = perm_test.name
+        df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    else:
+        log.warning("Finished cis-scan. No results to ouput!")
+
+    return 0
+
+
+def _nominal_scan(args, log):
+    dat, family, glm, test, perm_test = _common_setup(args, log)
+    if dat.num_genes < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
+
+    log.info("Starting nominal cis-scan.")
+    df_nominal = map_cis(
+        dat,
+        snp_test=test,
+        gene_test=perm_test,
+        mode="nominal",
+        window=args.window,
+        verbose=args.verbose,
+        log=log,
+        seed=args.seed,
+    )
+    if df_nominal is not None:
+        log.info("Finished nominal cis-scan. Writing results.")
+        test_str = test.name
+        # ztd compression?
+        df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
+
+    return 0
+
+
+def _trans_scan(args, log):
+    data, family, glm, test, perm_test = _common_setup(args, log)
+    if data.num_genes < 1:
+        log.info("No gene exists after filtering. Exiting.")
+        return 0
+
+    # convert types from python to pyarrow types
+    type_map = {int: pa.int64(), float: pa.float64(), str: pa.string(), bool: pa.bool_()}
+    var_schema, stats_schema = get_trans_schemas()
+    var_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in var_schema.items()])
+    stats_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in stats_schema.items()])
+
+    test_str = test.name
+    var_out = f"{args.out}.trans.{test_str}.variant.info.parquet.gz"
+    stats_out = f"{args.out}.trans.{test_str}.sumstats.parquet.gz"
+    with (
+        pq.ParquetWriter(var_out, var_schema_pa) as var_writer,
+        pq.ParquetWriter(stats_out, stats_schema_pa) as stats_writer,
+    ):
+        for tables in map_trans(data, test, chunk_size=2500, verbose=args.verbose, log=log, seed=args.seed):
+            if tables is None:
+                break
+
+            var_df, stats_df = tables
+            var_writer.write(var_df.to_arrow().cast(var_schema_pa))
+            stats_writer.write(stats_df.to_arrow().cast(stats_schema_pa))
+
+    return 0
+
+
+def _common_setup(args, log):
+    # Set up the distributional family and corresponding cumulative generating function (CGF) here.
+    # We only use CGF if --spa is set, but may as well set up thin objects here so we don't need to re-enumerate
+    # later.
+    if args.model == "poisson":
+        family = Poisson()
+        cgf = PoissonCGF()
+    elif args.model == "nb":
+        family = NegativeBinomial()
+        cgf = NegativeBinomialCGF()
+    elif args.model == "gaussian":
+        family = Gaussian()
+        cgf = GaussianCGF()
+    else:
+        raise ValueError(f"Unknown model: {args.model}")
+
+    # Whether to use Huber-style sandwich estimator or FisherInfo (ie Asymptotic) SEs
+    # This really only matters when doing Wald test
+    if args.robust_se:
+        se_estimator = HuberError()
+    else:
+        se_estimator = FisherInfoError()
+
+    # Power-users may want to explore diff solvers
+    if args.solver == "cholesky":
+        solver = CholeskySolve()
+    elif args.solver == "cg":
+        solver = CGSolve()
+    elif args.solver == "qr":
+        solver = QRSolve()
+    else:
+        raise ValueError(f"Unknown solver: {args.solver}")
+
+    # GLM under Gaussian assumptions is a single step under the IRLS, but that adds a bunch of overhead.
+    # So we use this simpler interface instead for Gaussian case
+    if isinstance(family, Gaussian):
+        reg_model = LinearModel(
+            family=family,
+            solver=solver,
+        )
+    else:
+        reg_model = GeneralizedLinearModel(
+            family=family,
+            solver=solver,
+            max_iter=args.max_iter,
+            tol=args.tol,
+            step_size=args.step_size,
+        )
+
+    # Set up our hypothesis testing framework. Score, SPA (which is Score + SPA), or Wald test.
+    if args.test == "score":
+        if args.spa:
+            if not isinstance(family, Gaussian):
+                # cgf set up top
+                test = SpaTest(model=reg_model, std_err=se_estimator, cgf=cgf)
+            else:
+                msg = (
+                    "Found `--spa` together with `--model gaussian`."
+                    " SPA adjustment is unnecessary as normality assumptions are met. Skipping `--spa` adjustment"
+                )
+                log.warning(msg)
+                test = ScoreTest(model=reg_model, std_err=se_estimator)
+        else:
+            test = ScoreTest(model=reg_model, std_err=se_estimator)
+    elif args.test == "wald":
+        if args.spa:
+            log.warning("`--spa` is only compatible with `--test score`. Found `--test wald`")
+        test = WaldTest(model=reg_model, std_err=se_estimator)
+    else:
+        raise ValueError("Unknown test method: {args.test_method}")
+
+    # Set up our within-gene multiple testing correction framework here: ACAT (fast) or Beta-Permutations.
+    if args.acat:
+        # we only do multiple testing adjustment when in cis mode.
+        if args.cmd != "cis":
+            log.warning("`--acat` is only compatible with `cis` subcommand. Ignoring.")
+        perm_test = ACAT()
+    else:
+        # for lm wald test, use t distribution during permutation
+        use_tdist = isinstance(family, Gaussian)
+        perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
+
+    if args.keep is not None:
+        log.info("Reading list of samples to keep for analyses.")
+        inds_to_keep = read_single_column_file(args.keep)
+        log.info(f"Found {len(inds_to_keep)} samples to keep.")
+    else:
+        inds_to_keep = None
+
+    if args.exclude is not None:
+        log.info("Reading list of samples to exclude from analyses.")
+        inds_to_exclude = read_single_column_file(args.exclude)
+        log.info(f"Found {len(inds_to_exclude)} samples to exclude.")
+    else:
+        inds_to_exclude = None
+
+    log.info("Reading genotype, phenotype, and covariate data")
+    if args.bfile is not None:
+        geno_data = PlinkData.load(args.bfile)
+    elif args.vcf is not None:
+        geno_data = VCFData.load(args.vcf)
+    elif args.geno is not None:
+        geno_data = PlinkData.load(args.geno)
+        log.warn("`--geno PREFIX` is deprecated and will be removed in a future version. Use `--bfile PREFIX` instead")
+    else:
+        # we really shouldn't get here with mutex above
+        raise ValueError("No valid genotype file specified.")
+
+    # so we end up aligning everything at the end of this function, but better to reduce as we go
+    # this should help speed up final data alignment a touch
+    if inds_to_keep:
+        geno_data = geno_data.filter_individuals(inds_to_keep, "keep")
+    elif inds_to_exclude:
+        geno_data = geno_data.filter_individuals(inds_to_exclude, "drop")
+
+    if args.gene_list is not None:
+        gene_keep_list = read_single_column_file(args.gene_list)
+    elif args.genes is not None:
+        gene_keep_list = args.genes
+    else:
+        gene_keep_list = None
+
+    gene_exclude_list = None
+    expr_data = ExpressionData.from_bedfile(
+        args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
+    )
+    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
+    if args.min_indiv_expr_pct:
+        expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
+
+    covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
+
+    # perform one-hot encoding for string-based columns, if specified
+    if args.one_hot:
+        cat = pl.selectors.string().exclude("iid")
+        covar = covar.to_dummies(cat, drop_first=True).drop(cat)
+
+    # normalize all numeric columns to have mean 0 and var 1
+    if args.normalize_covar:
+        num = pl.all().exclude("iid")
+
+        # let's make sure to not standardize the offset if it was provided, as we haven't yet extracted it
+        if args.offset_name_from_covar:
+            num = num.exclude(args.offset_name_from_covar)
+
+        covar = covar.with_columns((num - num.mean()) / num.std())
+
+    # we add an intercept column to the covariates by default if no normalization is performed
+    # but we allow users to disable this
+    if not args.no_intercept:
+        covar = covar.with_columns(pl.lit(1.0).alias("intercept"))
+
+    # before filter gene list, calculate library size and set offset, or read in pre-computed offset
+    if args.offset:
+        offset = read_offset_tsvlike(args.offset)
+    elif args.offset_name_from_covar:
+        offset = covar.select(pl.col("iid"), pl.col(args.offset_name_from_covar))
+        # drop the offset from the covariates data
+        covar = covar.drop(args.offset_name_from_covar)
+    elif args.set_offset_from_libsize:
+        offset = expr_data.offset_from_libsize
+    else:
+        offset = None
+
+    # take the genotype, expression, covariates, and offset and align by iid for valid analyses
+    # lump those into single object for easier passing around
+    data = ReadyDataState.from_data(
+        geno_data,
+        expr_data,
+        covar,
+        offset,
+    )
+    log.info("Finished reading and aligning genotype, phenotype, covariate data.")
+
+    return data, family, reg_model, test, perm_test
+
+
+def main(args):
+    argp = ap.ArgumentParser(
+        formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    subp = argp.add_subparsers(dest="cmd", required=True, help="Subcommands for linear-dag")
+
+    # build association scan parser from 'common' parser
+    cis_p = _create_common_subp(
+        subp,
+        "cis",
+        help="Perform cis-eQTL scans and report the lead hit per tested gene",
+    )
+    cis_p.set_defaults(func=_cis_scan)
+
+    nominal_p = _create_common_subp(
+        subp,
+        "nominal",
+        help="Perform cis-eQTL scans and report all association stats per tested gene.",
+    )
+    nominal_p.set_defaults(func=_nominal_scan)
+
+    trans_p = _create_common_subp(subp, "trans", help="Perform a trans-eQTL scan.")
+    trans_p.set_defaults(func=_trans_scan)
+
+    gepcs_p = subp.add_parser(
+        "compute-pcs",
+        help=(
+            "Compute gene expression principal components."
+            " This uses a randomized probabilistic PCA algorithm and will be dependent on `--seed`."
+        ),
+    )
+    gepcs_p.add_argument("--pheno", help="Path to phenotypes", required=True)
+    gepcs_p.add_argument(
+        "--num-pcs",
+        type=int,
+        help="Number of principal components to compute",
+    )
+    gepcs_p.add_argument("--covar", help="Path to covariate data", required=True)
+    gepcs_p.add_argument(
+        "--transform",
+        choices=["tmm", "log1p"],
+        default=None,
+        help="Transformation to perform on observed gene expression before computing PCs.",
+    )
+    gepcs_p.add_argument(
+        "--min-gene-expr-pct",
+        type=float,
+        default=0.0,
+        help="Keep genes with expression levels above specified value",
+    )
+    gepcs_p.add_argument(
+        "-p",
+        "--platform",
+        type=str,
+        choices=["cpu", "gpu", "tpu"],
+        default="cpu",
+        help="Machine platform: cpu, gpu or tpu",
+    )
+    gepcs_p.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Verbose for logger",
+    )
+    gepcs_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization.")
+    gepcs_p.add_argument(
+        "--out",
+        "-o",
+        type=str,
+        default="jaxqtl.princ_comp.tsv",
+        help="Path to output computed gene expression principal components (and covariate data, if specified).",
+    )
+    gepcs_p.set_defaults(func=_compute_expression_pcs)
+
+    args = argp.parse_args(args)
+
+    # we need to set 64bit support before any other option
+    if args.platform != "tpu":
+        jax.config.update("jax_enable_x64", True)
+    else:
         # TPU not support complex 64, only 16 and 32
         jax.config.update("jax_enable_x64", False)
-    else:
-        jax.config.update("jax_enable_x64", True)
+
+    jax.config.update("jax_platform_name", args.platform)
 
     log = get_logger(__name__, args.out)
     if args.verbose:
@@ -307,307 +659,16 @@ def main(args):
     else:
         log.setLevel(logging.INFO)
 
-    if args.model == "poisson":
-        family = Poisson()
-    elif args.model == "NB":
-        family = NegativeBinomial()
-    elif args.model == "gaussian":
-        family = Gaussian()
+    # strange bug with TPU error cropping up on local machines...
+    jax_logger = logging.getLogger("jax._src.xla_bridge")
+    jax_logger.propagate = False
+
+    # launch w/e task was selected
+    if hasattr(args, "func"):
+        args.func(args, log)
+        log.info("Finished! Thank you!")
     else:
-        log.info("Please choose either poisson or gaussian.")
-
-    # raw genotype data and impute for genotype data
-    geno_reader = PlinkReader()
-    geno, bim, sample_info = geno_reader(args.geno)
-
-    pheno_reader = PheBedReader()
-    pheno = pheno_reader(args.pheno)
-
-    covar = covar_reader(args.covar, args.add_covar, args.covar_test, args.rm_covar)
-
-    if args.genelist is not None:
-        genelist = pd.read_csv(args.genelist, header=None, sep="\t").iloc[:, 0].to_list()
-    else:
-        genelist = None
-
-    if args.indlist is not None:
-        indList = pd.read_csv(args.indlist, header=None, sep="\t").iloc[:, 0].to_list()
-        indList = [str(x) for x in indList]  # convert to strings
-    else:
-        indList = None
-
-    dat = create_readydata(geno, bim, pheno, covar, autosomal_only=args.autosomal_only, ind_list=indList)
-
-    # before filter gene list, calculate library size and set offset, or read in pre-computed log(offset)
-    if args.offset is None:
-        total_libsize = jnp.array(dat.pheno.count.sum(axis=1))[:, jnp.newaxis]
-        offset_eta = jnp.log(total_libsize)
-    else:
-        offset_eta = pd.read_csv(args.offset, names=['iid', 'eta'], sep="\t", index_col="iid")
-        offset_eta = offset_eta.loc[offset_eta.index.isin(dat.pheno.count.index)].sort_index()
-        offset_eta = jnp.array(offset_eta)
-
-    # filter out genes with no expressions at all
-    dat.filter_gene(geneexpr_percent_cutoff=0.0)
-
-    # add expression PCs to covar, genotype PC should appended to covar outside jaxqtl
-    if args.addpc > 0:
-        dat.add_covar_pheno_PC(k=args.addpc, add_covar=args.add_covar)
-
-    if isinstance(family, Gaussian) or args.no_offset is True:
-        # dat.transform_y(mode='log1p')  # log1p
-        # note: use pre-processed file as in tensorqtl
-        offset_eta = jnp.zeros_like(offset_eta)
-
-    # filter gene list
-    dat.filter_gene(gene_list=genelist, geneexpr_percent_cutoff=args.express_percent)
-
-    # permute gene expression for type I error calibration
-    if args.perm_pheno:
-        np.random.seed(args.perm_seed)
-        perm_idx = np.random.permutation(np.arange(0, len(dat.pheno.count)))
-        dat.pheno.count = dat.pheno.count.iloc[perm_idx]
-        offset_eta = offset_eta[perm_idx]
-
-    if dat.pheno_meta.gene_map.shape[0] < 1:
-        log.info("No gene exist.")
-        sys.exit()
-
-    # for lm wald test, use t distribution during permutation
-    if isinstance(family, Gaussian) and args.test_method == "wald":
-        beta_estimator = InferBetaLM()
-    else:
-        beta_estimator = InferBetaGLM()
-
-    if args.mode == "cis":
-        if args.test_method == "score":
-            outdf_cis_score = map_cis(
-                dat,
-                family=family,
-                test=ScoreTest(),
-                beta_estimator=beta_estimator,
-                standardize=args.standardize,
-                window=args.window,
-                offset_eta=offset_eta,
-                n_perm=args.nperm,
-                compute_qvalue=args.qvalue,
-                robust_se=args.robust,
-                log=log,
-                max_iter=args.max_iter,
-            )
-            outdf_cis_score.to_csv(args.out + ".cis_score.tsv.gz", sep="\t", index=False)
-        elif args.test_method == "wald":
-            if isinstance(family, Gaussian):
-                outdf_cis_wald = map_cis(
-                    dat,
-                    family=family,
-                    test=WaldTest_lm(),
-                    beta_estimator=beta_estimator,
-                    standardize=args.standardize,
-                    window=args.window,
-                    offset_eta=offset_eta,
-                    n_perm=args.nperm,
-                    robust_se=args.robust,
-                    compute_qvalue=args.qvalue,
-                    log=log,
-                    max_iter=args.max_iter,
-                )
-            else:
-                outdf_cis_wald = map_cis(
-                    dat,
-                    family=family,
-                    test=WaldTest(),
-                    beta_estimator=beta_estimator,
-                    standardize=args.standardize,
-                    window=args.window,
-                    offset_eta=offset_eta,
-                    n_perm=args.nperm,
-                    robust_se=args.robust,
-                    compute_qvalue=args.qvalue,
-                    log=log,
-                    max_iter=args.max_iter,
-                )
-            outdf_cis_wald.to_csv(args.out + ".cis_wald.tsv.gz", sep="\t", index=False)
-
-    elif args.mode == "cis_acat":
-        if args.test_method == "score":
-            # only work for Poisson
-            # score_test_func = RareTest() if args.rare_snp else CommonTest()
-            score_test_func = CommonTest()
-            out_df = map_nominal(
-                dat,
-                family=family,
-                test=ScoreTest(),
-                score_test=score_test_func,
-                standardize=args.standardize,
-                window=args.window,
-                offset_eta=offset_eta,
-                log=log,
-                robust_se=args.robust,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-
-            out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
-            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
-            acat_p = jnp.array([])
-            for gene in out_cis.phenotype_id.unique():
-                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
-                pvec = pvec[~jnp.isnan(pvec)]
-                acat_p = jnp.append(acat_p, _ACAT(pvec))
-
-            out_cis['pval_acat'] = acat_p
-            out_cis.to_csv(args.out + ".cis_score_acat.tsv.gz", sep="\t", index=False)
-        elif args.test_method == "wald":
-            out_df = map_nominal(
-                dat,
-                test=WaldTest(),
-                family=family,
-                standardize=args.standardize,
-                log=log,
-                window=args.window,
-                offset_eta=offset_eta,
-                robust_se=args.robust,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-
-            out_df = out_df[out_df.converged > 0 & ~out_df.pval_nominal.isnull()]
-            out_cis = out_df.loc[out_df.groupby('phenotype_id').pval_nominal.idxmin()]
-            acat_p = jnp.array([])
-            for gene in out_cis.phenotype_id.unique():
-                pvec = jnp.array(out_df.loc[out_df['phenotype_id'] == gene].pval_nominal)
-                pvec = pvec[~jnp.isnan(pvec)]
-                acat_p = jnp.append(acat_p, _ACAT(pvec))
-
-            out_cis['pval_acat'] = acat_p
-            out_cis.to_csv(args.out + ".cis_wald_acat.tsv.gz", sep="\t", index=False)
-
-    elif args.mode == "nominal":
-        if args.test_method == "score":
-            # only work for Poisson
-            # score_test_func = RareTest() if args.rare_snp else CommonTest()
-            score_test_func = CommonTest()
-            out_df = map_nominal(
-                dat,
-                family=family,
-                test=ScoreTest(),
-                score_test=score_test_func,
-                standardize=args.standardize,
-                window=args.window,
-                offset_eta=offset_eta,
-                log=log,
-                robust_se=args.robust,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-            write_parqet(outdf=out_df, method="score", out_path=args.out)
-        elif args.test_method == "wald":
-            out_df = map_nominal(
-                dat,
-                test=WaldTest(),
-                family=family,
-                standardize=args.standardize,
-                log=log,
-                window=args.window,
-                offset_eta=offset_eta,
-                robust_se=args.robust,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-            write_parqet(outdf=out_df, method="wald", out_path=args.out)
-
-    elif args.mode == "estimate_ld_only":
-        _ = map_nominal(
-            dat,
-            family=family,
-            standardize=args.standardize,
-            window=args.window,
-            offset_eta=offset_eta,
-            log=log,
-            mode=args.mode,
-            ld_out=args.out,
-            robust_se=args.robust,
-            max_iter=args.max_iter,
-            cond_snp=args.cond_snp,
-            ld_type=args.ld_type,
-        )
-        log.info("write out LD matrix.")
-
-    elif args.mode == "trans":
-        # genotype for trans-SNPs are read in from plink files, no trans-cutter
-        if args.test_method == "score":
-            out_df = map_nominal(
-                dat,
-                family=family,
-                offset_eta=offset_eta,
-                test=ScoreTest(),
-                mode="trans",
-                standardize=args.standardize,
-                robust_se=args.robust,
-                log=log,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-            out_df.to_csv(args.out + ".trans_score.tsv.gz", sep="\t", index=False)
-        elif args.test_method == "wald":
-            out_df = map_nominal(
-                dat,
-                family=family,
-                offset_eta=offset_eta,
-                test=WaldTest(),
-                mode="trans",
-                standardize=args.standardize,
-                robust_se=args.robust,
-                log=log,
-                max_iter=args.max_iter,
-                cond_snp=args.cond_snp,
-            )
-            out_df.to_csv(args.out + ".trans_wald.tsv.gz", sep="\t", index=False)
-
-    elif args.mode == "covar":
-        if args.test_method == "score":
-            out_df = map_nominal_covar(
-                dat,
-                family=family,
-                test=ScoreTest(),
-                offset_eta=offset_eta,
-                standardize=args.standardize,
-                robust_se=args.robust,
-                log=log,
-                max_iter=args.max_iter,
-                prop_cutoff=args.prop_cutoff,
-                cond_snp=args.cond_snp,
-            )
-            out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_score.tsv.gz", sep="\t", index=False)
-        elif args.test_method == "wald":
-            out_df = map_nominal_covar(
-                dat,
-                family=family,
-                test=WaldTest(),
-                offset_eta=offset_eta,
-                standardize=args.standardize,
-                robust_se=args.robust,
-                log=log,
-                max_iter=args.max_iter,
-                prop_cutoff=args.prop_cutoff,
-                cond_snp=args.cond_snp,
-            )
-            out_df.to_csv(args.out + ".below" + str(args.prop_cutoff) + ".cis_wald.tsv.gz", sep="\t", index=False)
-
-    elif args.mode == "fitnull":
-        pass
-        out_df = fit_intercept_only(
-            dat, family=family, offset_eta=offset_eta, robust_se=False, log=log, max_iter=args.max_iter
-        )
-        out_df.to_csv(args.out + ".intercept_only." + args.model + ".tsv.gz", sep="\t", index=False)
-    else:
-        log.info("please select available methods.")
-        sys.exit()
-
-    if args.statsmodel:
-        out_df = map_cis_nominal_score_sm(dat, standardize=True, log=log, window=args.window, offset_eta=offset_eta)
-        write_parqet(outdf=out_df, method="sm_score", out_path=args.out)
+        argp.print_help()
 
     return 0
 

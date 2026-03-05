@@ -5,7 +5,7 @@ out_path="../output"
 
 celltype="CD4_NC"
 
-# # genelist to perform cis-eQTL mapping
+# genelist to perform cis-eQTL mapping
 chr=22
 chunk_file="genelist_10"
 
@@ -13,8 +13,9 @@ chunk_file="genelist_10"
 test_method="score"
 
 # choose cis or nominal scan
-mode="cis" # nominal, cis
+mode="cis_acat" # nominal, cis
 window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
+N=982
 
 # jaxQTL by default compute expression PCs using the entire data provided in *.bed.gz
 # to disable this, set this to 0
@@ -34,8 +35,12 @@ model="NB"
 nperm=1000
 
 # prefix for output file
-out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
+out="${out_path}/${celltype}_N${N}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
 
+# viztracer \
+# --tracer_entries 10000000 \
+# -o results.json \
+# -- jaxqtl \
 jaxqtl \
  --geno ${geno} \
  --covar ${covar} \
