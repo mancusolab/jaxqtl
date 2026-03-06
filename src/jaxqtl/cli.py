@@ -491,6 +491,7 @@ def _common_setup(args, log):
     if args.bfile is not None:
         geno_data = PlinkData.load(args.bfile)
     elif args.vcf is not None:
+        log.error("`--vcf PREFIX` is not fully supported yet.")
         geno_data = VCFData.load(args.vcf)
     elif args.geno is not None:
         geno_data = PlinkData.load(args.geno)

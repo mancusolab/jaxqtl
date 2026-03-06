@@ -23,6 +23,7 @@ We are currently working on more detailed documentations.
 Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis.
 
 [**Installation**](#Installation)
+| [**Repository Structure**](#repository-structure)
 | [**Example**](#Example)
 | [**Notes**](#notes)
 | [**Support**](#support)
@@ -83,127 +84,116 @@ pip install lineax qtl
 
 ## Example
 
-Here we provide a working example for cis-eQTL mapping using down-sampled OneK1K dataset (N=100).
-Now we focus on identifying lead SNP for 10 genes in CD4_NC cell type and obtain
-its calibrated P value using permutations.
+This section uses the example files in `tutorial/input/` to run the current CLI on a small chr22/CD4_NC dataset.
+The examples below focus on 10 genes from the down-sampled OneK1K data (`N=100`).
 
 ### input format
 
-The input data format for expression data and covariate files are the same as described in
-[tensorQTL](https://github.com/broadinstitute/tensorqtl). See example data in `./tutorial/input/`.
+Four inputs are relevant for the examples below: genotypes, phenotypes, covariates, and an optional gene list.
 
-Four input files are required for eQTL analyses with jaxQTL: genotypes, phenotypes, covariates, and gene list (optional).
-
-* Phenotypes are provided in BED format, with a single header line starting with # and the first four columns corresponding to:
-`chr`, `start`, `end`, `phenotype_id`, with the remaining columns corresponding to samples (the identifiers must match those in the genotype input).
-The BED file can specify the center of the cis-window (usually the TSS), with `start == end-1`,
-or alternatively, start and end positions, in which case the cis-window is [start-window, end+window]
-
-* Covariates are provided as a tab-delimited tsv file dataframe (samples x covariates) with column headers.
-
-* Genotypes can be provided in PLINK1 bed/bim/fam format. (We will accomodate other formats in the future verssions)
-
-* Optional: A single-column (no header) file specifying gene identifiers.
-This means to break all genes on each chromosome to chunks (recommend 200-300 genes) so that
-run jaxQTL using HPC (e.g., slurm) array jobs to distribute in parallel.
+- Phenotypes: BED-like table. The first four columns must encode chromosome, start, end, and phenotype ID. The loader accepts common aliases such as `#Chr` and `Geneid`; `tutorial/input/CD4_NC.N100.bed.gz` is a working example.
+- Covariates: tab-delimited table with exactly one IID-like column such as `iid` or `#iid`. `tutorial/input/donor_features.tsv` matches the current reader.
+- Genotypes: PLINK BED/BIM/FAM triplet passed with `--bfile`. The examples below use `tutorial/input/chr22_N100`.
+- Gene list: optional single-column file with one gene ID per line. `tutorial/input/genelist_10` restricts the run to 10 genes.
 
 __Important note for the phenotype file__:\
-In order to adjust for library size (total count per person) correctly in the count-based model,
-you can use either of following:\
-- include all genes in the phenotype file, then jaxQTL can compute library size on the fly (default)
-- include a filtered subset of genes in the phenotype file, but compute the $\log$(library size) by yourself in file
-(see example `./tutorial/input/CD4_NC.N100.offset.tsv` ) and feed the path into jaxQTL using  `--offset ${offset_path}`
+In order to adjust for library size correctly in count-based models, pass one of the following:
+- `--set-offset-from-libsize` when the phenotype file still contains the genes needed to compute library size on the fly
+- `--offset ./tutorial/input/CD4_NC.N100.offset.tsv` when you want to use a precomputed offset file
 
 ### run jaxQTL in command line
 
-We provide two scripts for using jaxQTL in command line interface for cis-eQTL and nominal scan:
-* `./tutorial/code/run_jaxqtl_cis.sh`:: cis-eQTL mapping with permutation
-* `./tutorial/code/run_jaxqtl_nominal.sh`: all pairwise summary statistics of cis-SNPs for each gene
+The current CLI uses subcommands rather than a single `--mode` flag. The examples below show the direct interface that matches `src/jaxqtl/cli.py`.
 
-For example in cis-eQTL mapping with permutation calibration, we first specify parameters and paths:
+To compute expression PCs ahead of time, use the dedicated `compute-pcs` command:
+```bash
+jaxqtl compute-pcs \
+ --pheno ./tutorial/input/CD4_NC.N100.bed.gz \
+ --covar ./tutorial/input/donor_features.tsv \
+ --num-pcs 2 \
+ --out ./tutorial/output/CD4_NC.N100.covar_with_expr_pcs.tsv
+```
+
+This writes a covariate table with `ExprPC0`, `ExprPC1`, ... appended to the original covariates. Use that file as `--covar` if you want expression PCs in the downstream scan.
+
+For fast cis-eQTL mapping with permutation calibration:
 ```bash
 data_path="./tutorial/input"
-out_path="./tutorial/output"
+out_prefix="./tutorial/output/CD4_NC_chr22_genelist_10_jaxqtl_nb"
 
-celltype="CD4_NC"
-
-# genelist to perform cis-eQTL mapping
-chr=22
-chunk_file="genelist_10"
-
-# choose test method: score test (recommended) or wald
-test_method="score"
-
-# choose cis or nominal scan
-mode="cis"
-window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
-
-# jaxQTL by default compute expression PCs using the entire data provided in *.bed.gz
-# to disable adding expression PCs, set this to 0
-num_expression_pc=2
-
-pheno="${data_path}/${celltype}.N100.bed.gz"
-geno="${data_path}/chr${chr}" # prefix for plink triplet files
-covar="${data_path}/donor_features.tsv"
-
-# choose gene list for eQTL mapping
-genelist="${data_path}/${chunk_file}"
-
-# choose eQTL model: NB for negative binomial, poisson, gaussian
-model="NB"
-
-# if using permutation method to calibrate gene-level p value, set number of permutation
-nperm=1000
-
-# choose platform: cpu, gpu, tpu
-platform="cpu"
-
-# prefix for output file
-out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}"
+jaxqtl cis \
+ --bfile "${data_path}/chr22_N100" \
+ --covar "${data_path}/donor_features.tsv" \
+ --pheno "${data_path}/CD4_NC.N100.bed.gz" \
+ --gene-list "${data_path}/genelist_10" \
+ --model nb \
+ --test score \
+ --set-offset-from-libsize \
+ --normalize-covar \
+ --nperm 1000 \
+ --out "${out_prefix}"
 ```
 
-Then run jaxQTL using:
+For *faster* cis-eQTL mapping with SPA tail calibration and ACAT gene-level aggregation:
+
 ```bash
-jaxqtl \
- --geno ${geno} \
- --covar ${covar} \
- --pheno ${pheno} \
- --model ${model} \
- --mode ${mode} \
- --window ${window} \
- --genelist ${genelist} \
- --test-method ${test_method} \
- --nperm ${nperm} \
- --addpc ${num_expression_pc} \
- --standardize \
- -p ${platform} \
- --out ${out}
+data_path="./tutorial/input"
+out_prefix="./tutorial/output/CD4_NC_chr22_genelist_10_jaxqtl_nb"
+
+jaxqtl cis \
+ --bfile "${data_path}/chr22_N100" \
+ --covar "${data_path}/donor_features.tsv" \
+ --pheno "${data_path}/CD4_NC.N100.bed.gz" \
+ --gene-list "${data_path}/genelist_10" \
+ --model nb \
+ --test score \
+ --spa \
+ --acat \
+ --set-offset-from-libsize \
+ --normalize-covar \
+ --out "${out_prefix}"
 ```
-This took about ~1 min on my PC of macOS Apple M1 chip.
+
+This writes `./tutorial/output/CD4_NC_chr22_genelist_10_jaxqtl_nb.cis.score.spa.acat.parquet.gz`.
+
+For a nominal cis scan over the same genes:
+
+```bash
+data_path="./tutorial/input"
+out_prefix="./tutorial/output/CD4_NC_chr22_genelist_10_jaxqtl_nb"
+
+jaxqtl nominal \
+ --bfile "${data_path}/chr22_N100" \
+ --covar "${data_path}/donor_features.tsv" \
+ --pheno "${data_path}/CD4_NC.N100.bed.gz" \
+ --gene-list "${data_path}/genelist_10" \
+ --model nb \
+ --test wald \
+ --set-offset-from-libsize \
+ --normalize-covar \
+ --out "${out_prefix}"
+```
 
 For all available flags, please use ``jaxqtl -h``.
 
 ### output format
 
-See output results in `./tutorial/output`. The columns are,
-* `phenotype_id`: phenotype id of gene
-* `chrom`: chromosome of gene
-* `num_var`: number of variants tested in the cis-window
-* `variant_id`: identifier for lead SNP with the smallest p-value
-* `tss_distance`: distance to transcription starting site (TSS)
-* `ma_count`: minor allele count
-* `af`: allele frequency of alternative allele (effect allele)
-* `beta_shape1`: Parameter of the fitted Beta distribution
-* `beta_shape2`: Parameter of the fitted Beta distribution
-* `beta_converged`: whether fitting Beta distribution converged (1 or 0)
-* `true_nc`: non-central parameter for chi2 distribution to compute p values
-* `opt_status`: whether optimizer for identifying true_nc exited successfully
-* `pval_nominal`: nominal p-value of the association between the gene and SNP
-* `slope`: regression slope
-* `slope_se`: standard error of the regression slope
-* `pval_beta`: Beta-approximated empirical p-value
-* `alpha_cov`: overdispersion parameter fitted for covariate-only model if `--test-method score`
-* `model_converged`: whether the GLM model converged (1 or 0)
+See example outputs in `./tutorial/output`. The current CLI writes Parquet files:
+
+- `jaxqtl cis ...` writes `${out}.cis.{test}.{perm|acat}.parquet.gz`
+- `jaxqtl nominal ...` writes `${out}.nominal.{test}.parquet.gz`
+- `jaxqtl trans ...` writes `${out}.trans.{test}.variant.info.parquet.gz` and `${out}.trans.{test}.sumstats.parquet.gz`
+
+The cis output contains:
+
+- `phenotype_id`, `chrom`, `num_var`, `snp`, `a1`, `a0`, `pos`, `tss_distance`, `af`, `ma_count`
+- `beta`, `se`, `pvalue`, `pvalue_adj`, `adj_method`, `nb_alpha`, `model_converged`
+- `shape1`, `shape2`, `nc_estimate`, `perm_converged` when using permutation-based calibration rather than `--acat`
+
+The nominal output contains per-variant statistics for each tested gene:
+
+- `phenotype_id`, `chrom`, `snp`, `pos`, `a1`, `a0`, `tss_distance`, `af`, `ma_count`
+- `beta`, `se`, `pvalue`, `nb_alpha`, `model_converged`
 
 ## Genome-wide sc-eQTL mapping
 
@@ -219,7 +209,7 @@ You may consider increase the chunk size to maximize efficiency on CPU node or e
 If sample size is small (e.g., N=200), you may consider not splitting by chunks because it's fast enough.
 We recommend trying a few genes and check the log file to estimate the run time.
 
-We provide a shell script example to submit batch jobs on HPC: `./tutoral/code/run_jaxqtl_cis_all.sh`.
+The repository includes `./tutorial/code/run_jaxqtl_cis_all.sh` as a batch-workflow template. Use the current `jaxqtl cis ...` invocation shown above inside your scheduler script.
 Please see below for detailed instructions:
 
 ### 1. Organize directory structure
@@ -277,20 +267,20 @@ CD4_NC	2	chunk_2
 ...
 ```
 
-First put this script `./tutoral/code/create_genelist_dir.R` in your `/code` directory.
+The repository also includes `./tutorial/code/create_genelist_dir.R` as one way to generate these directories.
 Then run `Rscript create_genelist_dir.R`
 
 ### 3. Run jaxQTL on HPC using array jobs
 
-We used slurm job schedule on our HPC. An example sbatch script can be found in `./tutoral/code/run_jaxqtl_cis_all.sh` \
+We used slurm job schedule on our HPC. An example sbatch script can be found in `./tutorial/code/run_jaxqtl_cis_all.sh` \
 To submit jobs, use `sbatch run_jaxqtl_cis_all.sh`
 
 ### 4. Collect results
 
 After all cis-eQTL mapping are completed, you can prepare results for analysis by:
 1) combine all chunk results from one cell type into one single file
-2) filter by converged GLM model `model_converged > 0` and converged beta approximation `beta_converged > 0`
-3) calculate FDR-controlled pvalues on `pval_beta` using
+2) filter by converged GLM model `model_converged > 0` and, when using permutation-based calibration, converged adjustment fits `perm_converged > 0`
+3) calculate FDR-controlled pvalues on `pvalue_adj` using
 [qvalue](https://bioconductor.org/packages/release/bioc/html/qvalue.html) method in R
 4) identify eGenes (genes with at least one eQTL) by qvalue < FDR level, e.g., 0.05
 
