@@ -2,12 +2,14 @@
 
 from pathlib import Path
 
+import numpy as np
 import polars as pl
 import pytest
 
+import jax
 import jax.numpy as jnp
 
-from jaxqtl.io import GenoioData
+from jaxqtl.io import GenoioData, PlinkData
 from jaxqtl.map.data import CisData
 
 
@@ -22,6 +24,46 @@ def _source_iids() -> list[str]:
 
 def _sample_iids(sample_info: pl.DataFrame) -> list[str]:
     return sample_info.get_column("iid").to_list()
+
+
+def _first_five_variant_region(data: GenoioData) -> tuple[str, int, int]:
+    variant_info = data.variant_info.head(5)
+    return (
+        variant_info.get_column("chrom")[0],
+        variant_info.get_column("pos")[0],
+        variant_info.get_column("pos")[-1],
+    )
+
+
+def _assert_counted_allele_orientation(
+    query_G: jax.Array,
+    query_variant_info: pl.DataFrame,
+    legacy_G: jax.Array,
+    legacy_variant_info: pl.DataFrame,
+) -> set[str]:
+    legacy_rows = {row["snp"]: (index, row) for index, row in enumerate(legacy_variant_info.iter_rows(named=True))}
+    observed_orientations: set[str] = set()
+
+    for query_index, query_row in enumerate(query_variant_info.iter_rows(named=True)):
+        legacy_index, legacy_row = legacy_rows[query_row["snp"]]
+        query_values = np.asarray(query_G[:, query_index])
+        legacy_values = np.asarray(legacy_G[:, legacy_index])
+        finite = np.isfinite(query_values) & np.isfinite(legacy_values)
+        assert finite.any()
+
+        if query_row["a1"] == legacy_row["a1"]:
+            observed_orientations.add("same")
+            np.testing.assert_allclose(query_values[finite], legacy_values[finite])
+        elif query_row["a1"] == legacy_row["a0"]:
+            observed_orientations.add("opposite")
+            np.testing.assert_allclose(query_values[finite], 2 - legacy_values[finite])
+            assert np.any(query_values[finite] != legacy_values[finite])
+        else:
+            raise AssertionError(
+                f"Counted allele {query_row['a1']} is not represented in legacy metadata " f"for {query_row['snp']}"
+            )
+
+    return observed_orientations
 
 
 def test_sample_info_has_iid_and_preserves_source_order() -> None:
@@ -107,3 +149,65 @@ def test_cis_data_uses_named_variant_metadata_without_legacy_columns() -> None:
         "a1": ["C", "T"],
         "a0": ["A", "G"],
     }
+
+
+def test_query_cis_returns_jax_matrix_and_normalized_metadata() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+    chrom, start, end = _first_five_variant_region(data)
+
+    G, variant_info = data.query_cis(chrom, start, end)
+
+    assert isinstance(G, jax.Array)
+    assert G.shape == (data.sample_info.height, 5)
+    assert variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
+    assert variant_info.height == G.shape[1]
+    assert variant_info.get_column("snp").to_list() == (data.variant_info.head(5).get_column("snp").to_list())
+    assert bool(jnp.all(jnp.var(G, axis=0) > 0))
+
+
+def test_query_cis_reorders_rows_to_frozen_iid_order() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+    reversed_data = data.replace_individuals(data.sample_info.reverse())
+    chrom, start, end = _first_five_variant_region(data)
+
+    source_G, source_variant_info = data.query_cis(chrom, start, end)
+    reversed_G, reversed_variant_info = reversed_data.query_cis(chrom, start, end)
+
+    np.testing.assert_array_equal(np.asarray(reversed_G), np.asarray(source_G)[::-1, :])
+    assert reversed_variant_info.equals(source_variant_info)
+
+
+def test_query_cis_empty_region_returns_empty_jax_matrix_and_metadata() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+
+    G, variant_info = data.query_cis("22", 1, 10)
+
+    assert isinstance(G, jax.Array)
+    assert G.shape == (data.sample_info.height, 0)
+    assert variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
+    assert variant_info.height == 0
+
+
+def test_query_cis_matches_plink_values_by_counted_allele_orientation() -> None:
+    genoio_data = GenoioData.load(str(GENO_PREFIX))
+    plink_data = PlinkData.load(str(GENO_PREFIX))
+    chrom, start, end = _first_five_variant_region(genoio_data)
+
+    genoio_G, genoio_variant_info = genoio_data.query_cis(chrom, start, end)
+    plink_G, plink_variant_info = plink_data.query_cis(chrom, start, end)
+
+    same_orientations = _assert_counted_allele_orientation(
+        plink_G,
+        plink_variant_info,
+        plink_G,
+        plink_variant_info,
+    )
+    observed_orientations = _assert_counted_allele_orientation(
+        genoio_G,
+        genoio_variant_info,
+        plink_G,
+        plink_variant_info,
+    )
+
+    assert same_orientations == {"same"}
+    assert "opposite" in observed_orientations

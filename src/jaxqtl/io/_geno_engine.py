@@ -4,7 +4,10 @@ from collections.abc import Iterator
 from typing import Literal
 
 import genoio
+import numpy as np
 import polars as pl
+
+import jax.numpy as jnp
 
 from jaxtyping import Array
 
@@ -71,7 +74,31 @@ class GenoioData(GenotypeData):
 
     def query_cis(self, chrom: str, start: int, end: int) -> tuple[Array, pl.DataFrame]:
         """Extract genotypes and variant metadata for a chromosome interval."""
-        raise NotImplementedError("GenoioData.query_cis is implemented in a later genoio-engine task")
+        frozen_iids = self.sample_info.get_column("iid").to_list()
+        genotype, returned_samples, variant_info = self.dataset.read(
+            variants=genoio.region(f"{chrom}:{start}-{end}"),
+            samples=frozen_iids,
+            return_samples=True,
+            return_variants=True,
+        )
+
+        returned_iids = returned_samples.get_column("iid").to_list()
+        row_index_by_iid = {iid: index for index, iid in enumerate(returned_iids)}
+        row_order = [row_index_by_iid[iid] for iid in frozen_iids]
+
+        genotype = genotype[row_order, :]
+        genotype_jax = jnp.asarray(genotype)
+        cis_var_info = _normalize_variant_info(variant_info)
+
+        if genotype_jax.shape[1] == 0:
+            return genotype_jax, cis_var_info
+
+        snp_var = jnp.var(genotype_jax, axis=0)
+        keep = ~jnp.isnan(snp_var) & (snp_var > 0)
+        genotype_jax = genotype_jax[:, keep]
+        cis_var_info = cis_var_info.filter(np.asarray(keep))
+
+        return genotype_jax, cis_var_info
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
         """Yield genotype blocks and variant metadata in fixed-size chunks."""
