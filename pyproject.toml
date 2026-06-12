@@ -47,6 +47,7 @@ dependencies = [
     "lineax",
     "optimistix",
     "typing_extensions",
+    "genoio>=0.1.0",
     "pandas_plink",
     "polars",
     "qtl",
