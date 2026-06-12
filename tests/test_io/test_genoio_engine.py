@@ -5,7 +5,10 @@ from pathlib import Path
 import polars as pl
 import pytest
 
+import jax.numpy as jnp
+
 from jaxqtl.io import GenoioData
+from jaxqtl.map.data import CisData
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -56,3 +59,51 @@ def test_replace_individuals_rejects_duplicate_iids() -> None:
 
     with pytest.raises(ValueError, match="duplicate IID"):
         data.replace_individuals(duplicate_sample_info)
+
+
+def test_variant_info_uses_minimal_mapping_metadata_columns() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+
+    assert data.variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
+
+
+def test_cis_data_uses_named_variant_metadata_without_legacy_columns() -> None:
+    cis_info = pl.DataFrame(
+        {
+            "chrom": ["22", "22"],
+            "snp": ["rs1", "rs2"],
+            "pos": [110, 130],
+            "a0": ["A", "G"],
+            "a1": ["C", "T"],
+        }
+    )
+    cis_data = CisData(
+        X=jnp.ones((3, 1)),
+        G=jnp.array([[0.0, 2.0], [1.0, 2.0], [2.0, 0.0]]),
+        y=jnp.array([0.0, 1.0, 2.0]),
+        offset=jnp.array(0.0),
+        gene_name="gene1",
+        chrom="22",
+        gene_start=100,
+        gene_end=120,
+        cis_info=cis_info,
+        start=50,
+        end=150,
+    )
+
+    snp_info = cis_data.get_snp_info(0)
+    assert snp_info.id == "rs1"
+    assert snp_info.pos == 110
+    assert snp_info.a1 == "C"
+    assert snp_info.a0 == "A"
+    assert snp_info.tss_distance == 10
+
+    output = cis_data.get_cis_info()
+    assert output.columns == ["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"]
+    assert output.select(["chrom", "snp", "pos", "a1", "a0"]).to_dict(as_series=False) == {
+        "chrom": ["22", "22"],
+        "snp": ["rs1", "rs2"],
+        "pos": [110, 130],
+        "a1": ["C", "T"],
+        "a0": ["A", "G"],
+    }

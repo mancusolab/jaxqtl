@@ -18,6 +18,22 @@ def _validate_sample_info(sample_info: pl.DataFrame) -> None:
         raise ValueError("sample_info contains duplicate IID values")
 
 
+def _normalize_variant_info(variant_info: pl.DataFrame) -> pl.DataFrame:
+    id_column = "id" if "id" in variant_info.columns else "snp"
+    required_columns = {"chrom", id_column, "pos", "a0", "a1"}
+    missing_columns = sorted(required_columns - set(variant_info.columns))
+    if missing_columns:
+        raise ValueError(f"variant_info is missing required columns: {missing_columns}")
+
+    return variant_info.select(
+        pl.col("chrom").cast(pl.Utf8),
+        pl.col(id_column).alias("snp"),
+        pl.col("pos"),
+        pl.col("a0"),
+        pl.col("a1"),
+    )
+
+
 class GenoioData(GenotypeData):
     """genoio-backed genotype data adapter."""
 
@@ -36,7 +52,7 @@ class GenoioData(GenotypeData):
         dataset = genoio.bfile(prefix)
         sample_info = dataset.samples()
         _validate_sample_info(sample_info)
-        return cls(dataset, sample_info, dataset.variants())
+        return cls(dataset, sample_info, _normalize_variant_info(dataset.variants()))
 
     def replace_individuals(self, sample_info: pl.DataFrame) -> "GenoioData":
         """Return a copy of the dataset with sample order frozen by `sample_info`."""

@@ -1,3 +1,5 @@
+# pattern: Mixed (needs refactoring)
+
 from collections.abc import Iterator
 from dataclasses import dataclass
 
@@ -67,8 +69,11 @@ class CisData(eqx.Module):
     def get_snp_info(self, idx: int) -> SNPInfo:
         """Return SNPInfo for a variant at the provided column index."""
         af, ma_count = self.get_af_summary(idx)
-        # chrom, snp, cm, pos, a0, a1, index
-        _, snp_id, _, snp_pos, a0, a1, _ = self.cis_info.row(idx)
+        snp_info = self.cis_info.row(idx, named=True)
+        snp_id = snp_info["snp"]
+        snp_pos = snp_info["pos"]
+        a0 = snp_info["a0"]
+        a1 = snp_info["a1"]
         tss_distance = snp_pos - self.gene_start
         return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
 
