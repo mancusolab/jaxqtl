@@ -1,5 +1,6 @@
 # pattern: Imperative Shell
 
+from pathlib import Path
 from types import SimpleNamespace
 
 import polars as pl
@@ -168,3 +169,50 @@ def test_common_setup_bfile_uses_genoio_and_yields_trans_genotype_block() -> Non
     assert G.shape[0] > 0
     assert G.shape[1] > 0
     assert variant_info.height > 0
+
+
+def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
+    out_prefix = tmp_path / "jaxqtl"
+
+    return_code = cli.main(
+        [
+            "nominal",
+            "--bfile",
+            "tutorial/input/chr22_N100",
+            "--covar",
+            "tutorial/input/donor_features.tsv",
+            "--pheno",
+            "tutorial/input/CD4_NC.N100.bed.gz",
+            "--gene-list",
+            "tutorial/input/genelist_5",
+            "--model",
+            "poisson",
+            "--test",
+            "score",
+            "--set-offset-from-libsize",
+            "--normalize-covar",
+            "--platform",
+            "cpu",
+            "--out",
+            str(out_prefix),
+        ]
+    )
+
+    nominal_output = tmp_path / "jaxqtl.nominal.score.parquet.gz"
+    assert return_code == 0
+    assert nominal_output.exists()
+    assert pl.read_parquet(nominal_output, n_rows=0).columns == [
+        "phenotype_id",
+        "chrom",
+        "snp",
+        "pos",
+        "a1",
+        "a0",
+        "tss_distance",
+        "af",
+        "ma_count",
+        "beta",
+        "se",
+        "pvalue",
+        "model_converged",
+    ]
