@@ -77,6 +77,90 @@ def compare_frames(
     )
 
 
+_QTL_EXACT_COLUMNS = frozenset(
+    {
+        "phenotype_id",
+        "chrom",
+        "snp",
+        "pos",
+        "tss_distance",
+        "num_var",
+        "adj_method",
+        "model_converged",
+    }
+)
+
+
+def compare_qtl_frames(
+    left: pl.DataFrame,
+    right: pl.DataFrame,
+    *,
+    rtol: float,
+    atol: float,
+) -> FrameComparison:
+    """Compare QTL frames while allowing equivalent allele orientation."""
+    shape_left = left.shape
+    shape_right = right.shape
+    columns_left = tuple(left.columns)
+    columns_right = tuple(right.columns)
+    if shape_left != shape_right:
+        return FrameComparison(
+            equal=False,
+            shape_left=shape_left,
+            shape_right=shape_right,
+            columns_left=columns_left,
+            columns_right=columns_right,
+            column_results=(),
+            reason="shape mismatch",
+        )
+    if columns_left != columns_right:
+        return FrameComparison(
+            equal=False,
+            shape_left=shape_left,
+            shape_right=shape_right,
+            columns_left=columns_left,
+            columns_right=columns_right,
+            column_results=(),
+            reason="column mismatch",
+        )
+    if "a0" not in columns_left or "a1" not in columns_left:
+        return FrameComparison(
+            equal=False,
+            shape_left=shape_left,
+            shape_right=shape_right,
+            columns_left=columns_left,
+            columns_right=columns_right,
+            column_results=(),
+            reason="missing allele columns",
+        )
+
+    same_orientation, swapped_orientation = _allele_orientation(left, right)
+    valid_orientation = same_orientation | swapped_orientation
+    column_results = tuple(
+        _compare_qtl_column(
+            column,
+            left,
+            right,
+            same_orientation=same_orientation,
+            swapped_orientation=swapped_orientation,
+            valid_orientation=valid_orientation,
+            rtol=rtol,
+            atol=atol,
+        )
+        for column in left.columns
+    )
+    reason = "allele orientation mismatch" if not np.all(valid_orientation) else None
+    return FrameComparison(
+        equal=all(result.equal for result in column_results),
+        shape_left=shape_left,
+        shape_right=shape_right,
+        columns_left=columns_left,
+        columns_right=columns_right,
+        column_results=column_results,
+        reason=reason,
+    )
+
+
 def comparison_to_dict(comparison: FrameComparison) -> dict[str, Any]:
     return {
         "equal": comparison.equal,
@@ -97,6 +181,97 @@ def comparison_to_dict(comparison: FrameComparison) -> dict[str, Any]:
             for result in comparison.column_results
         ],
     }
+
+
+def _allele_orientation(left: pl.DataFrame, right: pl.DataFrame) -> tuple[np.ndarray, np.ndarray]:
+    left_a0 = left.get_column("a0").to_list()
+    left_a1 = left.get_column("a1").to_list()
+    right_a0 = right.get_column("a0").to_list()
+    right_a1 = right.get_column("a1").to_list()
+    same = np.array(
+        [a0 == b0 and a1 == b1 for a0, a1, b0, b1 in zip(left_a0, left_a1, right_a0, right_a1, strict=True)]
+    )
+    swapped = np.array(
+        [a0 == b1 and a1 == b0 for a0, a1, b0, b1 in zip(left_a0, left_a1, right_a0, right_a1, strict=True)]
+    )
+    return same, swapped
+
+
+def _compare_qtl_column(
+    column: str,
+    left: pl.DataFrame,
+    right: pl.DataFrame,
+    *,
+    same_orientation: np.ndarray,
+    swapped_orientation: np.ndarray,
+    valid_orientation: np.ndarray,
+    rtol: float,
+    atol: float,
+) -> ColumnComparison:
+    left_column = left.get_column(column)
+    right_column = right.get_column(column)
+    if column in {"a0", "a1"}:
+        return ColumnComparison(
+            column=column,
+            kind="allele_orientation",
+            equal=bool(np.all(valid_orientation)),
+            mismatch_count=int(valid_orientation.size - np.count_nonzero(valid_orientation)),
+        )
+    if column in _QTL_EXACT_COLUMNS:
+        return _compare_exact_column(left_column, right_column)
+    if column == "beta":
+        return _compare_numeric_column(
+            left_column,
+            _oriented_numeric_column(
+                column,
+                right_column,
+                same_orientation,
+                swapped_orientation,
+                swapped_multiplier=-1.0,
+            ),
+            rtol=rtol,
+            atol=atol,
+        )
+    if column == "af":
+        return _compare_numeric_column(
+            left_column,
+            _oriented_af_column(column, right_column, same_orientation, swapped_orientation),
+            rtol=rtol,
+            atol=atol,
+        )
+    return _compare_column(left_column, right_column, rtol=rtol, atol=atol)
+
+
+def _oriented_numeric_column(
+    column: str,
+    right: pl.Series,
+    same_orientation: np.ndarray,
+    swapped_orientation: np.ndarray,
+    *,
+    swapped_multiplier: float,
+) -> pl.Series:
+    values = right.to_numpy()
+    oriented = np.where(
+        same_orientation,
+        values,
+        np.where(swapped_orientation, swapped_multiplier * values, values),
+    )
+    return pl.Series(column, oriented)
+
+
+def _oriented_af_column(
+    column: str,
+    right: pl.Series,
+    same_orientation: np.ndarray,
+    swapped_orientation: np.ndarray,
+) -> pl.Series:
+    values = right.to_numpy()
+    oriented = np.where(
+        same_orientation,
+        values,
+        np.where(swapped_orientation, 1.0 - values, values),
+    )
+    return pl.Series(column, oriented)
 
 
 def _compare_column(left: pl.Series, right: pl.Series, *, rtol: float, atol: float) -> ColumnComparison:
