@@ -34,8 +34,7 @@ covar="./data/features/donor_features.tsv"
 pheno="./data/pheno/${celltype}.bed.gz"
 genelist="./data/genelist/${celltype}/chr${chr}/${chunk_file}"
 
-mode="cis"
-model="NB"
+model="nb"
 test_method="score"
 nperm=1000
 window=500000 # default
@@ -45,16 +44,16 @@ platform="cpu" # default
 out="./result/cis/${celltype}/chr${chr}/${chunk_file}.${model}"
 
 jaxqtl \
- --geno ${geno} \
+ cis \
+ --bfile ${geno} \
  --covar ${covar} \
  --pheno ${pheno} \
  --window ${window} \
  --model ${model} \
- --mode ${mode} \
- --genelist ${genelist} \
- --test-method ${test_method} \
+ --gene-list ${genelist} \
+ --test ${test_method} \
  --nperm ${nperm} \
- --addpc 2 \
  -p ${platform} \
- --standardize \
+ --set-offset-from-libsize \
+ --normalize-covar \
  --out ${out}

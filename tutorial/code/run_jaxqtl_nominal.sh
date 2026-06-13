@@ -12,8 +12,6 @@ chunk_file="genelist_10"
 # choose test method: use wald test to get slope and slope_se estimated in full model
 test_method="wald"
 
-# choose cis or nominal scan
-mode="nominal"
 window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
 
 # jaxQTL by default compute expression PCs using the entire data provided in *.bed.gz
@@ -28,23 +26,23 @@ covar="${data_path}/donor_features.tsv"
 genelist="${data_path}/${chunk_file}"
 
 # choose eQTL model: NB for negative binomial, poisson, gaussian
-model="NB"
+model="nb"
 
 # if using permutation method to calibrate gene-level p value, set number of permutation
 nperm=1000
 
 # prefix for output file
-out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
+out="${out_path}/${celltype}_chr${chr}_${chunk_file}_jaxqtl_${model}_nominal"
 
 jaxqtl \
- --geno ${geno} \
+ nominal \
+ --bfile ${geno} \
  --covar ${covar} \
  --pheno ${pheno} \
  --model ${model} \
- --mode ${mode} \
- --genelist ${genelist} \
- --test-method ${test_method} \
+ --gene-list ${genelist} \
+ --test ${test_method} \
  --nperm ${nperm} \
- --addpc ${num_expression_pc} \
- --standardize \
+ --set-offset-from-libsize \
+ --normalize-covar \
  --out ${out}
