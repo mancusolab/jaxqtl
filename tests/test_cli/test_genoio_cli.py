@@ -1,5 +1,7 @@
 # pattern: Imperative Shell
 
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
@@ -145,6 +147,17 @@ def test_vcf_uses_existing_unsupported_path_without_constructing_genoio(monkeypa
     assert _GenoioLoadSpy.calls == []
     assert _VCFLoadSpy.calls == ["input.vcf.gz"]
     assert log.errors == ["`--vcf PREFIX` is not fully supported yet."]
+
+
+def test_cli_help_marks_legacy_genotype_inputs() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["cis", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = " ".join(stdout.getvalue().split())
+    assert "deprecated; use --bfile for PLINK1 BED/BIM/FAM prefixes" in help_text
+    assert "unsupported/experimental; not a production genotype input" in help_text
 
 
 @pytest.mark.parametrize("cmd", ["cis", "nominal"])

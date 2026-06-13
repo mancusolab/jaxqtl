@@ -79,9 +79,9 @@ def _create_common_subp(subp, name, help):
 
     # geno arguments
     geno_group = common_p.add_mutually_exclusive_group(required=True)
-    geno_group.add_argument("--geno", help="Prefix to PLINK triplet")
-    geno_group.add_argument("--bfile", help="Prefix to PLINK triplet")
-    geno_group.add_argument("--vcf", help="Path to VCF data")
+    geno_group.add_argument("--geno", help="deprecated; use --bfile for PLINK1 BED/BIM/FAM prefixes.")
+    geno_group.add_argument("--bfile", help="Prefix to PLINK1 BED/BIM/FAM triplets.")
+    geno_group.add_argument("--vcf", help="unsupported/experimental; not a production genotype input.")
 
     # pheno / covariate arguments
     common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
@@ -111,7 +111,7 @@ def _create_common_subp(subp, name, help):
         default=False,
         help=(
             "Encode string/categorical covariates using one-hot encoding."
-            " The category corresponding to the first observation will be dropped for co-linearity reasons.",
+            " The category corresponding to the first observation will be dropped for co-linearity reasons."
         ),
     )
     common_p.add_argument(
@@ -164,7 +164,7 @@ def _create_common_subp(subp, name, help):
         default=False,
         help=(
             "Whether to perform SPA correction for p-values computed from score statistics."
-            " Not applicable for `--test wald` and not necessary for `--model gaussian`.",
+            " Not applicable for `--test wald` and not necessary for `--model gaussian`."
         ),
     )
 
