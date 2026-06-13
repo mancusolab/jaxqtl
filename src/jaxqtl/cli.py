@@ -1,3 +1,5 @@
+# pattern: Imperative Shell
+
 import argparse as ap
 import logging
 import re
@@ -31,7 +33,7 @@ from .infer import (
 )
 from .io import (
     ExpressionData,
-    PlinkData,
+    GenoioData,
     read_offset_tsvlike,
     read_plink_style_tsvlike,
     read_single_column_file,
@@ -391,6 +393,18 @@ def _trans_scan(args, log):
     return 0
 
 
+def _load_genotype_data(args, log):
+    if args.bfile is not None:
+        return GenoioData.load(args.bfile)
+    if args.geno is not None:
+        raise ValueError("`--geno` is deprecated. Use `--bfile` for PLINK1 BED/BIM/FAM prefixes.")
+    if args.vcf is not None:
+        log.error("`--vcf PREFIX` is not fully supported yet.")
+        return VCFData.load(args.vcf)
+
+    raise ValueError("No valid genotype file specified.")
+
+
 def _common_setup(args, log):
     # Set up the distributional family and corresponding cumulative generating function (CGF) here.
     # We only use CGF if --spa is set, but may as well set up thin objects here so we don't need to re-enumerate
@@ -488,17 +502,7 @@ def _common_setup(args, log):
         inds_to_exclude = None
 
     log.info("Reading genotype, phenotype, and covariate data")
-    if args.bfile is not None:
-        geno_data = PlinkData.load(args.bfile)
-    elif args.vcf is not None:
-        log.error("`--vcf PREFIX` is not fully supported yet.")
-        geno_data = VCFData.load(args.vcf)
-    elif args.geno is not None:
-        geno_data = PlinkData.load(args.geno)
-        log.warn("`--geno PREFIX` is deprecated and will be removed in a future version. Use `--bfile PREFIX` instead")
-    else:
-        # we really shouldn't get here with mutex above
-        raise ValueError("No valid genotype file specified.")
+    geno_data = _load_genotype_data(args, log)
 
     # so we end up aligning everything at the end of this function, but better to reduce as we go
     # this should help speed up final data alignment a touch
