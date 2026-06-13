@@ -1,7 +1,7 @@
 # pattern: Mixed (unavoidable)
 # Reason: The tests are pure in-memory comparator checks, but this repository does
 # not make top-level scripts importable from pytest collection without adding the
-# repository root to sys.path.
+# scripts directory to sys.path.
 
 import sys
 
@@ -11,9 +11,9 @@ import polars as pl
 import pytest
 
 
-sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+sys.path.insert(0, str(Path(__file__).resolve().parents[2] / "scripts"))
 
-from scripts import benchmark_core
+import benchmark_core
 
 
 def _qtl_frame(**overrides: object) -> pl.DataFrame:
@@ -100,6 +100,42 @@ def test_qtl_comparison_fails_for_unchanged_alleles_and_negated_beta() -> None:
 def test_qtl_comparison_passes_for_swapped_alleles_and_negated_beta() -> None:
     left = _qtl_frame(a0="A", a1="G", beta=0.35, af=0.25)
     right = _qtl_frame(a0="G", a1="A", beta=-0.35, af=0.75)
+
+    comparison = _compare_qtl_frames(left, right)
+
+    assert comparison.equal
+
+
+def test_qtl_comparison_passes_for_swapped_float32_af_complements() -> None:
+    left = _qtl_frame(a0="A", a1="G", beta=0.35)
+    right = _qtl_frame(a0="G", a1="A", beta=-0.35)
+    left = left.with_columns(pl.Series("af", [0.029999999329447746], dtype=pl.Float32))
+    right = right.with_columns(pl.Series("af", [0.9699999690055847], dtype=pl.Float32))
+
+    comparison = _compare_qtl_frames(left, right)
+
+    assert comparison.equal
+
+
+def test_qtl_comparison_accepts_rare_variant_beta_when_signed_wald_statistic_matches() -> None:
+    left = _qtl_frame(
+        a0="G",
+        a1="A",
+        af=0.029999999329447746,
+        ma_count=6,
+        beta=0.8715675273572471,
+        se=667867.9794536964,
+        pvalue=0.9999989587608702,
+    )
+    right = _qtl_frame(
+        a0="A",
+        a1="G",
+        af=0.9699999690055847,
+        ma_count=6,
+        beta=-0.8786884813160236,
+        se=667867.9793869716,
+        pvalue=0.9999989502536509,
+    )
 
     comparison = _compare_qtl_frames(left, right)
 
