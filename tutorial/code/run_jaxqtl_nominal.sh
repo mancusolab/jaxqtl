@@ -14,12 +14,8 @@ test_method="wald"
 
 window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
 
-# jaxQTL by default compute expression PCs using the entire data provided in *.bed.gz
-# to disable this, set this to 0
-num_expression_pc=2
-
 pheno="${data_path}/${celltype}.N100.bed.gz"
-geno="${data_path}/chr${chr}" # prefix for plink triplet files
+geno="${data_path}/chr${chr}_N100" # prefix for bundled PLINK1 BED/BIM/FAM files
 covar="${data_path}/donor_features.tsv"
 
 # choose gene list for eQTL mapping
