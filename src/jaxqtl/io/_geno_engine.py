@@ -33,8 +33,8 @@ def _normalize_variant_info(variant_info: pl.DataFrame) -> pl.DataFrame:
         pl.col("chrom").cast(pl.Utf8),
         pl.col(id_column).alias("snp"),
         pl.col("pos"),
-        pl.col("a0"),
-        pl.col("a1"),
+        pl.col("a1").alias("a0"),
+        pl.col("a0").alias("a1"),
     )
 
 
@@ -67,7 +67,7 @@ def _to_jax_filtered_genotype(
     row_order: list[int],
 ) -> tuple[Array, pl.DataFrame]:
     genotype = genotype[row_order, :]
-    genotype_jax = jnp.asarray(genotype)
+    genotype_jax = 2.0 - jnp.asarray(genotype)
     normalized_variant_info = _normalize_variant_info(variant_info)
 
     if genotype_jax.shape[1] == 0:

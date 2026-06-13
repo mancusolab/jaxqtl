@@ -92,37 +92,6 @@ def _full_variant_region(data: GenoioData) -> tuple[str, int, int]:
     )
 
 
-def _assert_counted_allele_orientation(
-    query_G: jax.Array,
-    query_variant_info: pl.DataFrame,
-    legacy_G: jax.Array,
-    legacy_variant_info: pl.DataFrame,
-) -> set[str]:
-    legacy_rows = {row["snp"]: (index, row) for index, row in enumerate(legacy_variant_info.iter_rows(named=True))}
-    observed_orientations: set[str] = set()
-
-    for query_index, query_row in enumerate(query_variant_info.iter_rows(named=True)):
-        legacy_index, legacy_row = legacy_rows[query_row["snp"]]
-        query_values = np.asarray(query_G[:, query_index])
-        legacy_values = np.asarray(legacy_G[:, legacy_index])
-        finite = np.isfinite(query_values) & np.isfinite(legacy_values)
-        assert finite.any()
-
-        if query_row["a1"] == legacy_row["a1"]:
-            observed_orientations.add("same")
-            np.testing.assert_allclose(query_values[finite], legacy_values[finite])
-        elif query_row["a1"] == legacy_row["a0"]:
-            observed_orientations.add("opposite")
-            np.testing.assert_allclose(query_values[finite], 2 - legacy_values[finite])
-            assert np.any(query_values[finite] != legacy_values[finite])
-        else:
-            raise AssertionError(
-                f"Counted allele {query_row['a1']} is not represented in legacy metadata " f"for {query_row['snp']}"
-            )
-
-    return observed_orientations
-
-
 def test_sample_info_has_iid_and_preserves_source_order() -> None:
     data = GenoioData.load(str(GENO_PREFIX))
 
@@ -229,7 +198,8 @@ def test_query_cis_explicitly_uses_nan_missing_policy_and_filters_metadata_toget
 
     assert dataset.read_missing == "nan"
     assert variant_info.get_column("snp").to_list() == ["rs_good"]
-    np.testing.assert_array_equal(np.asarray(G), np.array([[0.0], [1.0], [2.0]], dtype=np.float32))
+    np.testing.assert_array_equal(np.asarray(G), np.array([[2.0], [1.0], [0.0]], dtype=np.float32))
+    assert variant_info.select(["a0", "a1"]).to_dict(as_series=False) == {"a0": ["T"], "a1": ["A"]}
 
 
 def test_query_cis_returns_jax_matrix_and_normalized_metadata() -> None:
@@ -269,7 +239,7 @@ def test_query_cis_empty_region_returns_empty_jax_matrix_and_metadata() -> None:
     assert variant_info.height == 0
 
 
-def test_query_cis_matches_plink_values_by_counted_allele_orientation() -> None:
+def test_query_cis_matches_plink_values_and_counted_allele_convention() -> None:
     genoio_data = GenoioData.load(str(GENO_PREFIX))
     plink_data = PlinkData.load(str(GENO_PREFIX))
     chrom, start, end = _first_five_variant_region(genoio_data)
@@ -277,21 +247,8 @@ def test_query_cis_matches_plink_values_by_counted_allele_orientation() -> None:
     genoio_G, genoio_variant_info = genoio_data.query_cis(chrom, start, end)
     plink_G, plink_variant_info = plink_data.query_cis(chrom, start, end)
 
-    same_orientations = _assert_counted_allele_orientation(
-        plink_G,
-        plink_variant_info,
-        plink_G,
-        plink_variant_info,
-    )
-    observed_orientations = _assert_counted_allele_orientation(
-        genoio_G,
-        genoio_variant_info,
-        plink_G,
-        plink_variant_info,
-    )
-
-    assert same_orientations == {"same"}
-    assert "opposite" in observed_orientations
+    np.testing.assert_array_equal(np.asarray(genoio_G), np.asarray(plink_G))
+    assert genoio_variant_info.equals(plink_variant_info.select(["chrom", "snp", "pos", "a0", "a1"]))
 
 
 def test_iter_geno_rejects_invalid_chunk_size() -> None:
@@ -332,4 +289,5 @@ def test_iter_geno_explicitly_uses_nan_missing_policy_and_filters_metadata_toget
     assert len(blocks) == 1
     block_G, block_variant_info = blocks[0]
     assert block_variant_info.get_column("snp").to_list() == ["rs_good"]
-    np.testing.assert_array_equal(np.asarray(block_G), np.array([[0.0], [1.0], [2.0]], dtype=np.float32))
+    np.testing.assert_array_equal(np.asarray(block_G), np.array([[2.0], [1.0], [0.0]], dtype=np.float32))
+    assert block_variant_info.select(["a0", "a1"]).to_dict(as_series=False) == {"a0": ["T"], "a1": ["A"]}

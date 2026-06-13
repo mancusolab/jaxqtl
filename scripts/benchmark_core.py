@@ -90,7 +90,6 @@ _QTL_EXACT_COLUMNS = frozenset(
     }
 )
 _AF_ATOL = 1e-7
-_BETA_WALD_ATOL = 1e-7
 
 
 def compare_qtl_frames(
@@ -222,29 +221,17 @@ def _compare_qtl_column(
     if column in _QTL_EXACT_COLUMNS:
         return _compare_exact_column(left_column, right_column)
     if column == "beta":
-        oriented_right = _oriented_numeric_column(
-            column,
-            right_column,
-            same_orientation,
-            swapped_orientation,
-            swapped_multiplier=-1.0,
-        )
-        direct_comparison = _compare_numeric_column(
+        return _compare_numeric_column(
             left_column,
-            oriented_right,
+            _oriented_numeric_column(
+                column,
+                right_column,
+                same_orientation,
+                swapped_orientation,
+                swapped_multiplier=-1.0,
+            ),
             rtol=rtol,
             atol=atol,
-        )
-        if direct_comparison.equal or "se" not in left.columns:
-            return direct_comparison
-        return _compare_beta_column(
-            left_column,
-            oriented_right,
-            left.get_column("se"),
-            right.get_column("se"),
-            rtol=rtol,
-            atol=atol,
-            direct_comparison=direct_comparison,
         )
     if column == "af":
         return _compare_numeric_column(
@@ -287,40 +274,6 @@ def _oriented_af_column(
         np.where(swapped_orientation, one - values, values),
     )
     return pl.Series(column, oriented)
-
-
-def _compare_beta_column(
-    left_beta: pl.Series,
-    oriented_right_beta: pl.Series,
-    left_se: pl.Series,
-    right_se: pl.Series,
-    *,
-    rtol: float,
-    atol: float,
-    direct_comparison: ColumnComparison,
-) -> ColumnComparison:
-    left_beta_array = left_beta.to_numpy()
-    right_beta_array = oriented_right_beta.to_numpy()
-    with np.errstate(divide="ignore", invalid="ignore"):
-        left_wald = left_beta_array / left_se.to_numpy()
-        right_wald = right_beta_array / right_se.to_numpy()
-    beta_close = np.isclose(left_beta_array, right_beta_array, rtol=rtol, atol=atol, equal_nan=True)
-    wald_close = np.isclose(
-        left_wald,
-        right_wald,
-        rtol=rtol,
-        atol=max(atol, _BETA_WALD_ATOL),
-        equal_nan=True,
-    )
-    close = beta_close | wald_close
-    return ColumnComparison(
-        column=left_beta.name,
-        kind="oriented_beta",
-        equal=bool(np.all(close)),
-        max_abs_diff=direct_comparison.max_abs_diff,
-        max_rel_diff=direct_comparison.max_rel_diff,
-        mismatch_count=int(np.size(close) - np.count_nonzero(close)),
-    )
 
 
 def _compare_column(left: pl.Series, right: pl.Series, *, rtol: float, atol: float) -> ColumnComparison:

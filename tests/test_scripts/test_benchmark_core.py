@@ -117,29 +117,15 @@ def test_qtl_comparison_passes_for_swapped_float32_af_complements() -> None:
     assert comparison.equal
 
 
-def test_qtl_comparison_accepts_rare_variant_beta_when_signed_wald_statistic_matches() -> None:
-    left = _qtl_frame(
-        a0="G",
-        a1="A",
-        af=0.029999999329447746,
-        ma_count=6,
-        beta=0.8715675273572471,
-        se=667867.9794536964,
-        pvalue=0.9999989587608702,
-    )
-    right = _qtl_frame(
-        a0="A",
-        a1="G",
-        af=0.9699999690055847,
-        ma_count=6,
-        beta=-0.8786884813160236,
-        se=667867.9793869716,
-        pvalue=0.9999989502536509,
-    )
+def test_qtl_comparison_fails_for_beta_mismatch_even_when_wald_statistic_is_small() -> None:
+    left = _qtl_frame(beta=1.0, se=1e12)
+    right = _qtl_frame(beta=2.0, se=1e12)
 
     comparison = _compare_qtl_frames(left, right)
 
-    assert comparison.equal
+    assert not comparison.equal
+    beta_result = next(result for result in comparison.column_results if result.column == "beta")
+    assert not beta_result.equal
 
 
 def test_qtl_comparison_fails_for_swapped_alleles_and_direct_beta() -> None:
