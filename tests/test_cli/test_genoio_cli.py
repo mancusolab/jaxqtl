@@ -7,11 +7,20 @@ import pytest
 
 from jaxqtl import cli
 from jaxqtl.io import GenoioData
+from jaxqtl.map.data import CisData
 
 
 class _LoggerStub:
     def __init__(self) -> None:
+        self.infos: list[str] = []
+        self.warnings: list[str] = []
         self.errors: list[str] = []
+
+    def info(self, message: str) -> None:
+        self.infos.append(message)
+
+    def warning(self, message: str) -> None:
+        self.warnings.append(message)
 
     def error(self, message: str) -> None:
         self.errors.append(message)
@@ -61,6 +70,46 @@ def _args(**overrides: object) -> SimpleNamespace:
     return SimpleNamespace(**defaults)
 
 
+def _common_setup_args(cmd: str) -> SimpleNamespace:
+    return SimpleNamespace(
+        cmd=cmd,
+        bfile="tutorial/input/chr22_N100",
+        geno=None,
+        vcf=None,
+        pheno="tutorial/input/CD4_NC.N100.bed.gz",
+        covar="tutorial/input/donor_features.tsv",
+        covar_name=None,
+        rm_covar=None,
+        normalize_covar=True,
+        one_hot=False,
+        no_intercept=False,
+        offset=None,
+        offset_name_from_covar=None,
+        set_offset_from_libsize=True,
+        model="poisson",
+        test="score",
+        robust_se=False,
+        spa=False,
+        keep=None,
+        exclude=None,
+        min_indiv_expr_pct=None,
+        min_gene_expr_pct=0.0,
+        gene_list="tutorial/input/genelist_5",
+        genes=None,
+        window=500_000,
+        acat=False,
+        nperm=1000,
+        max_iter=1000,
+        tol=1e-3,
+        step_size=1.0,
+        seed=0,
+        solver="cholesky",
+        platform="cpu",
+        verbose=False,
+        out="jaxqtl",
+    )
+
+
 def test_bfile_constructs_genoio_data(monkeypatch: pytest.MonkeyPatch) -> None:
     _GenoioLoadSpy.calls = []
     monkeypatch.setattr(cli, "GenoioData", _GenoioLoadSpy)
@@ -95,3 +144,27 @@ def test_vcf_uses_existing_unsupported_path_without_constructing_genoio(monkeypa
     assert _GenoioLoadSpy.calls == []
     assert _VCFLoadSpy.calls == ["input.vcf.gz"]
     assert log.errors == ["`--vcf PREFIX` is not fully supported yet."]
+
+
+@pytest.mark.parametrize("cmd", ["cis", "nominal"])
+def test_common_setup_bfile_uses_genoio_and_yields_cis_data(cmd: str) -> None:
+    args = _common_setup_args(cmd)
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert isinstance(ready_data.genotype, GenoioData)
+    cis_data = next(ready_data.iter_cis(args.window))
+    assert isinstance(cis_data, CisData)
+    assert cis_data.num_snps > 0
+
+
+def test_common_setup_bfile_uses_genoio_and_yields_trans_genotype_block() -> None:
+    args = _common_setup_args("trans")
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert isinstance(ready_data.genotype, GenoioData)
+    G, variant_info = next(ready_data.iter_geno(chunk_size=2500))
+    assert G.shape[0] > 0
+    assert G.shape[1] > 0
+    assert variant_info.height > 0
