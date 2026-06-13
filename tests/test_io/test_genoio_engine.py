@@ -35,6 +35,14 @@ def _first_five_variant_region(data: GenoioData) -> tuple[str, int, int]:
     )
 
 
+def _full_variant_region(data: GenoioData) -> tuple[str, int, int]:
+    return (
+        data.variant_info.get_column("chrom")[0],
+        data.variant_info.get_column("pos").min(),
+        data.variant_info.get_column("pos").max(),
+    )
+
+
 def _assert_counted_allele_orientation(
     query_G: jax.Array,
     query_variant_info: pl.DataFrame,
@@ -211,3 +219,32 @@ def test_query_cis_matches_plink_values_by_counted_allele_orientation() -> None:
 
     assert same_orientations == {"same"}
     assert "opposite" in observed_orientations
+
+
+def test_iter_geno_rejects_invalid_chunk_size() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+
+    with pytest.raises(ValueError, match="chunk_size must be >= 1"):
+        list(data.iter_geno(0))
+
+
+def test_iter_geno_blocks_match_full_read_after_conversion_and_filtering() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+    chrom, start, end = _full_variant_region(data)
+    full_G, full_variant_info = data.query_cis(chrom, start, end)
+
+    blocks = list(data.iter_geno(max(1, data.variant_info.height // 2)))
+
+    assert len(blocks) > 1
+    for block_G, block_variant_info in blocks:
+        assert isinstance(block_G, jax.Array)
+        assert block_G.ndim == 2
+        assert block_G.shape[0] == data.sample_info.height
+        assert block_variant_info.height == block_G.shape[1]
+        assert block_variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
+
+    observed_G = jnp.concatenate([block_G for block_G, _ in blocks], axis=1)
+    observed_variant_info = pl.concat([block_variant_info for _, block_variant_info in blocks])
+
+    np.testing.assert_array_equal(np.asarray(observed_G), np.asarray(full_G))
+    assert observed_variant_info.equals(full_variant_info)

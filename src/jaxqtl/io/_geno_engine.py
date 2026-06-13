@@ -37,6 +37,32 @@ def _normalize_variant_info(variant_info: pl.DataFrame) -> pl.DataFrame:
     )
 
 
+def _row_order_for_frozen_iids(returned_samples: pl.DataFrame, frozen_iids: list[str]) -> list[int]:
+    returned_iids = returned_samples.get_column("iid").to_list()
+    row_index_by_iid = {iid: index for index, iid in enumerate(returned_iids)}
+    return [row_index_by_iid[iid] for iid in frozen_iids]
+
+
+def _to_jax_filtered_genotype(
+    genotype: np.ndarray,
+    variant_info: pl.DataFrame,
+    row_order: list[int],
+) -> tuple[Array, pl.DataFrame]:
+    genotype = genotype[row_order, :]
+    genotype_jax = jnp.asarray(genotype)
+    normalized_variant_info = _normalize_variant_info(variant_info)
+
+    if genotype_jax.shape[1] == 0:
+        return genotype_jax, normalized_variant_info
+
+    snp_var = jnp.var(genotype_jax, axis=0)
+    keep = ~jnp.isnan(snp_var) & (snp_var > 0)
+    genotype_jax = genotype_jax[:, keep]
+    normalized_variant_info = normalized_variant_info.filter(np.asarray(keep))
+
+    return genotype_jax, normalized_variant_info
+
+
 class GenoioData(GenotypeData):
     """genoio-backed genotype data adapter."""
 
@@ -82,24 +108,24 @@ class GenoioData(GenotypeData):
             return_variants=True,
         )
 
-        returned_iids = returned_samples.get_column("iid").to_list()
-        row_index_by_iid = {iid: index for index, iid in enumerate(returned_iids)}
-        row_order = [row_index_by_iid[iid] for iid in frozen_iids]
-
-        genotype = genotype[row_order, :]
-        genotype_jax = jnp.asarray(genotype)
-        cis_var_info = _normalize_variant_info(variant_info)
-
-        if genotype_jax.shape[1] == 0:
-            return genotype_jax, cis_var_info
-
-        snp_var = jnp.var(genotype_jax, axis=0)
-        keep = ~jnp.isnan(snp_var) & (snp_var > 0)
-        genotype_jax = genotype_jax[:, keep]
-        cis_var_info = cis_var_info.filter(np.asarray(keep))
-
-        return genotype_jax, cis_var_info
+        row_order = _row_order_for_frozen_iids(returned_samples, frozen_iids)
+        return _to_jax_filtered_genotype(genotype, variant_info, row_order)
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
         """Yield genotype blocks and variant metadata in fixed-size chunks."""
-        raise NotImplementedError("GenoioData.iter_geno is implemented in a later genoio-engine task")
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be >= 1")
+
+        frozen_iids = self.sample_info.get_column("iid").to_list()
+
+        def blocks() -> Iterator[tuple[Array, pl.DataFrame]]:
+            for genotype, returned_samples, variant_info in self.dataset.iter_blocks(
+                size=chunk_size,
+                samples=frozen_iids,
+                return_samples=True,
+                return_variants=True,
+            ):
+                row_order = _row_order_for_frozen_iids(returned_samples, frozen_iids)
+                yield _to_jax_filtered_genotype(genotype, variant_info, row_order)
+
+        return blocks()
