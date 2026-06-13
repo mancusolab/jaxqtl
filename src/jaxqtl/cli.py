@@ -37,7 +37,6 @@ from .io import (
     read_offset_tsvlike,
     read_plink_style_tsvlike,
     read_single_column_file,
-    VCFData,
 )
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
@@ -399,8 +398,7 @@ def _load_genotype_data(args, log):
     if args.geno is not None:
         raise ValueError("`--geno` is deprecated. Use `--bfile` for PLINK1 BED/BIM/FAM prefixes.")
     if args.vcf is not None:
-        log.error("`--vcf PREFIX` is not fully supported yet.")
-        return VCFData.load(args.vcf)
+        raise NotImplementedError("`--vcf` is not supported. Use `--bfile` for PLINK1 BED/BIM/FAM prefixes.")
 
     raise ValueError("No valid genotype file specified.")
 

@@ -58,15 +58,6 @@ class _GenoioLoadSpy:
         return cls.result
 
 
-class _VCFLoadSpy:
-    calls: list[str] = []
-
-    @classmethod
-    def load(cls, path: str) -> object:
-        cls.calls.append(path)
-        raise RuntimeError("existing VCF path remains unsupported")
-
-
 def _args(**overrides: object) -> SimpleNamespace:
     defaults: dict[str, object] = {"bfile": None, "geno": None, "vcf": None}
     defaults.update(overrides)
@@ -134,19 +125,14 @@ def test_deprecated_geno_raises_without_constructing_genoio(monkeypatch: pytest.
     assert _GenoioLoadSpy.calls == []
 
 
-def test_vcf_uses_existing_unsupported_path_without_constructing_genoio(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_vcf_fails_at_genotype_boundary_without_constructing_genoio(monkeypatch: pytest.MonkeyPatch) -> None:
     _GenoioLoadSpy.calls = []
-    _VCFLoadSpy.calls = []
-    log = _LoggerStub()
     monkeypatch.setattr(cli, "GenoioData", _GenoioLoadSpy)
-    monkeypatch.setattr(cli, "VCFData", _VCFLoadSpy)
 
-    with pytest.raises(RuntimeError, match="existing VCF path remains unsupported"):
-        cli._load_genotype_data(_args(vcf="input.vcf.gz"), log)
+    with pytest.raises(NotImplementedError, match="--vcf.*not supported.*--bfile.*PLINK1 BED/BIM/FAM"):
+        cli._load_genotype_data(_args(vcf="input.vcf.gz"), _LoggerStub())
 
     assert _GenoioLoadSpy.calls == []
-    assert _VCFLoadSpy.calls == ["input.vcf.gz"]
-    assert log.errors == ["`--vcf PREFIX` is not fully supported yet."]
 
 
 def test_cli_help_marks_legacy_genotype_inputs() -> None:
