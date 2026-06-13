@@ -10,7 +10,8 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-from jaxqtl.io import GenoioData, PlinkData
+from jaxqtl.io import GenoioData
+from jaxqtl.io._geno import PlinkData
 from jaxqtl.io._geno_engine import _row_order_for_frozen_iids
 from jaxqtl.map.data import CisData
 
