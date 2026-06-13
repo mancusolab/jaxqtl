@@ -1,5 +1,6 @@
 # pattern: Imperative Shell
 
+from collections.abc import Iterator
 from pathlib import Path
 
 import numpy as np
@@ -10,11 +11,59 @@ import jax
 import jax.numpy as jnp
 
 from jaxqtl.io import GenoioData, PlinkData
+from jaxqtl.io._geno_engine import _row_order_for_frozen_iids
 from jaxqtl.map.data import CisData
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
 GENO_PREFIX = REPO_ROOT / "tutorial" / "input" / "chr22_N100"
+
+
+class _SyntheticGenoioDataset:
+    def __init__(self) -> None:
+        self.read_missing: object = None
+        self.iter_missing: list[object] = []
+        self.genotype = np.array(
+            [
+                [1.0, 7.0, 0.0],
+                [0.0, 7.0, np.nan],
+                [2.0, 7.0, 2.0],
+            ],
+            dtype=np.float32,
+        )
+        self.returned_samples = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"]})
+        self.returned_variants = pl.DataFrame(
+            {
+                "chrom": ["1", "1", "1"],
+                "id": ["rs_good", "rs_monomorphic", "rs_missing"],
+                "pos": [10, 20, 30],
+                "a0": ["A", "C", "G"],
+                "a1": ["T", "G", "A"],
+            }
+        )
+
+    def read(self, **kwargs: object) -> tuple[np.ndarray, pl.DataFrame, pl.DataFrame]:
+        self.read_missing = kwargs.get("missing")
+        return self.genotype, self.returned_samples, self.returned_variants
+
+    def iter_blocks(self, size: int, **read_options: object) -> Iterator[tuple[np.ndarray, pl.DataFrame, pl.DataFrame]]:
+        self.iter_missing.append(read_options.get("missing"))
+        yield self.genotype, self.returned_samples, self.returned_variants
+
+
+def _synthetic_data() -> tuple[GenoioData, _SyntheticGenoioDataset]:
+    dataset = _SyntheticGenoioDataset()
+    frozen_sample_info = pl.DataFrame({"iid": ["iid2", "iid1", "iid3"]})
+    variant_info = pl.DataFrame(
+        {
+            "chrom": ["1", "1", "1"],
+            "snp": ["rs_good", "rs_monomorphic", "rs_missing"],
+            "pos": [10, 20, 30],
+            "a0": ["A", "C", "G"],
+            "a1": ["T", "G", "A"],
+        }
+    )
+    return GenoioData(dataset, frozen_sample_info, variant_info), dataset
 
 
 def _source_iids() -> list[str]:
@@ -103,6 +152,13 @@ def test_filter_individuals_matches_cli_keep_and_drop_expectations() -> None:
     assert _sample_iids(dropped.sample_info) == [iid for iid in source_iids if iid not in drop_iids]
 
 
+def test_filter_individuals_rejects_invalid_how_with_actionable_message() -> None:
+    data = GenoioData.load(str(GENO_PREFIX))
+
+    with pytest.raises(ValueError, match="`how` must be 'keep' or 'drop'"):
+        data.filter_individuals([], "invalid")  # type: ignore[arg-type]
+
+
 def test_replace_individuals_rejects_duplicate_iids() -> None:
     data = GenoioData.load(str(GENO_PREFIX))
     duplicate_sample_info = data.sample_info.head(2).with_columns(pl.lit(_source_iids()[0]).alias("iid"))
@@ -157,6 +213,23 @@ def test_cis_data_uses_named_variant_metadata_without_legacy_columns() -> None:
         "a1": ["C", "T"],
         "a0": ["A", "G"],
     }
+
+
+def test_row_order_reconciliation_rejects_malformed_returned_samples() -> None:
+    returned_samples = pl.DataFrame({"iid": ["iid1", "iid1", "iidX"]})
+
+    with pytest.raises(ValueError, match=r"missing.*iid2.*unexpected.*iidX.*duplicate.*iid1"):
+        _row_order_for_frozen_iids(returned_samples, ["iid1", "iid2"])
+
+
+def test_query_cis_explicitly_uses_nan_missing_policy_and_filters_metadata_together() -> None:
+    data, dataset = _synthetic_data()
+
+    G, variant_info = data.query_cis("1", 1, 99)
+
+    assert dataset.read_missing == "nan"
+    assert variant_info.get_column("snp").to_list() == ["rs_good"]
+    np.testing.assert_array_equal(np.asarray(G), np.array([[0.0], [1.0], [2.0]], dtype=np.float32))
 
 
 def test_query_cis_returns_jax_matrix_and_normalized_metadata() -> None:
@@ -248,3 +321,15 @@ def test_iter_geno_blocks_match_full_read_after_conversion_and_filtering() -> No
 
     np.testing.assert_array_equal(np.asarray(observed_G), np.asarray(full_G))
     assert observed_variant_info.equals(full_variant_info)
+
+
+def test_iter_geno_explicitly_uses_nan_missing_policy_and_filters_metadata_together() -> None:
+    data, dataset = _synthetic_data()
+
+    blocks = list(data.iter_geno(2))
+
+    assert dataset.iter_missing == ["nan"]
+    assert len(blocks) == 1
+    block_G, block_variant_info = blocks[0]
+    assert block_variant_info.get_column("snp").to_list() == ["rs_good"]
+    np.testing.assert_array_equal(np.asarray(block_G), np.array([[0.0], [1.0], [2.0]], dtype=np.float32))

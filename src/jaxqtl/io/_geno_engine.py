@@ -1,5 +1,6 @@
 # pattern: Imperative Shell
 
+from collections import Counter
 from collections.abc import Iterator
 from typing import Literal
 
@@ -38,7 +39,24 @@ def _normalize_variant_info(variant_info: pl.DataFrame) -> pl.DataFrame:
 
 
 def _row_order_for_frozen_iids(returned_samples: pl.DataFrame, frozen_iids: list[str]) -> list[int]:
+    if "iid" not in returned_samples.columns:
+        raise ValueError("returned_samples must include an 'iid' column")
+
     returned_iids = returned_samples.get_column("iid").to_list()
+    returned_iid_counts = Counter(returned_iids)
+    duplicate_iids = sorted(iid for iid, count in returned_iid_counts.items() if count > 1)
+    missing_iids = sorted(set(frozen_iids) - set(returned_iids))
+    unexpected_iids = sorted(set(returned_iids) - set(frozen_iids))
+
+    if returned_samples.height != len(frozen_iids) or missing_iids or unexpected_iids or duplicate_iids:
+        raise ValueError(
+            "returned_samples must match frozen IIDs exactly; "
+            f"expected height {len(frozen_iids)}, got {returned_samples.height}; "
+            f"missing IIDs: {missing_iids}; "
+            f"unexpected IIDs: {unexpected_iids}; "
+            f"duplicate IIDs: {duplicate_iids}"
+        )
+
     row_index_by_iid = {iid: index for index, iid in enumerate(returned_iids)}
     return [row_index_by_iid[iid] for iid in frozen_iids]
 
@@ -91,7 +109,7 @@ class GenoioData(GenotypeData):
     def filter_individuals(self, individuals: list[str], how: Literal["keep", "drop"]) -> "GenoioData":
         """Keep or drop individuals by IID, preserving current source/sample order semantics."""
         if how not in ["keep", "drop"]:
-            raise ValueError("`how` must be have value of 'keep' or 'drop'")
+            raise ValueError("`how` must be 'keep' or 'drop'")
 
         pl_how = "semi" if how == "keep" else "anti"
         iid_frame = pl.DataFrame({"iid": individuals}, schema={"iid": self.sample_info.schema["iid"]})
@@ -104,6 +122,7 @@ class GenoioData(GenotypeData):
         genotype, returned_samples, variant_info = self.dataset.read(
             variants=genoio.region(f"{chrom}:{start}-{end}"),
             samples=frozen_iids,
+            missing="nan",
             return_samples=True,
             return_variants=True,
         )
@@ -122,6 +141,7 @@ class GenoioData(GenotypeData):
             for genotype, returned_samples, variant_info in self.dataset.iter_blocks(
                 size=chunk_size,
                 samples=frozen_iids,
+                missing="nan",
                 return_samples=True,
                 return_variants=True,
             ):
