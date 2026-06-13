@@ -16,7 +16,10 @@ from typing import Any
 
 import polars as pl
 
-from benchmark_core import compare_frames, comparison_to_dict
+from benchmark_core import compare_qtl_frames, comparison_to_dict
+
+
+_COMPARISON_MODE = "qtl_allele_aware"
 
 
 @dataclass(frozen=True)
@@ -203,12 +206,13 @@ def _compare_outputs(
 
         current = pl.read_parquet(current_path)
         baseline = pl.read_parquet(baseline_path)
-        comparison = compare_frames(current, baseline, rtol=rtol, atol=atol)
+        comparison = compare_qtl_frames(current, baseline, rtol=rtol, atol=atol)
         comparisons.append(
             {
                 "suffix": suffix,
                 "current": str(current_path),
                 "baseline": str(baseline_path),
+                "comparison_mode": _COMPARISON_MODE,
                 **comparison_to_dict(comparison),
             }
         )
