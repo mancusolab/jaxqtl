@@ -1,3 +1,7 @@
+# pattern: Mixed (needs refactoring)
+
+"""Mapping genotype interface plus deprecated private legacy backend implementations."""
+
 import warnings
 
 from abc import abstractmethod
@@ -77,7 +81,13 @@ class GenotypeData(eqx.Module):
 
 
 class PlinkData(GenotypeData):
-    """Read raw genotype data from plink triplets
+    """Deprecated private legacy reader for PLINK triplets.
+
+    Active CLI PLINK1 loading now uses :class:`jaxqtl.io.GenoioData`. This class
+    remains only as a private compatibility implementation for legacy internal
+    callers and tests.
+
+    Read raw genotype data from plink triplets
     prefix: chr22.bed, also accept chr*.bed (read everything)
 
     Note: read bed file is much faster than VCF file (parser)
@@ -99,6 +109,11 @@ class PlinkData(GenotypeData):
     @classmethod
     def load(cls, prefix: str):
         """Load PLINK genotype triplets (bed/bim/fam) from a prefix."""
+        warnings.warn(
+            "PlinkData is a deprecated private legacy backend; use GenoioData for active PLINK1 loading.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
         # a0=0, a1=1, genotype value (0/1/2) is the count for a1 allele
         with warnings.catch_warnings(action="ignore", category=FutureWarning):
             bim, fam, bed = read_plink(prefix, verbose=False)
@@ -167,7 +182,11 @@ class PlinkData(GenotypeData):
 
 
 class VCFData(GenotypeData):
-    """Genotype reader for VCF inputs."""
+    """Deprecated private legacy reader for VCF inputs.
+
+    VCF is not an active production CLI genotype input in the genoio migration.
+    This class remains only as a private legacy implementation.
+    """
 
     def __call__(self, vcf_path: str) -> GenoState:
         """read genotype from VCF file
@@ -176,6 +195,11 @@ class VCFData(GenotypeData):
         `plink2 --vcf example.vcf.gz --make-bed --out ex`
 
         """
+        warnings.warn(
+            "VCFData is a deprecated private legacy backend; VCF is not supported by the production CLI.",
+            DeprecationWarning,
+            stacklevel=2,
+        )
 
         # read VCF files
         vcf = VCF(vcf_path, gts012=True)  # can add samples=[]
