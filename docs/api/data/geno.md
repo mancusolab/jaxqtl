@@ -18,7 +18,7 @@ Developer note: the internal engine converts `genoio` dense NumPy hardcall reads
 
     The genotype IO modules depend on optional IO dependencies (e.g. `polars`, `pandas`, PLINK/VCF readers). In
     minimal documentation builds, the API is described here conceptually; consult the source for concrete classes:
-    `src/jaxqtl/io/geno.py`.
+    `src/jaxqtl/io/_geno.py` and `src/jaxqtl/io/_geno_engine.py`.
 
 ## Concepts
 
