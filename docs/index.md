@@ -36,8 +36,11 @@ jaxqtl -h
 
 ### Cis mapping
 
-Run cis mapping using a PLINK1 BED/BIM/FAM prefix (`--bfile`), plus phenotype and covariate tables.
-`--geno` is deprecated; VCF (`--vcf`) is currently unsupported/experimental and is not a production genotype input.
+Run cis mapping using a PLINK1 BED/BIM/FAM prefix through `--bfile`, plus phenotype and covariate tables.
+`--geno` is deprecated and now raises an error; use `--bfile` for PLINK1 BED/BIM/FAM prefixes.
+`--vcf` remains unsupported in production CLI behavior for this migration.
+
+PLINK2, VCF/BCF, BGEN, dosage, sparse, and haplotype inputs are future extension paths behind later design work.
 
 ```bash
 jaxqtl cis \
