@@ -7,13 +7,14 @@ from typing import cast
 import genoio
 import numpy as np
 import polars as pl
+import pytest
 
 import jax
 import jax.numpy as jnp
 
 from jaxqtl.io._geno_engine import filter_sample_ids, normalize_variant_info
 from jaxqtl.io._pheno import ExpressionData
-from jaxqtl.map.data import CisData, ReadyDataState
+from jaxqtl.map.data import align_on_iid, CisData, ReadyDataState
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -148,6 +149,14 @@ def test_normalize_variant_info_preserves_genoio_counted_allele_convention() -> 
         "a0": ["A"],
         "a1": ["G"],
     }
+
+
+def test_align_on_iid_rejects_duplicate_keys_before_join() -> None:
+    left = pl.DataFrame({"iid": ["iid1", "iid2"], "x": [1.0, 2.0]})
+    right = pl.DataFrame({"iid": ["iid1", "iid1"], "y": [10.0, 20.0]})
+
+    with pytest.raises(ValueError, match="Duplicate iid values found in dataframe 1: iid1"):
+        align_on_iid([left, right])
 
 
 def test_ready_data_state_aligns_to_genoio_source_order_and_uses_sample_pushdown() -> None:

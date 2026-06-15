@@ -215,6 +215,9 @@ def align_on_iid(
     iid_col: str = "iid",
 ) -> list[pl.DataFrame]:
     """Align multiple DataFrames on a shared IID column, preserving the order of the first frame."""
+    for idx, df in enumerate(dfs):
+        _reject_duplicate_iids(df, iid_col, idx)
+
     # first df determines final ordering (minus dropped iids)
     base_iids = dfs[0].get_column(iid_col).to_list()
 
@@ -236,3 +239,11 @@ def align_on_iid(
         aligned.append(iid_df.join(df, on=iid_col, how="left"))
 
     return aligned
+
+
+def _reject_duplicate_iids(df: pl.DataFrame, iid_col: str, df_idx: int) -> None:
+    duplicated = df.filter(pl.col(iid_col).is_duplicated()).get_column(iid_col).unique().to_list()
+    if duplicated:
+        examples = ", ".join(str(iid) for iid in duplicated[:5])
+        suffix = "" if len(duplicated) <= 5 else f", ... ({len(duplicated)} total)"
+        raise ValueError(f"Duplicate {iid_col} values found in dataframe {df_idx}: {examples}{suffix}")
