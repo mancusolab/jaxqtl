@@ -9,7 +9,6 @@ import polars as pl
 import pytest
 
 from jaxqtl import cli
-from jaxqtl.io import GenoioData
 from jaxqtl.map.data import CisData
 
 
@@ -29,37 +28,41 @@ class _LoggerStub:
         self.errors.append(message)
 
 
-class _GenoioLoadSpy:
-    calls: list[str] = []
-    result = GenoioData(
-        genotype=object(),
-        sample_info=pl.DataFrame({"iid": []}, schema={"iid": pl.Utf8}),
-        variant_info=pl.DataFrame(
+class _EmptyGenoioDataset:
+    def samples(self) -> pl.DataFrame:
+        return pl.DataFrame({"iid": []}, schema={"iid": pl.Utf8})
+
+    def variants(self) -> pl.DataFrame:
+        return pl.DataFrame(
             {
                 "chrom": [],
-                "snp": [],
                 "pos": [],
+                "id": [],
                 "a0": [],
                 "a1": [],
             },
             schema={
                 "chrom": pl.Utf8,
-                "snp": pl.Utf8,
                 "pos": pl.Int64,
+                "id": pl.Utf8,
                 "a0": pl.Utf8,
                 "a1": pl.Utf8,
             },
-        ),
-    )
+        )
 
-    @classmethod
-    def load(cls, prefix: str) -> GenoioData:
-        cls.calls.append(prefix)
-        return cls.result
+
+class _LoadDatasetSpy:
+    def __init__(self) -> None:
+        self.calls: list[tuple[str, str]] = []
+        self.result = _EmptyGenoioDataset()
+
+    def __call__(self, source: str, path: str):
+        self.calls.append((source, path))
+        return self.result
 
 
 def _args(**overrides: object) -> SimpleNamespace:
-    defaults: dict[str, object] = {"bfile": None, "geno": None, "vcf": None}
+    defaults: dict[str, object] = {"bfile": None, "pfile": None, "vcf": None, "bgen": None, "geno": None}
     defaults.update(overrides)
     return SimpleNamespace(**defaults)
 
@@ -68,6 +71,8 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
     return SimpleNamespace(
         cmd=cmd,
         bfile="tutorial/input/chr22_N100",
+        pfile=None,
+        bgen=None,
         geno=None,
         vcf=None,
         pheno="tutorial/input/CD4_NC.N100.bed.gz",
@@ -104,35 +109,44 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
     )
 
 
-def test_bfile_constructs_genoio_data(monkeypatch: pytest.MonkeyPatch) -> None:
-    _GenoioLoadSpy.calls = []
-    monkeypatch.setattr(cli, "GenoioData", _GenoioLoadSpy)
+def test_bfile_constructs_genoio_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
+    spy = _LoadDatasetSpy()
+    monkeypatch.setattr(cli, "load_genotype_dataset", spy)
 
     result = cli._load_genotype_data(_args(bfile="plink-prefix"), _LoggerStub())
 
-    assert result is _GenoioLoadSpy.result
-    assert isinstance(result, GenoioData)
-    assert _GenoioLoadSpy.calls == ["plink-prefix"]
+    assert result is spy.result
+    assert spy.calls == [("bfile", "plink-prefix")]
+
+
+@pytest.mark.parametrize(
+    ("arg_name", "source", "path"),
+    [
+        ("pfile", "pfile", "plink2-prefix"),
+        ("vcf", "vcf", "input.vcf.gz"),
+        ("bgen", "bgen", "input.bgen"),
+    ],
+)
+def test_other_genoio_sources_construct_dataset(
+    monkeypatch: pytest.MonkeyPatch, arg_name: str, source: str, path: str
+) -> None:
+    spy = _LoadDatasetSpy()
+    monkeypatch.setattr(cli, "load_genotype_dataset", spy)
+
+    result = cli._load_genotype_data(_args(**{arg_name: path}), _LoggerStub())
+
+    assert result is spy.result
+    assert spy.calls == [(source, path)]
 
 
 def test_deprecated_geno_raises_without_constructing_genoio(monkeypatch: pytest.MonkeyPatch) -> None:
-    _GenoioLoadSpy.calls = []
-    monkeypatch.setattr(cli, "GenoioData", _GenoioLoadSpy)
+    spy = _LoadDatasetSpy()
+    monkeypatch.setattr(cli, "load_genotype_dataset", spy)
 
-    with pytest.raises(ValueError, match="--geno.*deprecated.*--bfile.*PLINK1 BED/BIM/FAM"):
+    with pytest.raises(ValueError, match="--geno.*deprecated.*genoio-native inputs"):
         cli._load_genotype_data(_args(geno="legacy-prefix"), _LoggerStub())
 
-    assert _GenoioLoadSpy.calls == []
-
-
-def test_vcf_fails_at_genotype_boundary_without_constructing_genoio(monkeypatch: pytest.MonkeyPatch) -> None:
-    _GenoioLoadSpy.calls = []
-    monkeypatch.setattr(cli, "GenoioData", _GenoioLoadSpy)
-
-    with pytest.raises(NotImplementedError, match="--vcf.*not supported.*--bfile.*PLINK1 BED/BIM/FAM"):
-        cli._load_genotype_data(_args(vcf="input.vcf.gz"), _LoggerStub())
-
-    assert _GenoioLoadSpy.calls == []
+    assert spy.calls == []
 
 
 def test_cli_help_marks_legacy_genotype_inputs() -> None:
@@ -142,8 +156,9 @@ def test_cli_help_marks_legacy_genotype_inputs() -> None:
 
     assert exc_info.value.code == 0
     help_text = " ".join(stdout.getvalue().split())
-    assert "deprecated; use --bfile for PLINK1 BED/BIM/FAM prefixes" in help_text
-    assert "unsupported/experimental; not a production genotype input" in help_text
+    assert "Prefix to PLINK2 PGEN/PVAR/PSAM triplets." in help_text
+    assert "Path to an indexed VCF/BCF genotype file." in help_text
+    assert "Path to a BGEN genotype file." in help_text
 
 
 @pytest.mark.parametrize("cmd", ["cis", "nominal"])
@@ -152,7 +167,8 @@ def test_common_setup_bfile_uses_genoio_and_yields_cis_data(cmd: str) -> None:
 
     ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
 
-    assert isinstance(ready_data.genotype, GenoioData)
+    assert ready_data.genotype.__class__.__name__ == "Dataset"
+    assert ready_data.sample_ids
     cis_data = next(ready_data.iter_cis(args.window))
     assert isinstance(cis_data, CisData)
     assert cis_data.num_snps > 0
@@ -163,7 +179,8 @@ def test_common_setup_bfile_uses_genoio_and_yields_trans_genotype_block() -> Non
 
     ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
 
-    assert isinstance(ready_data.genotype, GenoioData)
+    assert ready_data.genotype.__class__.__name__ == "Dataset"
+    assert ready_data.sample_ids
     G, variant_info = next(ready_data.iter_geno(chunk_size=2500))
     assert G.shape[0] > 0
     assert G.shape[1] > 0

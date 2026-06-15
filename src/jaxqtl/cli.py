@@ -33,7 +33,7 @@ from .infer import (
 )
 from .io import (
     ExpressionData,
-    GenoioData,
+    load_genotype_dataset,
     read_offset_tsvlike,
     read_plink_style_tsvlike,
     read_single_column_file,
@@ -78,9 +78,11 @@ def _create_common_subp(subp, name, help):
 
     # geno arguments
     geno_group = common_p.add_mutually_exclusive_group(required=True)
-    geno_group.add_argument("--geno", help="deprecated; use --bfile for PLINK1 BED/BIM/FAM prefixes.")
+    geno_group.add_argument("--geno", help="deprecated; use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
     geno_group.add_argument("--bfile", help="Prefix to PLINK1 BED/BIM/FAM triplets.")
-    geno_group.add_argument("--vcf", help="unsupported/experimental; not a production genotype input.")
+    geno_group.add_argument("--pfile", help="Prefix to PLINK2 PGEN/PVAR/PSAM triplets.")
+    geno_group.add_argument("--vcf", help="Path to an indexed VCF/BCF genotype file.")
+    geno_group.add_argument("--bgen", help="Path to a BGEN genotype file.")
 
     # pheno / covariate arguments
     common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
@@ -394,11 +396,15 @@ def _trans_scan(args, log):
 
 def _load_genotype_data(args, log):
     if args.bfile is not None:
-        return GenoioData.load(args.bfile)
-    if args.geno is not None:
-        raise ValueError("`--geno` is deprecated. Use `--bfile` for PLINK1 BED/BIM/FAM prefixes.")
+        return load_genotype_dataset("bfile", args.bfile)
+    if args.pfile is not None:
+        return load_genotype_dataset("pfile", args.pfile)
     if args.vcf is not None:
-        raise NotImplementedError("`--vcf` is not supported. Use `--bfile` for PLINK1 BED/BIM/FAM prefixes.")
+        return load_genotype_dataset("vcf", args.vcf)
+    if args.bgen is not None:
+        return load_genotype_dataset("bgen", args.bgen)
+    if args.geno is not None:
+        raise ValueError("`--geno` is deprecated. Use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
 
     raise ValueError("No valid genotype file specified.")
 
@@ -502,13 +508,6 @@ def _common_setup(args, log):
     log.info("Reading genotype, phenotype, and covariate data")
     geno_data = _load_genotype_data(args, log)
 
-    # so we end up aligning everything at the end of this function, but better to reduce as we go
-    # this should help speed up final data alignment a touch
-    if inds_to_keep:
-        geno_data = geno_data.filter_individuals(inds_to_keep, "keep")
-    elif inds_to_exclude:
-        geno_data = geno_data.filter_individuals(inds_to_exclude, "drop")
-
     if args.gene_list is not None:
         gene_keep_list = read_single_column_file(args.gene_list)
     elif args.genes is not None:
@@ -565,6 +564,8 @@ def _common_setup(args, log):
         expr_data,
         covar,
         offset,
+        keep_samples=inds_to_keep,
+        drop_samples=inds_to_exclude,
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 

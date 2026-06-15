@@ -109,6 +109,9 @@ dependencies = [
 target-version = "py310"
 line-length = 120
 
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
 [tool.ruff.lint]
 select = ["E", "F", "I001", "UP"]
 ignore = ["E402", "E721", "E731", "E741", "F722", "UP038", "TID252"]

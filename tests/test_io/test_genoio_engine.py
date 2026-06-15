@@ -2,18 +2,18 @@
 
 from collections.abc import Iterator
 from pathlib import Path
+from typing import cast
 
+import genoio
 import numpy as np
 import polars as pl
-import pytest
 
 import jax
 import jax.numpy as jnp
 
-from jaxqtl.io import GenoioData
-from jaxqtl.io._geno import PlinkData
-from jaxqtl.io._geno_engine import _row_order_for_frozen_iids
-from jaxqtl.map.data import CisData
+from jaxqtl.io._geno_engine import filter_sample_ids, normalize_variant_info
+from jaxqtl.io._pheno import ExpressionData
+from jaxqtl.map.data import CisData, ReadyDataState
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
@@ -22,128 +22,131 @@ GENO_PREFIX = REPO_ROOT / "tutorial" / "input" / "chr22_N100"
 
 class _SyntheticGenoioDataset:
     def __init__(self) -> None:
-        self.read_missing: object = None
-        self.iter_missing: list[object] = []
-        self.genotype = np.array(
-            [
-                [1.0, 7.0, 0.0],
-                [0.0, 7.0, np.nan],
-                [2.0, 7.0, 2.0],
-            ],
-            dtype=np.float32,
-        )
+        self.block_calls: list[tuple[int, dict[str, object]]] = []
+        self.region_calls: list[tuple[list[object], dict[str, object]]] = []
         self.returned_samples = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"]})
         self.returned_variants = pl.DataFrame(
             {
-                "chrom": ["1", "1", "1"],
-                "id": ["rs_good", "rs_monomorphic", "rs_missing"],
-                "pos": [10, 20, 30],
-                "a0": ["A", "C", "G"],
-                "a1": ["T", "G", "A"],
+                "chrom": ["1", "1"],
+                "id": ["rs1", "rs2"],
+                "pos": [10, 20],
+                "a0": ["A", "C"],
+                "a1": ["T", "G"],
             }
         )
+        self.genotype = np.array(
+            [
+                [0.0, 1.0],
+                [1.0, 2.0],
+                [2.0, 0.0],
+            ],
+            dtype=np.float32,
+        )
 
-    def read(self, **kwargs: object) -> tuple[np.ndarray, pl.DataFrame, pl.DataFrame]:
-        self.read_missing = kwargs.get("missing")
-        return self.genotype, self.returned_samples, self.returned_variants
+    def samples(self) -> pl.DataFrame:
+        return self.returned_samples
 
-    def iter_blocks(self, size: int, **read_options: object) -> Iterator[tuple[np.ndarray, pl.DataFrame, pl.DataFrame]]:
-        self.iter_missing.append(read_options.get("missing"))
-        yield self.genotype, self.returned_samples, self.returned_variants
+    def variants(self) -> pl.DataFrame:
+        return self.returned_variants
+
+    def iter_blocks(self, size: int, **read_options: object) -> Iterator[tuple[np.ndarray, pl.DataFrame]]:
+        self.block_calls.append((size, read_options))
+        yield self.genotype, self.returned_variants
+
+    def iter_regions(
+        self, regions: list[object], **read_options: object
+    ) -> Iterator[tuple[object, tuple[np.ndarray, pl.DataFrame]]]:
+        self.region_calls.append((regions, read_options))
+        for region in regions:
+            yield region, (self.genotype, self.returned_variants)
 
 
-def _synthetic_data() -> tuple[GenoioData, _SyntheticGenoioDataset]:
-    dataset = _SyntheticGenoioDataset()
-    frozen_sample_info = pl.DataFrame({"iid": ["iid2", "iid1", "iid3"]})
-    variant_info = pl.DataFrame(
+def _expression() -> ExpressionData:
+    pheno = pl.DataFrame(
         {
-            "chrom": ["1", "1", "1"],
-            "snp": ["rs_good", "rs_monomorphic", "rs_missing"],
-            "pos": [10, 20, 30],
-            "a0": ["A", "C", "G"],
-            "a1": ["T", "G", "A"],
+            "iid": ["iid2", "iid1", "iid3"],
+            "gene1": [20.0, 10.0, 30.0],
         }
     )
-    return GenoioData(dataset, frozen_sample_info, variant_info), dataset
+    pheno_meta = pl.DataFrame(
+        {
+            "chrom": ["1"],
+            "start": [5],
+            "end": [15],
+            "phenotype_id": ["gene1"],
+        }
+    )
+    libsize = pl.DataFrame({"iid": ["iid2", "iid1", "iid3"], "libsize": [2.0, 1.0, 3.0]})
+    return ExpressionData(pheno, pheno_meta, libsize)
 
 
-def _source_iids() -> list[str]:
-    fam_path = GENO_PREFIX.with_suffix(".fam")
-    return [line.split()[1] for line in fam_path.read_text().splitlines()]
+def test_filter_sample_ids_preserves_genoio_source_order_for_keep_and_drop() -> None:
+    samples = pl.DataFrame({"iid": ["iid1", "iid2", "iid3", "iid4"]})
+
+    assert filter_sample_ids(samples, keep=["iid3", "iid1"]) == ("iid1", "iid3")
+    assert filter_sample_ids(samples, drop=["iid2", "iid4"]) == ("iid1", "iid3")
 
 
-def _sample_iids(sample_info: pl.DataFrame) -> list[str]:
-    return sample_info.get_column("iid").to_list()
-
-
-def _first_five_variant_region(data: GenoioData) -> tuple[str, int, int]:
-    variant_info = data.variant_info.head(5)
-    return (
-        variant_info.get_column("chrom")[0],
-        variant_info.get_column("pos")[0],
-        variant_info.get_column("pos")[-1],
+def test_normalize_variant_info_preserves_genoio_counted_allele_convention() -> None:
+    variants = pl.DataFrame(
+        {
+            "chrom": [22],
+            "id": ["rs1"],
+            "pos": [123],
+            "a0": ["A"],
+            "a1": ["G"],
+        }
     )
 
+    observed = normalize_variant_info(variants)
 
-def _full_variant_region(data: GenoioData) -> tuple[str, int, int]:
-    return (
-        data.variant_info.get_column("chrom")[0],
-        data.variant_info.get_column("pos").min(),
-        data.variant_info.get_column("pos").max(),
-    )
-
-
-def test_sample_info_has_iid_and_preserves_source_order() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-
-    assert "iid" in data.sample_info.columns
-    assert _sample_iids(data.sample_info) == _source_iids()
+    assert observed.to_dict(as_series=False) == {
+        "chrom": ["22"],
+        "snp": ["rs1"],
+        "pos": [123],
+        "a0": ["A"],
+        "a1": ["G"],
+    }
 
 
-def test_replace_individuals_freezes_reversed_iid_order() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    reversed_sample_info = data.sample_info.reverse()
+def test_ready_data_state_aligns_to_genoio_source_order_and_uses_sample_pushdown() -> None:
+    dataset = _SyntheticGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid3", "iid1", "iid2"], "cov": [30.0, 10.0, 20.0]})
 
-    replaced = data.replace_individuals(reversed_sample_info)
+    ready = ReadyDataState.from_data(cast(genoio.Dataset, dataset), _expression(), covar, keep_samples=["iid3", "iid1"])
+    G, variant_info = next(ready.iter_geno(chunk_size=128))
 
-    assert _sample_iids(replaced.sample_info) == list(reversed(_source_iids()))
-
-
-def test_filter_individuals_matches_cli_keep_and_drop_expectations() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    source_iids = _source_iids()
-
-    keep_iids = [source_iids[2], source_iids[0], source_iids[-1]]
-    kept = data.filter_individuals(keep_iids, "keep")
-    assert _sample_iids(kept.sample_info) == [source_iids[0], source_iids[2], source_iids[-1]]
-
-    drop_iids = [source_iids[1], source_iids[3]]
-    dropped = data.filter_individuals(drop_iids, "drop")
-    assert _sample_iids(dropped.sample_info) == [iid for iid in source_iids if iid not in drop_iids]
+    assert ready.sample_ids == ("iid1", "iid3")
+    assert ready.expression.pheno.get_column("iid").to_list() == ["iid1", "iid3"]
+    np.testing.assert_array_equal(np.asarray(ready.covar), np.array([[10.0], [30.0]], dtype=np.float32))
+    assert dataset.block_calls[0][0] == 128
+    assert dataset.block_calls[0][1]["samples"] == ["iid1", "iid3"]
+    assert dataset.block_calls[0][1]["missing"] == "impute"
+    variants = cast(genoio.FilterExpr, dataset.block_calls[0][1]["variants"])
+    assert variants.to_ir() == genoio.polymorphic().to_ir()
+    assert isinstance(G, jax.Array)
+    assert variant_info.get_column("snp").to_list() == ["rs1", "rs2"]
 
 
-def test_filter_individuals_rejects_invalid_how_with_actionable_message() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
+def test_ready_data_state_iter_cis_uses_genoio_regions_with_polymorphic_filter() -> None:
+    dataset = _SyntheticGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "cov": [1.0, 2.0, 3.0]})
+    ready = ReadyDataState.from_data(cast(genoio.Dataset, dataset), _expression(), covar)
 
-    with pytest.raises(ValueError, match="`how` must be 'keep' or 'drop'"):
-        data.filter_individuals([], "invalid")  # type: ignore[arg-type]
+    cis_data = next(ready.iter_cis(window=5))
 
-
-def test_replace_individuals_rejects_duplicate_iids() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    duplicate_sample_info = data.sample_info.head(2).with_columns(pl.lit(_source_iids()[0]).alias("iid"))
-
-    with pytest.raises(ValueError, match="duplicate IID"):
-        data.replace_individuals(duplicate_sample_info)
-
-
-def test_variant_info_uses_minimal_mapping_metadata_columns() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-
-    assert data.variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
+    assert isinstance(cis_data, CisData)
+    assert cis_data.G.shape == (3, 2)
+    regions, read_options = dataset.region_calls[0]
+    assert len(regions) == 1
+    region = cast(genoio.FilterExpr, regions[0])
+    assert region.to_ir()["op"] == "and"
+    assert read_options["samples"] == ["iid1", "iid2", "iid3"]
+    assert read_options["missing"] == "impute"
+    assert read_options["return_variants"] is True
 
 
-def test_cis_data_uses_named_variant_metadata_without_legacy_columns() -> None:
+def test_cis_data_uses_genoio_variant_metadata_without_legacy_columns() -> None:
     cis_info = pl.DataFrame(
         {
             "chrom": ["22", "22"],
@@ -176,119 +179,3 @@ def test_cis_data_uses_named_variant_metadata_without_legacy_columns() -> None:
 
     output = cis_data.get_cis_info()
     assert output.columns == ["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"]
-    assert output.select(["chrom", "snp", "pos", "a1", "a0"]).to_dict(as_series=False) == {
-        "chrom": ["22", "22"],
-        "snp": ["rs1", "rs2"],
-        "pos": [110, 130],
-        "a1": ["C", "T"],
-        "a0": ["A", "G"],
-    }
-
-
-def test_row_order_reconciliation_rejects_malformed_returned_samples() -> None:
-    returned_samples = pl.DataFrame({"iid": ["iid1", "iid1", "iidX"]})
-
-    with pytest.raises(ValueError, match=r"missing.*iid2.*unexpected.*iidX.*duplicate.*iid1"):
-        _row_order_for_frozen_iids(returned_samples, ["iid1", "iid2"])
-
-
-def test_query_cis_explicitly_uses_nan_missing_policy_and_filters_metadata_together() -> None:
-    data, dataset = _synthetic_data()
-
-    G, variant_info = data.query_cis("1", 1, 99)
-
-    assert dataset.read_missing == "nan"
-    assert variant_info.get_column("snp").to_list() == ["rs_good"]
-    np.testing.assert_array_equal(np.asarray(G), np.array([[2.0], [1.0], [0.0]], dtype=np.float32))
-    assert variant_info.select(["a0", "a1"]).to_dict(as_series=False) == {"a0": ["T"], "a1": ["A"]}
-
-
-def test_query_cis_returns_jax_matrix_and_normalized_metadata() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    chrom, start, end = _first_five_variant_region(data)
-
-    G, variant_info = data.query_cis(chrom, start, end)
-
-    assert isinstance(G, jax.Array)
-    assert G.shape == (data.sample_info.height, 5)
-    assert variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
-    assert variant_info.height == G.shape[1]
-    assert variant_info.get_column("snp").to_list() == (data.variant_info.head(5).get_column("snp").to_list())
-    assert bool(jnp.all(jnp.var(G, axis=0) > 0))
-
-
-def test_query_cis_reorders_rows_to_frozen_iid_order() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    reversed_data = data.replace_individuals(data.sample_info.reverse())
-    chrom, start, end = _first_five_variant_region(data)
-
-    source_G, source_variant_info = data.query_cis(chrom, start, end)
-    reversed_G, reversed_variant_info = reversed_data.query_cis(chrom, start, end)
-
-    np.testing.assert_array_equal(np.asarray(reversed_G), np.asarray(source_G)[::-1, :])
-    assert reversed_variant_info.equals(source_variant_info)
-
-
-def test_query_cis_empty_region_returns_empty_jax_matrix_and_metadata() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-
-    G, variant_info = data.query_cis("22", 1, 10)
-
-    assert isinstance(G, jax.Array)
-    assert G.shape == (data.sample_info.height, 0)
-    assert variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
-    assert variant_info.height == 0
-
-
-def test_query_cis_matches_plink_values_and_counted_allele_convention() -> None:
-    genoio_data = GenoioData.load(str(GENO_PREFIX))
-    plink_data = PlinkData.load(str(GENO_PREFIX))
-    chrom, start, end = _first_five_variant_region(genoio_data)
-
-    genoio_G, genoio_variant_info = genoio_data.query_cis(chrom, start, end)
-    plink_G, plink_variant_info = plink_data.query_cis(chrom, start, end)
-
-    np.testing.assert_array_equal(np.asarray(genoio_G), np.asarray(plink_G))
-    assert genoio_variant_info.equals(plink_variant_info.select(["chrom", "snp", "pos", "a0", "a1"]))
-
-
-def test_iter_geno_rejects_invalid_chunk_size() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-
-    with pytest.raises(ValueError, match="chunk_size must be >= 1"):
-        list(data.iter_geno(0))
-
-
-def test_iter_geno_blocks_match_full_read_after_conversion_and_filtering() -> None:
-    data = GenoioData.load(str(GENO_PREFIX))
-    chrom, start, end = _full_variant_region(data)
-    full_G, full_variant_info = data.query_cis(chrom, start, end)
-
-    blocks = list(data.iter_geno(max(1, data.variant_info.height // 2)))
-
-    assert len(blocks) > 1
-    for block_G, block_variant_info in blocks:
-        assert isinstance(block_G, jax.Array)
-        assert block_G.ndim == 2
-        assert block_G.shape[0] == data.sample_info.height
-        assert block_variant_info.height == block_G.shape[1]
-        assert block_variant_info.columns == ["chrom", "snp", "pos", "a0", "a1"]
-
-    observed_G = jnp.concatenate([block_G for block_G, _ in blocks], axis=1)
-    observed_variant_info = pl.concat([block_variant_info for _, block_variant_info in blocks])
-
-    np.testing.assert_array_equal(np.asarray(observed_G), np.asarray(full_G))
-    assert observed_variant_info.equals(full_variant_info)
-
-
-def test_iter_geno_explicitly_uses_nan_missing_policy_and_filters_metadata_together() -> None:
-    data, dataset = _synthetic_data()
-
-    blocks = list(data.iter_geno(2))
-
-    assert dataset.iter_missing == ["nan"]
-    assert len(blocks) == 1
-    block_G, block_variant_info = blocks[0]
-    assert block_variant_info.get_column("snp").to_list() == ["rs_good"]
-    np.testing.assert_array_equal(np.asarray(block_G), np.array([[2.0], [1.0], [0.0]], dtype=np.float32))
-    assert block_variant_info.select(["a0", "a1"]).to_dict(as_series=False) == {"a0": ["T"], "a1": ["A"]}

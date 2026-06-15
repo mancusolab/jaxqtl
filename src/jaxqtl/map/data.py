@@ -11,7 +11,16 @@ import jax.numpy as jnp
 
 from jaxtyping import Array
 
-from ..io._geno import GenotypeData
+import genoio
+
+from ..io._geno_engine import (
+    default_variant_filter,
+    filter_sample_ids,
+    GenotypeReadOptions,
+    normalize_sample_info,
+    normalize_variant_info,
+    region_filter,
+)
 from ..io._pheno import ExpressionData
 
 
@@ -59,7 +68,7 @@ class CisData(eqx.Module):
         """Compute allele frequency and minor allele count for a single variant."""
         g = self.G[:, idx]
         n = len(g)
-        counts = jnp.sum(g, axis=0)  # count REF allele
+        counts = jnp.sum(g, axis=0)  # genoio returns counts for the a1 allele
         af = counts / (2.0 * n)
         flag = af <= 0.5
         ma_counts = jnp.where(flag, counts, 2 * n - counts)
@@ -80,7 +89,7 @@ class CisData(eqx.Module):
     def get_cis_info(self) -> pl.DataFrame:
         """Return cis variant information augmented with AF and minor allele counts."""
         n, p = self.G.shape
-        counts = jnp.sum(self.G, axis=0)  # count REF allele
+        counts = jnp.sum(self.G, axis=0)  # genoio returns counts for the a1 allele
         af = counts / (2.0 * n)
         flag = af <= 0.5
         ma_counts = jnp.where(flag, counts, 2 * n - counts)
@@ -97,10 +106,13 @@ class CisData(eqx.Module):
 class ReadyDataState:
     """Aligned genotype, expression, covariates, and offsets ready for mapping."""
 
-    genotype: GenotypeData
+    genotype: genoio.Dataset
+    sample_ids: tuple[str, ...]
     expression: ExpressionData
     covar: Array
     offset: Array
+    read_options: GenotypeReadOptions
+    variant_filter: genoio.FilterExpr
 
     @property
     def num_genes(self) -> int:
@@ -109,14 +121,20 @@ class ReadyDataState:
 
     def iter_cis(self, window: int) -> Iterator[CisData]:
         """Iterate over genes and yield per-gene cis windows with matched genotype."""
-        for data in self.expression:
-            y, gene_name, chrom, gene_start, gene_end = data
-            start = max(0, gene_start - window)
+        gene_windows = []
+        regions = []
+        for y, gene_name, chrom, gene_start, gene_end in self.expression:
+            start = max(1, gene_start - window)
             end = gene_end + window
+            gene_windows.append((y, gene_name, chrom, gene_start, gene_end, start, end))
+            regions.append(region_filter(str(chrom), start, end, self.variant_filter))
 
-            # query cis-variant info
-            # note: if no variants taken, then G has shape (n,0), cis_var_info has shape (0, 7); both 2-dim
-            G, cis_var_info = self.genotype.query_cis(chrom, start, end)
+        read_options = self.read_options.kwargs(samples=self.sample_ids)
+        region_results = self.genotype.iter_regions(regions, **read_options)
+        for gene_window, (_, (genotype, variant_info)) in zip(gene_windows, region_results, strict=True):
+            y, gene_name, chrom, gene_start, gene_end, start, end = gene_window
+            G = jnp.asarray(genotype)
+            cis_var_info = normalize_variant_info(variant_info)
 
             yield CisData(
                 self.covar, G, y, self.offset, gene_name, str(chrom), gene_start, gene_end, cis_var_info, start, end
@@ -126,18 +144,27 @@ class ReadyDataState:
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
         """Yield genotype blocks and metadata in chunks."""
-        yield from self.genotype.iter_geno(chunk_size)
+        if chunk_size < 1:
+            raise ValueError("chunk_size must be >= 1")
+
+        read_options = self.read_options.kwargs(samples=self.sample_ids, variants=self.variant_filter)
+        for genotype, variant_info in self.genotype.iter_blocks(size=chunk_size, **read_options):
+            yield jnp.asarray(genotype), normalize_variant_info(variant_info)
 
     @classmethod
     def from_data(
         cls,
-        genotype: GenotypeData,
+        genotype: genoio.Dataset,
         expression: ExpressionData,
         covar: pl.DataFrame,
         offset: pl.DataFrame | None = None,
+        keep_samples: list[str] | None = None,
+        drop_samples: list[str] | None = None,
+        read_options: GenotypeReadOptions | None = None,
     ) -> "ReadyDataState":
         """Align genotype, expression, covariates, and optional offset on IID and return a ReadyDataState."""
-        dfs = [genotype.sample_info, expression.pheno, covar]
+        genotype_samples = _sample_frame(filter_sample_ids(genotype.samples(), keep=keep_samples, drop=drop_samples))
+        dfs = [genotype_samples, expression.pheno, covar]
         if offset is not None:
             dfs.append(offset)
 
@@ -147,9 +174,7 @@ class ReadyDataState:
         else:
             geno_samples, expression_samples, covar = aligned_dfs
 
-        # create new object with the subsetted individuals
-        # we need this method bc we dont know what kind of geno data we're looking at here (PLINK, VCF, etc)
-        genotype = genotype.replace_individuals(geno_samples)
+        sample_ids = tuple(normalize_sample_info(geno_samples).get_column("iid").to_list())
 
         # at this point we have only 1 kind of expression object so just make a new one
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression.libsize)
@@ -167,10 +192,17 @@ class ReadyDataState:
 
         return ReadyDataState(
             genotype=genotype,
+            sample_ids=sample_ids,
             expression=expression,
             covar=covar,
             offset=offset,
+            read_options=read_options or GenotypeReadOptions(),
+            variant_filter=default_variant_filter(),
         )
+
+
+def _sample_frame(sample_ids: tuple[str, ...]) -> pl.DataFrame:
+    return pl.DataFrame({"iid": list(sample_ids)}, schema={"iid": pl.Utf8})
 
 
 def align_on_iid(
