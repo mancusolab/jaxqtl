@@ -317,25 +317,49 @@ def _cis_scan(args, log):
         return 0
 
     log.info("Starting cis-scan.")
-    df_cis = map_cis(
-        dat,
-        snp_test=test,
-        gene_test=perm_test,
-        mode="cis",
-        window=args.window,
-        verbose=args.verbose,
-        log=log,
-        seed=args.seed,
+    test_str = test.name
+    adj_name = perm_test.name
+    cis_out = f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz"
+    wrote_results = _write_scan_results(
+        map_cis(
+            dat,
+            snp_test=test,
+            gene_test=perm_test,
+            mode="cis",
+            window=args.window,
+            verbose=args.verbose,
+            log=log,
+            seed=args.seed,
+        ),
+        cis_out,
     )
-    if df_cis is not None:
-        log.info("Finished cis-scan. Writing results.")
-        test_str = test.name
-        adj_name = perm_test.name
-        df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    if wrote_results:
+        log.info(f"Finished cis-scan. Wrote results to {cis_out}.")
     else:
-        log.warning("Finished cis-scan. No results to ouput!")
+        log.warning("Finished cis-scan. No results to output!")
 
     return 0
+
+
+def _write_scan_results(chunks, output_path):
+    writer = None
+    schema = None
+    wrote_results = False
+    try:
+        for df in chunks:
+            table = df.to_arrow()
+            if writer is None:
+                # The first result fixes the Parquet schema; columns differ by scan mode and model family.
+                schema = table.schema
+                writer = pq.ParquetWriter(output_path, schema, compression="gzip")
+            # Cast later chunks to the first schema so row groups stay consistent.
+            writer.write_table(table.cast(schema))
+            wrote_results = True
+    finally:
+        if writer is not None:
+            writer.close()
+
+    return wrote_results
 
 
 def _nominal_scan(args, log):
@@ -345,21 +369,25 @@ def _nominal_scan(args, log):
         return 0
 
     log.info("Starting nominal cis-scan.")
-    df_nominal = map_cis(
-        dat,
-        snp_test=test,
-        gene_test=perm_test,
-        mode="nominal",
-        window=args.window,
-        verbose=args.verbose,
-        log=log,
-        seed=args.seed,
+    test_str = test.name
+    nominal_out = f"{args.out}.nominal.{test_str}.parquet.gz"
+    wrote_results = _write_scan_results(
+        map_cis(
+            dat,
+            snp_test=test,
+            gene_test=perm_test,
+            mode="nominal",
+            window=args.window,
+            verbose=args.verbose,
+            log=log,
+            seed=args.seed,
+        ),
+        nominal_out,
     )
-    if df_nominal is not None:
-        log.info("Finished nominal cis-scan. Writing results.")
-        test_str = test.name
-        # ztd compression?
-        df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
+    if wrote_results:
+        log.info(f"Finished nominal cis-scan. Wrote results to {nominal_out}.")
+    else:
+        log.warning("Finished nominal cis-scan. No results to output!")
 
     return 0
 

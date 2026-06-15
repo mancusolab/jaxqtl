@@ -8,7 +8,12 @@ from types import SimpleNamespace
 import polars as pl
 import pytest
 
+from jax import numpy as jnp
+
+import jaxqtl.map.cis as cis_map
+
 from jaxqtl import cli
+from jaxqtl.hypothesis import TestResult as AssocTestResult
 from jaxqtl.map.data import CisData
 
 
@@ -232,3 +237,141 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
         "pvalue",
         "model_converged",
     ]
+
+
+def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> None:
+    class FakeData:
+        def iter_cis(self, window):
+            for idx in range(3):
+                yield CisData(
+                    jnp.ones((2, 1)),
+                    jnp.array([[0.0], [1.0]]),
+                    jnp.array([0.0, 1.0]),
+                    jnp.array(0.0),
+                    f"gene{idx}",
+                    "1",
+                    100,
+                    101,
+                    pl.DataFrame(
+                        {
+                            "chrom": ["1"],
+                            "snp": [f"rs{idx}"],
+                            "pos": [101 + idx],
+                            "a1": ["A"],
+                            "a0": ["G"],
+                        }
+                    ),
+                    1,
+                    200,
+                )
+
+    class FakeTest:
+        model = SimpleNamespace(family=object())
+
+        def __call__(self, X, G, y, offset):
+            return AssocTestResult(
+                beta=jnp.array([0.1]),
+                se=jnp.array([0.2]),
+                p=jnp.array([0.3]),
+                z=jnp.array([0.4]),
+                num_iters=jnp.array([1]),
+                converged=jnp.array([True]),
+                disp=jnp.array(0.0),
+            )
+
+    # Lower the private flush threshold so the test observes batching without a large fixture.
+    monkeypatch.setattr(cis_map, "_MAP_CIS_BATCH_ROWS", 2)
+    monkeypatch.setattr(cis_map.eqx, "filter_jit", lambda fn: fn)
+
+    map_cis = getattr(cis_map, "map_cis")
+    chunks = list(map_cis(FakeData(), FakeTest(), None, mode="nominal", verbose=False, log=_LoggerStub()))
+
+    assert [chunk.height for chunk in chunks] == [2, 1]
+    assert chunks[0]["phenotype_id"].to_list() == ["gene0", "gene1"]
+    assert chunks[1]["phenotype_id"].to_list() == ["gene2"]
+
+
+def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    args = SimpleNamespace(window=500_000, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
+    test = SimpleNamespace(name="score")
+    perm_test = SimpleNamespace(name="acat")
+    dat = SimpleNamespace(num_genes=2)
+
+    monkeypatch.setattr(cli, "_common_setup", lambda args, log: (dat, None, None, test, perm_test))
+
+    def cis_frame(phenotype_id, snp):
+        return pl.DataFrame(
+            {
+                "phenotype_id": [phenotype_id],
+                "chrom": ["1"],
+                "num_var": [2],
+                "snp": [snp],
+                "a1": ["A"],
+                "a0": ["G"],
+                "pos": [101],
+                "tss_distance": [1],
+                "af": [0.1],
+                "ma_count": [10],
+                "beta": [0.2],
+                "se": [0.03],
+                "pvalue": [0.04],
+                "pvalue_adj": [0.05],
+                "adj_method": ["ACAT"],
+                "model_converged": [True],
+            }
+        )
+
+    def cis_chunks(*args, **kwargs):
+        assert kwargs["mode"] == "cis"
+        yield cis_frame("gene1", "rs1")
+        yield cis_frame("gene2", "rs2")
+
+    monkeypatch.setattr(cli, "map_cis", cis_chunks)
+
+    return_code = cli._cis_scan(args, _LoggerStub())
+
+    cis_output = tmp_path / "jaxqtl.cis.score.acat.parquet.gz"
+    assert return_code == 0
+    assert cis_output.exists()
+    assert pl.read_parquet(cis_output)["phenotype_id"].to_list() == ["gene1", "gene2"]
+
+
+def test_nominal_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    args = SimpleNamespace(window=500_000, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
+    test = SimpleNamespace(name="score")
+    dat = SimpleNamespace(num_genes=2)
+
+    monkeypatch.setattr(cli, "_common_setup", lambda args, log: (dat, None, None, test, None))
+
+    def nominal_frame(phenotype_id, snp, converged):
+        return pl.DataFrame(
+            {
+                "phenotype_id": [phenotype_id],
+                "chrom": ["1"],
+                "snp": [snp],
+                "pos": [101],
+                "a1": ["A"],
+                "a0": ["G"],
+                "tss_distance": [1],
+                "af": [0.1],
+                "ma_count": [10],
+                "beta": [0.2],
+                "se": [0.03],
+                "pvalue": [0.04],
+                "model_converged": [converged],
+            }
+        )
+
+    def nominal_chunks(*args, **kwargs):
+        assert kwargs["mode"] == "nominal"
+        yield nominal_frame("gene1", "rs1", True)
+        yield nominal_frame("gene2", "rs2", False)
+
+    monkeypatch.setattr(cli, "map_cis", nominal_chunks)
+
+    return_code = cli._nominal_scan(args, _LoggerStub())
+
+    nominal_output = tmp_path / "jaxqtl.nominal.score.parquet.gz"
+    assert return_code == 0
+    assert nominal_output.exists()
+    assert pl.read_parquet(nominal_output)["phenotype_id"].to_list() == ["gene1", "gene2"]
