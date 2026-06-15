@@ -1,6 +1,6 @@
 # pattern: Imperative Shell
 
-from collections.abc import Iterator
+from collections.abc import Iterable, Iterator
 from pathlib import Path
 from typing import cast
 
@@ -23,7 +23,8 @@ GENO_PREFIX = REPO_ROOT / "tutorial" / "input" / "chr22_N100"
 class _SyntheticGenoioDataset:
     def __init__(self) -> None:
         self.block_calls: list[tuple[int, dict[str, object]]] = []
-        self.region_calls: list[tuple[list[object], dict[str, object]]] = []
+        self.region_calls: list[tuple[object, dict[str, object]]] = []
+        self.consumed_regions: list[object] = []
         self.returned_samples = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"]})
         self.returned_variants = pl.DataFrame(
             {
@@ -54,10 +55,30 @@ class _SyntheticGenoioDataset:
         yield self.genotype, self.returned_variants
 
     def iter_regions(
-        self, regions: list[object], **read_options: object
+        self, regions: Iterable[object], **read_options: object
     ) -> Iterator[tuple[object, tuple[np.ndarray, pl.DataFrame]]]:
         self.region_calls.append((regions, read_options))
         for region in regions:
+            self.consumed_regions.append(region)
+            yield region, (self.genotype, self.returned_variants)
+
+
+class _StreamingGenoioDataset(_SyntheticGenoioDataset):
+    def __init__(self) -> None:
+        super().__init__()
+        self.region_iterable_type: str | None = None
+        self.regions_consumed_before_first_yield = 0
+
+    def iter_regions(
+        self, regions: Iterable[object], **read_options: object
+    ) -> Iterator[tuple[object, tuple[np.ndarray, pl.DataFrame]]]:
+        self.region_iterable_type = type(regions).__name__
+        iterator = iter(regions)
+        region = next(iterator)
+        self.regions_consumed_before_first_yield = 1
+        yield region, (self.genotype, self.returned_variants)
+        for region in iterator:
+            self.regions_consumed_before_first_yield += 1
             yield region, (self.genotype, self.returned_variants)
 
 
@@ -77,6 +98,26 @@ def _expression() -> ExpressionData:
         }
     )
     libsize = pl.DataFrame({"iid": ["iid2", "iid1", "iid3"], "libsize": [2.0, 1.0, 3.0]})
+    return ExpressionData(pheno, pheno_meta, libsize)
+
+
+def _two_gene_expression() -> ExpressionData:
+    pheno = pl.DataFrame(
+        {
+            "iid": ["iid1", "iid2", "iid3"],
+            "gene1": [1.0, 2.0, 3.0],
+            "gene2": [3.0, 2.0, 1.0],
+        }
+    )
+    pheno_meta = pl.DataFrame(
+        {
+            "chrom": ["1", "1"],
+            "start": [5, 50],
+            "end": [15, 60],
+            "phenotype_id": ["gene1", "gene2"],
+        }
+    )
+    libsize = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "libsize": [1.0, 2.0, 3.0]})
     return ExpressionData(pheno, pheno_meta, libsize)
 
 
@@ -137,13 +178,25 @@ def test_ready_data_state_iter_cis_uses_genoio_regions_with_polymorphic_filter()
 
     assert isinstance(cis_data, CisData)
     assert cis_data.G.shape == (3, 2)
-    regions, read_options = dataset.region_calls[0]
-    assert len(regions) == 1
-    region = cast(genoio.FilterExpr, regions[0])
+    _, read_options = dataset.region_calls[0]
+    assert len(dataset.consumed_regions) == 1
+    region = cast(genoio.FilterExpr, dataset.consumed_regions[0])
     assert region.to_ir()["op"] == "and"
     assert read_options["samples"] == ["iid1", "iid2", "iid3"]
     assert read_options["missing"] == "impute"
     assert read_options["return_variants"] is True
+
+
+def test_ready_data_state_iter_cis_streams_regions_before_first_yield() -> None:
+    dataset = _StreamingGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "cov": [1.0, 2.0, 3.0]})
+    ready = ReadyDataState.from_data(cast(genoio.Dataset, dataset), _two_gene_expression(), covar)
+
+    first = next(ready.iter_cis(window=5))
+
+    assert first.gene_name == "gene1"
+    assert dataset.region_iterable_type != "list"
+    assert dataset.regions_consumed_before_first_yield == 1
 
 
 def test_cis_data_uses_genoio_variant_metadata_without_legacy_columns() -> None:

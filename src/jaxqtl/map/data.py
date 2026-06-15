@@ -1,8 +1,11 @@
 # pattern: Mixed (needs refactoring)
 
+from collections import deque
 from collections.abc import Iterator
 from dataclasses import dataclass
+from typing import Any
 
+import genoio
 import numpy as np
 import polars as pl
 
@@ -10,8 +13,6 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from jaxtyping import Array
-
-import genoio
 
 from ..io._geno_engine import (
     default_variant_filter,
@@ -121,17 +122,21 @@ class ReadyDataState:
 
     def iter_cis(self, window: int) -> Iterator[CisData]:
         """Iterate over genes and yield per-gene cis windows with matched genotype."""
-        gene_windows = []
-        regions = []
-        for y, gene_name, chrom, gene_start, gene_end in self.expression:
-            start = max(1, gene_start - window)
-            end = gene_end + window
-            gene_windows.append((y, gene_name, chrom, gene_start, gene_end, start, end))
-            regions.append(region_filter(str(chrom), start, end, self.variant_filter))
+        gene_window_queue: deque[Any] = deque()
+
+        # genoio consumes region filters lazily; keep matching gene metadata in FIFO order
+        # so each returned genotype block is paired with the gene window that produced it.
+        def regions() -> Iterator[genoio.FilterExpr]:
+            for y, gene_name, chrom, gene_start, gene_end in self.expression:
+                start = max(1, gene_start - window)
+                end = gene_end + window
+                gene_window_queue.append((y, gene_name, chrom, gene_start, gene_end, start, end))
+                yield region_filter(str(chrom), start, end, self.variant_filter)
 
         read_options = self.read_options.kwargs(samples=self.sample_ids)
-        region_results = self.genotype.iter_regions(regions, **read_options)
-        for gene_window, (_, (genotype, variant_info)) in zip(gene_windows, region_results, strict=True):
+        region_results = self.genotype.iter_regions(regions(), **read_options)
+        for _, (genotype, variant_info) in region_results:
+            gene_window = gene_window_queue.popleft()
             y, gene_name, chrom, gene_start, gene_end, start, end = gene_window
             G = jnp.asarray(genotype)
             cis_var_info = normalize_variant_info(variant_info)
