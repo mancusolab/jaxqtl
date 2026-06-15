@@ -236,7 +236,7 @@ def align_on_iid(
     # align all dfs using left join on the canonical ordering
     aligned = []
     for df in dfs:
-        aligned.append(iid_df.join(df, on=iid_col, how="left"))
+        aligned.append(iid_df.join(df, on=iid_col, how="left", maintain_order="left"))
 
     return aligned
 

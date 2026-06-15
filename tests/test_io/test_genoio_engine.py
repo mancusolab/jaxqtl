@@ -159,6 +159,25 @@ def test_align_on_iid_rejects_duplicate_keys_before_join() -> None:
         align_on_iid([left, right])
 
 
+def test_align_on_iid_requests_left_join_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    left = pl.DataFrame({"iid": ["iid2", "iid1"], "x": [2.0, 1.0]})
+    right = pl.DataFrame({"iid": ["iid1", "iid2"], "y": [10.0, 20.0]})
+    maintain_order_values = []
+    original_join = pl.DataFrame.join
+
+    def join_spy(self, *args, **kwargs):
+        maintain_order_values.append(kwargs.get("maintain_order"))
+        return original_join(self, *args, **kwargs)
+
+    monkeypatch.setattr(pl.DataFrame, "join", join_spy)
+
+    aligned = align_on_iid([left, right])
+
+    assert maintain_order_values == ["left", "left"]
+    assert aligned[0].get_column("iid").to_list() == ["iid2", "iid1"]
+    assert aligned[1].get_column("iid").to_list() == ["iid2", "iid1"]
+
+
 def test_ready_data_state_aligns_to_genoio_source_order_and_uses_sample_pushdown() -> None:
     dataset = _SyntheticGenoioDataset()
     covar = pl.DataFrame({"iid": ["iid3", "iid1", "iid2"], "cov": [30.0, 10.0, 20.0]})
