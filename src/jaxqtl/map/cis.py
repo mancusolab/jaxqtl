@@ -118,6 +118,7 @@ def map_cis(
 
     if not yielded:
         log.warning("All genes were skipped!")
+        yield _empty_result_frame(mode, snp_test, gene_test)
 
 
 def _should_skip_cis_data(cis_data: CisData, verbose: bool, log: Logger) -> bool:
@@ -138,6 +139,65 @@ def _should_skip_cis_data(cis_data: CisData, verbose: bool, log: Logger) -> bool
         return True
 
     return False
+
+
+def _empty_result_frame(mode: Literal["cis", "nominal"], snp_test, gene_test) -> pl.DataFrame:
+    columns = _empty_cis_columns(gene_test) if mode == "cis" else _empty_nominal_columns()
+    if not isinstance(snp_test.model.family, NegativeBinomial):
+        columns.pop("nb_alpha")
+
+    return pl.DataFrame(schema=columns)
+
+
+def _empty_nominal_columns() -> dict[str, pl.DataType]:
+    return {
+        "phenotype_id": pl.Utf8,
+        "chrom": pl.Utf8,
+        "snp": pl.Utf8,
+        "pos": pl.Int64,
+        "a1": pl.Utf8,
+        "a0": pl.Utf8,
+        "tss_distance": pl.Int64,
+        "af": pl.Float64,
+        "ma_count": pl.Int64,
+        "beta": pl.Float64,
+        "se": pl.Float64,
+        "pvalue": pl.Float64,
+        "nb_alpha": pl.Float64,
+        "model_converged": pl.Boolean,
+    }
+
+
+def _empty_cis_columns(gene_test) -> dict[str, pl.DataType]:
+    columns = {
+        "phenotype_id": pl.Utf8,
+        "chrom": pl.Utf8,
+        "num_var": pl.Int64,
+        "snp": pl.Utf8,
+        "a1": pl.Utf8,
+        "a0": pl.Utf8,
+        "pos": pl.Int64,
+        "tss_distance": pl.Int64,
+        "af": pl.Float64,
+        "ma_count": pl.Int64,
+        "shape1": pl.Float64,
+        "shape2": pl.Float64,
+        "nc_estimate": pl.Float64,
+        "perm_converged": pl.Boolean,
+        "beta": pl.Float64,
+        "se": pl.Float64,
+        "pvalue": pl.Float64,
+        "pvalue_adj": pl.Float64,
+        "adj_method": pl.Utf8,
+        "nb_alpha": pl.Float64,
+        "model_converged": pl.Boolean,
+    }
+
+    if getattr(gene_test, "name", None) == "acat":
+        for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
+            columns.pop(beta_perm_col)
+
+    return columns
 
 
 @eqx.filter_jit

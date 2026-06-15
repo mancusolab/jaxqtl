@@ -169,20 +169,20 @@ class ReadyDataState:
     ) -> "ReadyDataState":
         """Align genotype, expression, covariates, and optional offset on IID and return a ReadyDataState."""
         genotype_samples = _sample_frame(filter_sample_ids(genotype.samples(), keep=keep_samples, drop=drop_samples))
-        dfs = [genotype_samples, expression.pheno, covar]
+        dfs = [genotype_samples, expression.pheno, expression.libsize, covar]
         if offset is not None:
             dfs.append(offset)
 
         aligned_dfs = align_on_iid(dfs, iid_col="iid")
         if offset is not None:
-            geno_samples, expression_samples, covar, offset = aligned_dfs
+            geno_samples, expression_samples, expression_libsize, covar, offset = aligned_dfs
         else:
-            geno_samples, expression_samples, covar = aligned_dfs
+            geno_samples, expression_samples, expression_libsize, covar = aligned_dfs
 
         sample_ids = tuple(normalize_sample_info(geno_samples).get_column("iid").to_list())
 
         # at this point we have only 1 kind of expression object so just make a new one
-        expression = ExpressionData(expression_samples, expression.pheno_meta, expression.libsize)
+        expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
         # convert covariates to jax.numpy at this point
         covar = covar.select(pl.all().exclude("iid")).to_jax()

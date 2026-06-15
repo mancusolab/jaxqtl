@@ -291,6 +291,62 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
     assert chunks[1]["phenotype_id"].to_list() == ["gene2"]
 
 
+def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None:
+    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    test = SimpleNamespace(model=SimpleNamespace(family=object()))
+
+    map_cis = getattr(cis_map, "map_cis")
+    chunks = list(map_cis(data, test, None, mode="nominal", verbose=False, log=_LoggerStub()))
+
+    assert len(chunks) == 1
+    assert chunks[0].height == 0
+    assert chunks[0].columns == [
+        "phenotype_id",
+        "chrom",
+        "snp",
+        "pos",
+        "a1",
+        "a0",
+        "tss_distance",
+        "af",
+        "ma_count",
+        "beta",
+        "se",
+        "pvalue",
+        "model_converged",
+    ]
+
+
+def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
+    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    test = SimpleNamespace(model=SimpleNamespace(family=object()))
+    gene_test = SimpleNamespace(name="acat")
+
+    map_cis = getattr(cis_map, "map_cis")
+    chunks = list(map_cis(data, test, gene_test, mode="cis", verbose=False, log=_LoggerStub()))
+
+    assert len(chunks) == 1
+    assert chunks[0].height == 0
+    assert chunks[0].columns == [
+        "phenotype_id",
+        "chrom",
+        "num_var",
+        "snp",
+        "a1",
+        "a0",
+        "pos",
+        "tss_distance",
+        "af",
+        "ma_count",
+        "beta",
+        "se",
+        "pvalue",
+        "pvalue_adj",
+        "adj_method",
+        "model_converged",
+    ]
+
+
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     args = SimpleNamespace(window=500_000, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
     test = SimpleNamespace(name="score")

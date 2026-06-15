@@ -187,6 +187,8 @@ def test_ready_data_state_aligns_to_genoio_source_order_and_uses_sample_pushdown
 
     assert ready.sample_ids == ("iid1", "iid3")
     assert ready.expression.pheno.get_column("iid").to_list() == ["iid1", "iid3"]
+    assert ready.expression.libsize.get_column("iid").to_list() == ["iid1", "iid3"]
+    assert ready.expression.libsize.get_column("libsize").to_list() == [1.0, 3.0]
     np.testing.assert_array_equal(np.asarray(ready.covar), np.array([[10.0], [30.0]], dtype=np.float32))
     assert dataset.block_calls[0][0] == 128
     assert dataset.block_calls[0][1]["samples"] == ["iid1", "iid3"]
