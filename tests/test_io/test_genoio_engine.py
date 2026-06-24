@@ -258,7 +258,7 @@ def test_cis_data_uses_genoio_variant_metadata_without_legacy_columns() -> None:
     assert snp_info.pos == 110
     assert snp_info.a1 == "C"
     assert snp_info.a0 == "A"
-    assert snp_info.tss_distance == 10
+    assert snp_info.tss_distance == 9
 
     output = cis_data.get_cis_info()
     assert output.columns == ["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"]

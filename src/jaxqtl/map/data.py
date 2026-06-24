@@ -84,7 +84,7 @@ class CisData(eqx.Module):
         snp_pos = snp_info["pos"]
         a0 = snp_info["a0"]
         a1 = snp_info["a1"]
-        tss_distance = snp_pos - self.gene_start
+        tss_distance = snp_pos - (self.gene_start + 1)
         return SNPInfo(snp_id, snp_pos, a1, a0, tss_distance, float(af), int(ma_count))
 
     def get_cis_info(self) -> pl.DataFrame:
@@ -95,7 +95,7 @@ class CisData(eqx.Module):
         flag = af <= 0.5
         ma_counts = jnp.where(flag, counts, 2 * n - counts)
         local = self.cis_info.with_columns(
-            (pl.col("pos") - pl.lit(self.gene_start)).alias("tss_distance"),
+            (pl.col("pos") - pl.lit(self.gene_start + 1)).alias("tss_distance"),
             pl.Series("af", np.array(af)),
             pl.Series("ma_count", np.array(ma_counts, dtype=int)),
         ).select(["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"])
