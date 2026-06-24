@@ -17,24 +17,8 @@ from ..log import get_log
 from .data import CisData, ReadyDataState
 
 
-class _ResultsAggregator:
-    """Accumulate per-gene or per-variant result frames into a single DataFrame."""
-
-    def __init__(self):
-        self.frames: list = []
-
-    def __len__(self) -> int:
-        return len(self.frames)
-
-    def add_row(self, row: dict):
-        # cheap 1-row DataFrame, but *only* created when needed
-        self.frames.append(pl.DataFrame([row]))
-
-    def add_df(self, df: pl.DataFrame):
-        self.frames.append(df)
-
-    def to_df(self):
-        return pl.concat(self.frames, how="vertical")
+# Keep Parquet row groups reasonably sized without rebuilding genome-wide result tables.
+_MAP_CIS_BATCH_ROWS = 10_000
 
 
 def map_cis(
@@ -46,8 +30,8 @@ def map_cis(
     verbose: bool = True,
     log: Logger | None = None,
     seed: int = 123,
-) -> pl.DataFrame:
-    r"""Run cis or nominal eQTL mapping per gene and return summary statistics.
+):
+    r"""Yield cis or nominal eQTL mapping results in bounded DataFrame chunks.
 
     **Arguments:**
 
@@ -62,7 +46,7 @@ def map_cis(
 
     **Returns:**
 
-    A `pl.DataFrame` of concatenated cis or nominal results.
+    An iterator of `pl.DataFrame` chunks. Each chunk may contain one or more genes.
     """
     if log is None:
         log = get_log()
@@ -70,33 +54,26 @@ def map_cis(
     if mode not in ["cis", "nominal"]:
         raise ValueError("`mode` must be 'cis' or 'nominal'")
 
-    key = rdm.key(seed)
-    results = _ResultsAggregator()
+    # Only cis mode needs PRNG state: permutations and lead-SNP tie breaking both consume keys.
+    key = rdm.key(seed) if mode == "cis" else None
+    include_nb_alpha = isinstance(snp_test.model.family, NegativeBinomial)
+    pending = []
+    pending_rows = 0
+    yielded = False
     for i, cis_data in enumerate(data.iter_cis(window)):
         gene_name = cis_data.gene_name
         chrom = cis_data.chrom
         lstart = cis_data.start
         rend = cis_data.end
 
-        # skip if no cis SNPs found
-        if cis_data.num_snps == 0:
-            if verbose:
-                log.warning(f"No cis-SNPs found for {gene_name} over region {chrom}:{lstart}-{rend}. Skipping.")
-            continue
-
-        # skip if no variation in y
-        y_var = jnp.var(cis_data.y)
-        if y_var == 0 or jnp.isnan(y_var):
-            if verbose:
-                log.warning(f"No variation found in for {gene_name}. Skipping.")
+        if _should_skip_cis_data(cis_data, verbose, log):
             continue
 
         if verbose:
             log.info(f"Performing cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         if mode == "cis":
-            # cis-mode tests each variant, and then performs either permutations or ACAT to compute a gene-level
-            # calibrated p-value
+            # cis mode tests variants, then computes a gene-level calibrated p-value.
             key, p_key, s_key = rdm.split(key, 3)
             test_result, perm_result = map_cis_single(
                 cis_data.X,
@@ -107,35 +84,120 @@ def map_cis(
                 gene_test,
                 p_key,
             )
-            result = _process_cis_result(cis_data, test_result, perm_result, s_key)
-            results.add_row(result)
+            result = pl.DataFrame([_process_cis_result(cis_data, test_result, perm_result, s_key)])
         else:
-            # nominal mode only performs variant-level testing
             test_result = eqx.filter_jit(snp_test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
             result = _process_nominal_result(cis_data, test_result)
-            results.add_df(result)
+
+        # Keep the output schema model-specific. Non-NB tests carry a constant placeholder alpha.
+        if not include_nb_alpha:
+            result = result.drop("nb_alpha")
+
+        pending.append(result)
+        pending_rows += result.height
 
         if verbose:
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
-        # clear caches every 50 genes
+        # Repeated per-gene shapes can leave stale compiled functions resident after many genes.
         if (i + 1) % 50 == 0:
             if verbose:
                 log.debug("Clearing JAX JIT-caches")
-            jax.clear_caches()  # clear up caches
+            jax.clear_caches()
 
-    if len(results) > 0:
-        result_df = results.to_df()
+        # Flush by row count rather than gene count: cis emits one row per gene, while nominal emits one row per SNP.
+        if pending_rows >= _MAP_CIS_BATCH_ROWS:
+            yielded = True
+            yield pl.concat(pending, how="vertical")
+            pending = []
+            pending_rows = 0
 
-        # if we didn't fit a negative binomial, just drop the alpha column as its const 0
-        # its usually a code-smell to refer to chained attributes (ie something.something.something), but w/e
-        if not isinstance(snp_test.model.family, NegativeBinomial):
-            result_df = result_df.drop("nb_alpha")
-    else:
+    if pending:
+        yielded = True
+        yield pl.concat(pending, how="vertical")
+
+    if not yielded:
         log.warning("All genes were skipped!")
-        result_df = None
+        yield _empty_result_frame(mode, snp_test, gene_test)
 
-    return result_df
+
+def _should_skip_cis_data(cis_data: CisData, verbose: bool, log: Logger) -> bool:
+    gene_name = cis_data.gene_name
+    chrom = cis_data.chrom
+    lstart = cis_data.start
+    rend = cis_data.end
+
+    if cis_data.num_snps == 0:
+        if verbose:
+            log.warning(f"No cis-SNPs found for {gene_name} over region {chrom}:{lstart}-{rend}. Skipping.")
+        return True
+
+    y_var = jnp.var(cis_data.y)
+    if y_var == 0 or jnp.isnan(y_var):
+        if verbose:
+            log.warning(f"No variation found in for {gene_name}. Skipping.")
+        return True
+
+    return False
+
+
+def _empty_result_frame(mode: Literal["cis", "nominal"], snp_test, gene_test) -> pl.DataFrame:
+    columns = _empty_cis_columns(gene_test) if mode == "cis" else _empty_nominal_columns()
+    if not isinstance(snp_test.model.family, NegativeBinomial):
+        columns.pop("nb_alpha")
+
+    return pl.DataFrame(schema=columns)
+
+
+def _empty_nominal_columns() -> dict[str, pl.DataType]:
+    return {
+        "phenotype_id": pl.Utf8,
+        "chrom": pl.Utf8,
+        "snp": pl.Utf8,
+        "pos": pl.Int64,
+        "a1": pl.Utf8,
+        "a0": pl.Utf8,
+        "tss_distance": pl.Int64,
+        "af": pl.Float64,
+        "ma_count": pl.Int64,
+        "beta": pl.Float64,
+        "se": pl.Float64,
+        "pvalue": pl.Float64,
+        "nb_alpha": pl.Float64,
+        "model_converged": pl.Boolean,
+    }
+
+
+def _empty_cis_columns(gene_test) -> dict[str, pl.DataType]:
+    columns = {
+        "phenotype_id": pl.Utf8,
+        "chrom": pl.Utf8,
+        "num_var": pl.Int64,
+        "snp": pl.Utf8,
+        "a1": pl.Utf8,
+        "a0": pl.Utf8,
+        "pos": pl.Int64,
+        "tss_distance": pl.Int64,
+        "af": pl.Float64,
+        "ma_count": pl.Int64,
+        "shape1": pl.Float64,
+        "shape2": pl.Float64,
+        "nc_estimate": pl.Float64,
+        "perm_converged": pl.Boolean,
+        "beta": pl.Float64,
+        "se": pl.Float64,
+        "pvalue": pl.Float64,
+        "pvalue_adj": pl.Float64,
+        "adj_method": pl.Utf8,
+        "nb_alpha": pl.Float64,
+        "model_converged": pl.Boolean,
+    }
+
+    if getattr(gene_test, "name", None) == "acat":
+        for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
+            columns.pop(beta_perm_col)
+
+    return columns
 
 
 @eqx.filter_jit

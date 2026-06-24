@@ -7,7 +7,7 @@ name = "jaxqtl"
 dynamic = ["version"]
 description = "Add a short description here!"
 readme = "README.md"
-requires-python = "~=3.10"
+requires-python = ">=3.11,<4"
 license = "MIT"
 keywords = [
     "jax",
@@ -30,7 +30,6 @@ classifiers = [
     "Topic :: Scientific/Engineering :: Information Analysis",
     "Topic :: Scientific/Engineering :: Mathematics",
     "Programming Language :: Python",
-    "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
@@ -47,6 +46,7 @@ dependencies = [
     "lineax",
     "optimistix",
     "typing_extensions",
+    "genoio>=0.1.0",
     "pandas_plink",
     "polars",
     "qtl",
@@ -95,7 +95,7 @@ run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
 run = "run-coverage --no-cov"
 
 [[tool.hatch.envs.all.matrix]]
-python = ["3.10", "3.11", "3.12", "3.13", "3.14"]
+python = ["3.11", "3.12", "3.13", "3.14"]
 
 [tool.hatch.envs.lint]
 detached = true
@@ -105,8 +105,11 @@ dependencies = [
 ]
 
 [tool.ruff]
-target-version = "py310"
+target-version = "py311"
 line-length = 120
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I001", "UP"]

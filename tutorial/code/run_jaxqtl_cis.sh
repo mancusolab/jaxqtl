@@ -12,8 +12,6 @@ chunk_file="genelist_10"
 # choose test method: score test (recommended) or wald
 test_method="score"
 
-# choose cis or nominal scan
-mode="cis_acat" # nominal, cis
 window=500000 # default extend 500kb on either side, i.e., [start-window, end+window]
 N=982
 
@@ -29,27 +27,28 @@ covar="${data_path}/donor_features.tsv"
 genelist="${data_path}/${chunk_file}"
 
 # choose eQTL model: NB for negative binomial, poisson, gaussian
-model="NB"
+model="nb"
 
 # if using permutation method to calibrate gene-level p value, set number of permutation
 nperm=1000
 
 # prefix for output file
-out="${out_path}/${celltype}_N${N}_chr${chr}_${chunk_file}_jaxqtl_${model}_${mode}"
+out="${out_path}/${celltype}_N${N}_chr${chr}_${chunk_file}_jaxqtl_${model}_cis_acat"
 
 # viztracer \
 # --tracer_entries 10000000 \
 # -o results.json \
 # -- jaxqtl \
 jaxqtl \
- --geno ${geno} \
+ cis \
+ --bfile ${geno} \
  --covar ${covar} \
  --pheno ${pheno} \
  --model ${model} \
- --mode ${mode} \
- --genelist ${genelist} \
- --test-method ${test_method} \
+ --gene-list ${genelist} \
+ --test ${test_method} \
  --nperm ${nperm} \
- --addpc ${num_expression_pc} \
- --standardize \
+ --acat \
+ --set-offset-from-libsize \
+ --normalize-covar \
  --out ${out}

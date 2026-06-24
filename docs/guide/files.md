@@ -6,8 +6,12 @@
 
 ### Genotypes
 
-- PLINK bed/bim/fam triplets via a prefix (`--bfile` / `--geno`)
-- VCF files (`--vcf`)
+- Production CLI genotype support in this implementation is:
+  - `--bfile` (PLINK1 BED/BIM/FAM prefix)
+  - `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
+  - `--vcf` (indexed VCF/BCF)
+  - `--bgen` (BGEN)
+- `--geno` is deprecated and now raises an error; use one of the four supported genotype flags instead.
 
 ### Phenotypes (expression)
 

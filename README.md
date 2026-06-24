@@ -66,20 +66,20 @@ or proportion if including library size offsets.
 
 ## Installation
 
-We recommend first create a conda environment and have `pip` installed.
+Set up a local environment with `uv`.
 ```bash
 # download use http address
 git clone https://github.com/mancusolab/jaxqtl.git
 
-# create conda environment
-conda create -n jaxqtl python=3.10.9
-conda activate jaxqtl
-
+# create and enter a local virtualenv
 cd jaxqtl
-pip install -e .
+uv venv
+source .venv/bin/activate  # or use uv run
 
-# install other required packages
-pip install lineax qtl
+uv pip install -e .
+
+# (optional) install extra docs dependencies
+uv pip install -e .[docs]
 ```
 
 ## Example
@@ -93,7 +93,7 @@ Four inputs are relevant for the examples below: genotypes, phenotypes, covariat
 
 - Phenotypes: BED-like table. The first four columns must encode chromosome, start, end, and phenotype ID. The loader accepts common aliases such as `#Chr` and `Geneid`; `tutorial/input/CD4_NC.N100.bed.gz` is a working example.
 - Covariates: tab-delimited table with exactly one IID-like column such as `iid` or `#iid`. `tutorial/input/donor_features.tsv` matches the current reader.
-- Genotypes: PLINK BED/BIM/FAM triplet passed with `--bfile`. The examples below use `tutorial/input/chr22_N100`.
+- Genotypes: PLINK1 BED/BIM/FAM with `--bfile`, PLINK2 PGEN/PVAR/PSAM with `--pfile`, indexed VCF/BCF with `--vcf`, or BGEN with `--bgen`. The examples below use the PLINK1 prefix `tutorial/input/chr22_N100`.
 - Gene list: optional single-column file with one gene ID per line. `tutorial/input/genelist_10` restricts the run to 10 genes.
 
 __Important note for the phenotype file__:\

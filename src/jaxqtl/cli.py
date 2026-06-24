@@ -1,3 +1,5 @@
+# pattern: Imperative Shell
+
 import argparse as ap
 import logging
 import re
@@ -31,11 +33,10 @@ from .infer import (
 )
 from .io import (
     ExpressionData,
-    PlinkData,
+    load_genotype_dataset,
     read_offset_tsvlike,
     read_plink_style_tsvlike,
     read_single_column_file,
-    VCFData,
 )
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
@@ -77,9 +78,11 @@ def _create_common_subp(subp, name, help):
 
     # geno arguments
     geno_group = common_p.add_mutually_exclusive_group(required=True)
-    geno_group.add_argument("--geno", help="Prefix to PLINK triplet")
-    geno_group.add_argument("--bfile", help="Prefix to PLINK triplet")
-    geno_group.add_argument("--vcf", help="Path to VCF data")
+    geno_group.add_argument("--geno", help="deprecated; use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
+    geno_group.add_argument("--bfile", help="Prefix to PLINK1 BED/BIM/FAM triplets.")
+    geno_group.add_argument("--pfile", help="Prefix to PLINK2 PGEN/PVAR/PSAM triplets.")
+    geno_group.add_argument("--vcf", help="Path to an indexed VCF/BCF genotype file.")
+    geno_group.add_argument("--bgen", help="Path to a BGEN genotype file.")
 
     # pheno / covariate arguments
     common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
@@ -109,7 +112,7 @@ def _create_common_subp(subp, name, help):
         default=False,
         help=(
             "Encode string/categorical covariates using one-hot encoding."
-            " The category corresponding to the first observation will be dropped for co-linearity reasons.",
+            " The category corresponding to the first observation will be dropped for co-linearity reasons."
         ),
     )
     common_p.add_argument(
@@ -162,7 +165,7 @@ def _create_common_subp(subp, name, help):
         default=False,
         help=(
             "Whether to perform SPA correction for p-values computed from score statistics."
-            " Not applicable for `--test wald` and not necessary for `--model gaussian`.",
+            " Not applicable for `--test wald` and not necessary for `--model gaussian`."
         ),
     )
 
@@ -314,25 +317,49 @@ def _cis_scan(args, log):
         return 0
 
     log.info("Starting cis-scan.")
-    df_cis = map_cis(
-        dat,
-        snp_test=test,
-        gene_test=perm_test,
-        mode="cis",
-        window=args.window,
-        verbose=args.verbose,
-        log=log,
-        seed=args.seed,
+    test_str = test.name
+    adj_name = perm_test.name
+    cis_out = f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz"
+    wrote_results = _write_scan_results(
+        map_cis(
+            dat,
+            snp_test=test,
+            gene_test=perm_test,
+            mode="cis",
+            window=args.window,
+            verbose=args.verbose,
+            log=log,
+            seed=args.seed,
+        ),
+        cis_out,
     )
-    if df_cis is not None:
-        log.info("Finished cis-scan. Writing results.")
-        test_str = test.name
-        adj_name = perm_test.name
-        df_cis.write_parquet(f"{args.out}.cis.{test_str}.{adj_name}.parquet.gz", compression="gzip")
+    if wrote_results:
+        log.info(f"Finished cis-scan. Wrote results to {cis_out}.")
     else:
-        log.warning("Finished cis-scan. No results to ouput!")
+        log.warning("Finished cis-scan. No results to output!")
 
     return 0
+
+
+def _write_scan_results(chunks, output_path):
+    writer = None
+    schema = None
+    wrote_results = False
+    try:
+        for df in chunks:
+            table = df.to_arrow()
+            if writer is None:
+                # The first result fixes the Parquet schema; columns differ by scan mode and model family.
+                schema = table.schema
+                writer = pq.ParquetWriter(output_path, schema, compression="gzip")
+            # Cast later chunks to the first schema so row groups stay consistent.
+            writer.write_table(table.cast(schema))
+            wrote_results = True
+    finally:
+        if writer is not None:
+            writer.close()
+
+    return wrote_results
 
 
 def _nominal_scan(args, log):
@@ -342,21 +369,25 @@ def _nominal_scan(args, log):
         return 0
 
     log.info("Starting nominal cis-scan.")
-    df_nominal = map_cis(
-        dat,
-        snp_test=test,
-        gene_test=perm_test,
-        mode="nominal",
-        window=args.window,
-        verbose=args.verbose,
-        log=log,
-        seed=args.seed,
+    test_str = test.name
+    nominal_out = f"{args.out}.nominal.{test_str}.parquet.gz"
+    wrote_results = _write_scan_results(
+        map_cis(
+            dat,
+            snp_test=test,
+            gene_test=perm_test,
+            mode="nominal",
+            window=args.window,
+            verbose=args.verbose,
+            log=log,
+            seed=args.seed,
+        ),
+        nominal_out,
     )
-    if df_nominal is not None:
-        log.info("Finished nominal cis-scan. Writing results.")
-        test_str = test.name
-        # ztd compression?
-        df_nominal.write_parquet(f"{args.out}.nominal.{test_str}.parquet.gz", compression="gzip")
+    if wrote_results:
+        log.info(f"Finished nominal cis-scan. Wrote results to {nominal_out}.")
+    else:
+        log.warning("Finished nominal cis-scan. No results to output!")
 
     return 0
 
@@ -389,6 +420,21 @@ def _trans_scan(args, log):
             stats_writer.write(stats_df.to_arrow().cast(stats_schema_pa))
 
     return 0
+
+
+def _load_genotype_data(args, log):
+    if args.bfile is not None:
+        return load_genotype_dataset("bfile", args.bfile)
+    if args.pfile is not None:
+        return load_genotype_dataset("pfile", args.pfile)
+    if args.vcf is not None:
+        return load_genotype_dataset("vcf", args.vcf)
+    if args.bgen is not None:
+        return load_genotype_dataset("bgen", args.bgen)
+    if args.geno is not None:
+        raise ValueError("`--geno` is deprecated. Use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
+
+    raise ValueError("No valid genotype file specified.")
 
 
 def _common_setup(args, log):
@@ -488,24 +534,7 @@ def _common_setup(args, log):
         inds_to_exclude = None
 
     log.info("Reading genotype, phenotype, and covariate data")
-    if args.bfile is not None:
-        geno_data = PlinkData.load(args.bfile)
-    elif args.vcf is not None:
-        log.error("`--vcf PREFIX` is not fully supported yet.")
-        geno_data = VCFData.load(args.vcf)
-    elif args.geno is not None:
-        geno_data = PlinkData.load(args.geno)
-        log.warn("`--geno PREFIX` is deprecated and will be removed in a future version. Use `--bfile PREFIX` instead")
-    else:
-        # we really shouldn't get here with mutex above
-        raise ValueError("No valid genotype file specified.")
-
-    # so we end up aligning everything at the end of this function, but better to reduce as we go
-    # this should help speed up final data alignment a touch
-    if inds_to_keep:
-        geno_data = geno_data.filter_individuals(inds_to_keep, "keep")
-    elif inds_to_exclude:
-        geno_data = geno_data.filter_individuals(inds_to_exclude, "drop")
+    geno_data = _load_genotype_data(args, log)
 
     if args.gene_list is not None:
         gene_keep_list = read_single_column_file(args.gene_list)
@@ -563,6 +592,8 @@ def _common_setup(args, log):
         expr_data,
         covar,
         offset,
+        keep_samples=inds_to_keep,
+        drop_samples=inds_to_exclude,
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
