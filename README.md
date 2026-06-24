@@ -22,7 +22,7 @@ Efficient count-based models improve power and robustness for large-scale single
 We are currently working on more detailed documentations.
 Feel free to contact me (zzhang39@usc.edu) if you need help on running our tool and further analysis.
 
-[**Installation**](#Installation)
+[**Installation**](#installation)
 | [**Repository Structure**](#repository-structure)
 | [**Example**](#Example)
 | [**Notes**](#notes)
@@ -66,17 +66,38 @@ or proportion if including library size offsets.
 
 ## Installation
 
-Set up a local environment with `uv`.
+Install the latest release from PyPI:
+
 ```bash
-# download use http address
+pip install jaxqtl
+```
+
+With `uv`, either add `jaxqtl` to a project:
+
+```bash
+uv add jaxqtl
+```
+
+or install it into the active virtual environment:
+
+```bash
+uv pip install jaxqtl
+```
+
+After installation, the command line interface is available as `jaxqtl`:
+
+```bash
+jaxqtl --help
+```
+
+### Development install
+
+To work from the repository, set up a local environment with `uv`:
+
+```bash
 git clone https://github.com/mancusolab/jaxqtl.git
-
-# create and enter a local virtualenv
 cd jaxqtl
-uv venv
-source .venv/bin/activate  # or use uv run
 
-# install runtime + dev dependencies
 uv sync --frozen --extra dev
 
 # (optional) install docs dependencies
