@@ -69,8 +69,10 @@ def simulate_pheno(
 
     if offset is None:
         offset = jnp.zeros((n,))
-    elif offset.shape[0] != n:
-        raise ValueError(f"`offset` length {offset.shape[0]} does not match `n`={n}")
+    else:
+        offset = jnp.asarray(offset)
+        if offset.shape[0] != n:
+            raise ValueError(f"`offset` length {offset.shape[0]} does not match `n`={n}")
 
     eta = offset + X @ beta + gamma * g
     mu = family.glink.inverse(eta)

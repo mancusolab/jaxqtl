@@ -28,8 +28,8 @@ repos:
 - repo: local
   hooks:
   - id: ty
-    name: ty (advisory)
-    description: Type-check with ty without blocking commits while the baseline is cleaned up.
-    entry: .venv/bin/ty check --exit-zero src tests scripts
+    name: ty
+    description: Type-check with ty.
+    entry: .venv/bin/ty check src tests scripts
     language: system
     pass_filenames: false

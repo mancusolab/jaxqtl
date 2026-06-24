@@ -131,6 +131,8 @@ class ExponentialFamily(eqx.Module):
 
         Tuple of (mu, link derivative, weights).
         """
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
         mu_k = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
         var_k = jnp.clip(self.variance(mu_k, disp), jnp.finfo(float).eps)
         g_deriv_k = self.glink.deriv(mu_k)
@@ -149,6 +151,7 @@ class ExponentialFamily(eqx.Module):
 
         Initial linear predictor.
         """
+        y = jnp.asarray(y)
         return self.glink((y + y.mean()) / 2)
 
     def update_dispersion(
@@ -229,6 +232,9 @@ class Gaussian(ExponentialFamily):
         self.glink = glink
 
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        mu = jnp.asarray(mu)
         resid = jnp.sum(jnp.square(mu - y))
         df = y.shape[0] - X.shape[1]
         phi = resid / df
@@ -244,6 +250,9 @@ class Gaussian(ExponentialFamily):
         tol: ScalarLike = 1e-3,
         max_iter: int = 1000,
     ) -> Array:
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
         mu = self.glink.inverse(eta)
         rss = jnp.sum(jnp.square(mu - y))
         df = jnp.maximum(y.shape[0] - X.shape[1], 1)
@@ -257,12 +266,17 @@ class Gaussian(ExponentialFamily):
         eta: ArrayLike,
         disp: ScalarLike = 1.0,
     ) -> Array:
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
         mu = self.glink.inverse(eta)
         sigma_sq = self.variance(mu, disp)
         logprob = jnp.sum(jaxstats.norm.logpdf(y, mu, jnp.sqrt(sigma_sq)))
         return -logprob
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = jnp.asarray(mu)
+        disp = jnp.asarray(disp)
         return jnp.ones_like(mu) * disp
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
@@ -278,6 +292,8 @@ class Gaussian(ExponentialFamily):
 
         Samples with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
         mu = self.glink.inverse(eta)
         return mu + rdm.normal(key, shape=mu.shape) * jnp.sqrt(disp)
 
@@ -296,7 +312,7 @@ class Gamma(ExponentialFamily):
 
     glink: AbstractLink
     _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, InverseLink, LogLink]
-    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+    _bounds: ClassVar[tuple[float, float]] = (float(jnp.finfo(float).eps), float("inf"))
 
     def __init__(self, glink: AbstractLink = InverseLink()):
         r"""**Arguments:**
@@ -316,6 +332,9 @@ class Gamma(ExponentialFamily):
         eta: ArrayLike,
         disp: ScalarLike = 0.0,
     ) -> Array:
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
         mu = jnp.clip(self.glink.inverse(eta), self._bounds[0])
         k = jnp.clip(1.0 / disp, self._bounds[0])
         theta = mu * disp  # scale
@@ -325,6 +344,8 @@ class Gamma(ExponentialFamily):
         return -ll
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = jnp.asarray(mu)
+        disp = jnp.asarray(disp)
         return disp * (mu**2)
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
@@ -340,6 +361,7 @@ class Gamma(ExponentialFamily):
 
         Samples with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
         mu = jnp.clip(self.glink.inverse(eta), self._bounds[0])
         disp = jnp.clip(jnp.asarray(disp), self._bounds[0])
         shape = jnp.reciprocal(disp)
@@ -388,13 +410,17 @@ class Binomial(ExponentialFamily):
         this works if we're using sigmoid link
         -jnp.sum(nn.softplus(jnp.where(y, -eta, eta)))
         """
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
         logprob = jnp.sum(jaxstats.bernoulli.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = jnp.asarray(mu)
         return mu * (1 - mu)
 
     def init_eta(self, y: ArrayLike) -> Array:
+        y = jnp.asarray(y)
         return self.glink((y + 0.5) / 2.0)
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
@@ -410,6 +436,7 @@ class Binomial(ExponentialFamily):
 
         Samples with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
         mu = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
         return rdm.bernoulli(key, p=mu, shape=mu.shape).astype(float)
 
@@ -426,7 +453,7 @@ class Poisson(ExponentialFamily):
 
     glink: AbstractLink = LogLink()
     _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, LogLink]  # Sqrt
-    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+    _bounds: ClassVar[tuple[float, float]] = (float(jnp.finfo(float).eps), float("inf"))
 
     def __init__(self, glink: AbstractLink = LogLink()):
         r"""**Arguments:**
@@ -446,10 +473,13 @@ class Poisson(ExponentialFamily):
         eta: ArrayLike,
         disp: ScalarLike = 0.0,
     ) -> Array:
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
         logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
         return -logprob
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = jnp.asarray(mu)
         return mu
 
     def sample(self, key, eta: ArrayLike, disp: ScalarLike = 1.0) -> Array:
@@ -465,6 +495,7 @@ class Poisson(ExponentialFamily):
 
         Samples with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
         lam = self.glink.inverse(eta)
         return rdm.poisson(key, lam=lam)
 
@@ -484,7 +515,7 @@ class NegativeBinomial(ExponentialFamily):
 
     glink: AbstractLink = LogLink()
     _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink, LogLink, NBLink, PowerLink]  # CLogLog
-    _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
+    _bounds: ClassVar[tuple[float, float]] = (float(jnp.finfo(float).eps), float("inf"))
 
     def __init__(self, glink: AbstractLink = LogLink()):
         r"""**Arguments:**
@@ -498,6 +529,9 @@ class NegativeBinomial(ExponentialFamily):
         return jnp.asarray(1.0)
 
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, disp: ScalarLike) -> Array:
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
         log_r = -jnp.log(disp)
         r = jnp.exp(log_r)
         log_mu = jnp.log(self.glink.inverse(eta))
@@ -511,6 +545,8 @@ class NegativeBinomial(ExponentialFamily):
         return -jnp.sum(term1 + term2)
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
+        mu = jnp.asarray(mu)
+        disp = jnp.asarray(disp)
         return mu + disp * (mu**2)
 
     def _log_alpha_score_and_hessian(
@@ -540,6 +576,11 @@ class NegativeBinomial(ExponentialFamily):
         # alpha := disp
         # we optimize over log(alpha) isntead of alpha, but in theory we could compute exact geodesics on NB manifold
         # which could enable Riemannian optimization, but this is fine for now...
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
+        step_size = jnp.asarray(step_size)
         log_alpha = jnp.log(disp)
         score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
         log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-9), jnp.log(1e9))
@@ -556,6 +597,13 @@ class NegativeBinomial(ExponentialFamily):
         tol=1e-3,
         max_iter=1000,
     ) -> Array:
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
+        step_size = jnp.asarray(step_size)
+        tol = jnp.asarray(tol)
+
         def body_fun(val: tuple):
             diff, num_iter, alpha_o = val
             alpha_n = self.update_dispersion(X, y, eta, alpha_o, step_size)
@@ -586,6 +634,7 @@ class NegativeBinomial(ExponentialFamily):
 
         Samples with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
         mu = self.glink.inverse(eta)
         disp = jnp.asarray(disp)
         r = jnp.reciprocal(disp)

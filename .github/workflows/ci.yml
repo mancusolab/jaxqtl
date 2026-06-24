@@ -79,8 +79,8 @@ jobs:
       - name: Python format
         run: uv run ruff format --check src tests scripts
 
-      - name: Type check (advisory)
-        run: uv run ty check --exit-zero src tests scripts
+      - name: Type check
+        run: uv run ty check src tests scripts
 
       - name: Prune uv cache
         if: always()

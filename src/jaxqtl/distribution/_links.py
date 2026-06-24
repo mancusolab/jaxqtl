@@ -6,7 +6,7 @@ import jax.nn as nn
 import jax.numpy as jnp
 import jax.scipy.special as jspec
 
-from jaxtyping import Array, ArrayLike, Scalar
+from jaxtyping import Array, ArrayLike, ScalarLike
 
 
 class AbstractLink(eqx.Module):
@@ -74,9 +74,9 @@ class AbstractLink(eqx.Module):
 class PowerLink(AbstractLink):
     r"""Power link with $g(\mu) = \mu^{p}$ on $\mu > 0$, configurable exponent $p$."""
 
-    power: Scalar = eqx.field(converter=jnp.asarray, default=1.0)
+    power: Array = eqx.field(converter=jnp.asarray, default=1.0)
 
-    def __init__(self, power: Scalar = 1.0):
+    def __init__(self, power: ScalarLike = 1.0):
         r"""Create a power link.
 
         **Arguments:**
@@ -100,6 +100,7 @@ class PowerLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
+        mu = jnp.asarray(mu)
         return jnp.power(mu, self.power)
 
     def inverse(self, eta: ArrayLike) -> Array:
@@ -113,6 +114,7 @@ class PowerLink(AbstractLink):
 
         Mean parameter $\mu$.
         """
+        eta = jnp.asarray(eta)
         return jnp.power(eta, 1.0 / self.power)
 
     def deriv(self, mu: ArrayLike) -> Array:
@@ -156,7 +158,7 @@ class IdentityLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
-        return mu
+        return jnp.asarray(mu)
 
     def inverse(self, eta: ArrayLike) -> Array:
         r"""Compute the inverse link $g^{-1}(\eta) = \eta$.
@@ -169,7 +171,7 @@ class IdentityLink(AbstractLink):
 
         Mean parameter $\mu$.
         """
-        return eta
+        return jnp.asarray(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
         r"""Compute $g'(\mu) = 1$.
@@ -182,6 +184,7 @@ class IdentityLink(AbstractLink):
 
         Array of ones with the same shape as `mu`.
         """
+        mu = jnp.asarray(mu)
         return jnp.ones_like(mu)
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
@@ -195,6 +198,7 @@ class IdentityLink(AbstractLink):
 
         Array of ones with the same shape as `eta`.
         """
+        eta = jnp.asarray(eta)
         return jnp.ones_like(eta)
 
 
@@ -212,6 +216,7 @@ class LogitLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
+        mu = jnp.asarray(mu)
         return jspec.logit(mu)
 
     def inverse(self, eta: ArrayLike) -> Array:
@@ -225,6 +230,7 @@ class LogitLink(AbstractLink):
 
         Mean parameter $\mu$ with support on $(0, 1)$.
         """
+        eta = jnp.asarray(eta)
         return _clipped_expit(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
@@ -268,6 +274,7 @@ class InverseLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
+        mu = jnp.asarray(mu)
         return jnp.reciprocal(mu)
 
     def inverse(self, eta: ArrayLike) -> Array:
@@ -281,6 +288,7 @@ class InverseLink(AbstractLink):
 
         Mean parameter $\mu$.
         """
+        eta = jnp.asarray(eta)
         return jnp.reciprocal(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
@@ -324,6 +332,7 @@ class LogLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
+        mu = jnp.asarray(mu)
         return jnp.log(mu)
 
     def inverse(self, eta: ArrayLike) -> Array:
@@ -337,6 +346,7 @@ class LogLink(AbstractLink):
 
         Mean parameter $\mu$ with support on $\mathbb{R}_+$.
         """
+        eta = jnp.asarray(eta)
         return jnp.exp(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
@@ -372,9 +382,9 @@ class NBLink(AbstractLink):
 
     """
 
-    alpha: Scalar = eqx.field(converter=jnp.asarray, default=1.0)
+    alpha: Array = eqx.field(converter=jnp.asarray, default=1.0)
 
-    def __init__(self, alpha: Scalar = 1.0):
+    def __init__(self, alpha: ScalarLike = 1.0):
         r"""Create a Negative Binomial-specific link parameterized by dispersion.
 
         **Arguments:**
@@ -398,7 +408,7 @@ class NBLink(AbstractLink):
 
         Linear predictor $\eta$.
         """
-        # pre-commit trigger
+        mu = jnp.asarray(mu)
         mu_alpha = mu * self.alpha
         return jnp.log(mu_alpha / (mu_alpha + 1.0))
 
@@ -413,6 +423,7 @@ class NBLink(AbstractLink):
 
         Mean parameter $\mu$ with support on $\mathbb{R}_+$.
         """
+        eta = jnp.asarray(eta)
         return jnp.reciprocal(self.alpha * jnp.expm1(-eta))
 
     def deriv(self, mu: ArrayLike) -> Array:
@@ -442,15 +453,17 @@ class NBLink(AbstractLink):
         return _grad_per_sample(self.inverse, eta)
 
 
-def _clipped_expit(x):
+def _clipped_expit(x: ArrayLike) -> Array:
+    x = jnp.asarray(x)
     finfo = jnp.finfo(jnp.result_type(x))
     return jnp.clip(nn.sigmoid(x), min=finfo.tiny, max=1.0 - finfo.eps)
 
 
-def _grad_per_sample(func, x):
+def _grad_per_sample(func, x: ArrayLike) -> Array:
     """Get gradient for each sample
     x.shape = (n,1), eg. x can be mu or eta
     need to convert x to (n,) in order to apply vmap and grad
     """
+    x = jnp.asarray(x)
     grad_fn = jax.vmap(jax.grad(func), 0)
     return grad_fn(x)

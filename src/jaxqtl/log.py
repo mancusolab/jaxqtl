@@ -10,7 +10,7 @@ def get_log():
     logger = _log
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
-        logger.propagate = 0
+        logger.propagate = False
         console = logging.StreamHandler()
         logger.addHandler(console)
 
@@ -27,7 +27,7 @@ def get_logger(name, path=None):
     logger = logging.getLogger(name)
     if not logger.handlers:
         # Prevent logging from propagating to the root logger
-        logger.propagate = 0
+        logger.propagate = False
         console = logging.StreamHandler()
         logger.addHandler(console)
 

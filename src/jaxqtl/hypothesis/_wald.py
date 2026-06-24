@@ -52,6 +52,10 @@ class WaldTest(AbstractHypothesisTest):
 
         A [`jaxqtl.hypothesis.TestResult`][] containing per-variant Wald-test statistics.
         """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         if self._is_linear:
             result = self.model.fit(X, y, offset, self.std_err)
             y_resid = result.resid

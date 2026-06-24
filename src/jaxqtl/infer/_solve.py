@@ -80,6 +80,9 @@ class QRSolve(AbstractLinearSolve):
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         w_half = jnp.sqrt(weights)
         w_half_r = w_half * r
         w_half_X = X * w_half[:, jnp.newaxis]
@@ -93,6 +96,8 @@ class QRSolve(AbstractLinearSolve):
         X: ArrayLike,
         r: ArrayLike,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         Q, R = jnpla.qr(X)
         return jspla.solve_triangular(R, Q.T @ r)
 
@@ -110,6 +115,9 @@ class CholeskySolve(AbstractLinearSolve):
         r: ArrayLike,
         weights: ArrayLike,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         Xw = X * weights[:, jnp.newaxis]
         XtWX = Xw.T @ X
         XtWy = Xw.T @ r
@@ -122,6 +130,8 @@ class CholeskySolve(AbstractLinearSolve):
         X: ArrayLike,
         r: ArrayLike,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         XtX = X.T @ X
         Xty = X.T @ r
         factor = jspla.cho_factor(XtX, lower=True)
@@ -154,6 +164,9 @@ class CGSolve(AbstractLinearSolve):
 
         Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         w_half = jnp.sqrt(weights)
         w_half_X = X * w_half[:, jnp.newaxis]
 
@@ -182,6 +195,8 @@ class CGSolve(AbstractLinearSolve):
 
         Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         # CG solve using normal equation which solve A^t A x = A^t b
         ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
         operator = lx.MatrixLinearOperator(X)

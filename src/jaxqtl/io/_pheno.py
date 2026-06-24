@@ -121,9 +121,9 @@ class ExpressionData:
         # load using a lazy frame to speed things up in Rust-based parsing before moving into Python space
         name = str(path_or_filename)
         if name.endswith((".bed", ".bed.gz")):
-            phenotype_lf = pl.scan_csv(path_or_filename, separator="\t", has_header=True)
+            phenotype_lf = pl.scan_csv(name, separator="\t", has_header=True)
         elif name.endswith((".parquet", ".parquet.gz")):
-            phenotype_lf = pl.scan_parquet(path_or_filename)
+            phenotype_lf = pl.scan_parquet(name)
         else:
             raise ValueError(f"File {path_or_filename} is unsupported for bed-style phenotype data.")
 
@@ -223,7 +223,7 @@ def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
     count_df: rows are genes, columns are individual ID
     """
     count_df = pl.read_csv(
-        pheno_path,
+        str(pheno_path),
         separator="\t",
         infer_schema_length=10000,
     )

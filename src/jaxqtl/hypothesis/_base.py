@@ -106,6 +106,9 @@ def _residualize_genotypes(
 
     A residualized genotype matrix with shape `(n, m)`.
     """
+    X = jnp.asarray(X)
+    G = jnp.asarray(G)
+    resid_covar = jnp.asarray(resid_covar)
     wgt = jnp.atleast_1d(glm_wt)
     x_W = X * wgt[:, jnp.newaxis]
     return G - multi_dot([X, resid_covar, x_W.T, G])

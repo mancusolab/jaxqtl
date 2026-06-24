@@ -185,22 +185,22 @@ class ReadyDataState:
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
         # convert covariates to jax.numpy at this point
-        covar = covar.select(pl.all().exclude("iid")).to_jax()
+        covar_array = covar.select(pl.all().exclude("iid")).to_jax()
 
         # offset should only have two columns by construction at this point
         if offset is not None:
             assert offset.width == 2, "Offset dataframe should only have two columns at this point."
-            offset = offset[:, 1].to_jax()
+            offset_array = offset[:, 1].to_jax()
         else:
             # otherwise just zero it out
-            offset = jnp.array(0.0)
+            offset_array = jnp.array(0.0)
 
         return ReadyDataState(
             genotype=genotype,
             sample_ids=sample_ids,
             expression=expression,
-            covar=covar,
-            offset=offset,
+            covar=covar_array,
+            offset=offset_array,
             read_options=read_options or GenotypeReadOptions(),
             variant_filter=default_variant_filter(),
         )

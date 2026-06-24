@@ -132,6 +132,10 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
         A 1D array of permutation max statistics.
         """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
 
         def _func(key, x):
             key, p_key = rdm.split(key)
@@ -173,6 +177,9 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
         A tuple `(pvalue, aux)` where `aux` includes fitted Beta parameters and diagnostics.
         """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         z_stats_perm = self._run_permutations(X, G, y, offset, test, key)
 
         n = X.shape[0]

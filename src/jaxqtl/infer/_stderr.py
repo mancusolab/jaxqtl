@@ -80,6 +80,7 @@ class FisherInfoError(AbstractVarianceEstimator):
 
         Coefficient covariance matrix with shape `(p, p)`.
         """
+        X = jnp.asarray(X)
         weight = jnp.atleast_1d(weight)
         infor = (X * weight[:, jnp.newaxis]).T @ X
         asmpt_cov = jnpla.inv(infor)
@@ -120,6 +121,10 @@ class HuberError(AbstractVarianceEstimator):
 
         Coefficient covariance matrix with shape `(p, p)`.
         """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        mu = jnp.asarray(mu)
         variance = family.variance(mu, disp)
         mu_eta = family.glink.inverse_deriv(eta)
 

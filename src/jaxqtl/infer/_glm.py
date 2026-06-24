@@ -92,6 +92,9 @@ class _NBInit(_AbstractInit):
         tol: float = 1e-3,
         step_size: float = 1e-2,
     ):
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         n, p = X.shape
 
         jaxqtl_pois = GeneralizedLinearModel(
@@ -123,6 +126,7 @@ class _SimpleInit(_AbstractInit):
         tol: float = 1e-3,
         step_size: float = 1e-2,
     ):
+        y = jnp.asarray(y)
         init_val = self.family.init_eta(y)
         return init_val, jnp.array(1.0)
 
@@ -191,6 +195,9 @@ class LinearModel(AbstractLinearModel):
 
         A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
         df = jnp.maximum(X.shape[0] - X.shape[1], 1)
 
@@ -270,6 +277,9 @@ class GeneralizedLinearModel(AbstractLinearModel):
 
         A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
         """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
 
         # initialize eta and alpha
         init, disp_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)

@@ -460,6 +460,10 @@ class SpaTest(AbstractHypothesisTest):
 
         A [`jaxqtl.hypothesis.TestResult`][] containing per-variant SPA p-values.
         """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         cgf_state = self.cgf.init(glmstate_cov_only)
 
