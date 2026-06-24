@@ -1,10 +1,13 @@
 # Genotype Data
 
-The production CLI genotype path in this implementation is PLINK1 BED/BIM/FAM through `--bfile`.
-`--geno` is deprecated and now raises an error; use `--bfile` for PLINK1 BED/BIM/FAM prefixes.
-`--vcf` remains unsupported in production CLI behavior for this migration.
+The production CLI supports genotype inputs through:
 
-PLINK2, VCF/BCF, BGEN, dosage, sparse, and haplotype inputs are future extension paths behind later design work.
+- `--bfile` (PLINK1 BED/BIM/FAM prefix)
+- `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
+- `--vcf` (indexed VCF/BCF)
+- `--bgen` (BGEN)
+
+`--geno` is deprecated and raises an error. Use one of the above flags instead.
 
 Genotype adapters provide:
 
@@ -18,7 +21,7 @@ Developer note: the internal engine converts `genoio` dense NumPy hardcall reads
 
     The genotype IO modules depend on optional IO dependencies (e.g. `polars`, `pandas`, PLINK/VCF readers). In
     minimal documentation builds, the API is described here conceptually; consult the source for concrete classes:
-    `src/jaxqtl/io/_geno.py` and `src/jaxqtl/io/_geno_engine.py`.
+    `src/jaxqtl/io/_geno_engine.py` and `src/jaxqtl/io/__init__.py`.
 
 ## Concepts
 

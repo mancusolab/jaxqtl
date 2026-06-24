@@ -6,10 +6,12 @@
 
 ### Genotypes
 
-- Production CLI genotype support in this implementation is PLINK1 BED/BIM/FAM through `--bfile`.
-- `--geno` is deprecated and now raises an error; use `--bfile` for PLINK1 BED/BIM/FAM prefixes.
-- `--vcf` remains unsupported in production CLI behavior for this migration.
-- PLINK2, VCF/BCF, BGEN, dosage, sparse, and haplotype inputs are future extension paths behind later design work.
+- Production CLI genotype support in this implementation is:
+  - `--bfile` (PLINK1 BED/BIM/FAM prefix)
+  - `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
+  - `--vcf` (indexed VCF/BCF)
+  - `--bgen` (BGEN)
+- `--geno` is deprecated and now raises an error; use one of the four supported genotype flags instead.
 
 ### Phenotypes (expression)
 

@@ -66,20 +66,20 @@ or proportion if including library size offsets.
 
 ## Installation
 
-We recommend first create a conda environment and have `pip` installed.
+Set up a local environment with `uv`.
 ```bash
 # download use http address
 git clone https://github.com/mancusolab/jaxqtl.git
 
-# create conda environment
-conda create -n jaxqtl python=3.10.9
-conda activate jaxqtl
-
+# create and enter a local virtualenv
 cd jaxqtl
-pip install -e .
+uv venv
+source .venv/bin/activate  # or use uv run
 
-# install other required packages
-pip install lineax qtl
+uv pip install -e .
+
+# (optional) install extra docs dependencies
+uv pip install -e .[docs]
 ```
 
 ## Example

@@ -23,7 +23,9 @@ For development installs:
 ``` bash
 git clone https://github.com/mancusolab/jaxqtl.git
 cd jaxqtl
-python -m pip install -e .
+uv venv
+source .venv/bin/activate
+uv pip install -e .
 ```
 
 ## Quickstart
@@ -36,11 +38,14 @@ jaxqtl -h
 
 ### Cis mapping
 
-Run cis mapping using a PLINK1 BED/BIM/FAM prefix through `--bfile`, plus phenotype and covariate tables.
-`--geno` is deprecated and now raises an error; use `--bfile` for PLINK1 BED/BIM/FAM prefixes.
-`--vcf` remains unsupported in production CLI behavior for this migration.
+Run cis mapping using one of these genotype inputs, plus phenotype and covariate tables:
 
-PLINK2, VCF/BCF, BGEN, dosage, sparse, and haplotype inputs are future extension paths behind later design work.
+- `--bfile` (PLINK1 BED/BIM/FAM prefix)
+- `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
+- `--vcf` (indexed VCF/BCF)
+- `--bgen` (BGEN)
+
+`--geno` is deprecated and now raises an error.
 
 ```bash
 jaxqtl cis \
