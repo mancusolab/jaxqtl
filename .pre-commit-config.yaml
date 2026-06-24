@@ -18,18 +18,21 @@ repos:
   - id: mixed-line-ending
     args: ['--fix=auto']  # replace 'auto' with 'lf' to enforce Linux/Mac line endings or 'crlf' for Windows
 
-- repo: https://github.com/charliermarsh/ruff-pre-commit
-  rev: 'v0.1.7'
-  hooks:
-    - id: ruff
-      args: [--fix]
-    - id: ruff-format
-
 - repo: local
   hooks:
+  - id: ruff-check
+    name: ruff check
+    entry: uv run ruff check src tests scripts
+    language: system
+    pass_filenames: false
+  - id: ruff-format
+    name: ruff format check
+    entry: uv run ruff format --check src tests scripts
+    language: system
+    pass_filenames: false
   - id: ty
     name: ty
     description: Type-check with ty.
-    entry: .venv/bin/ty check src tests scripts
+    entry: uv run ty check src tests scripts
     language: system
     pass_filenames: false
