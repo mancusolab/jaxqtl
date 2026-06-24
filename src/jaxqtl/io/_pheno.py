@@ -4,7 +4,6 @@ from os import PathLike
 from typing import Literal
 
 import numpy as np
-import pandas as pd
 import polars as pl
 import qtl.io
 import qtl.norm
@@ -219,25 +218,38 @@ class ExpressionData:
         return cls(phenotype_lf, meta_lf, libsize)
 
 
-def bed_transform_y(pheno_path: str, method: str = "log1p"):
+def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
     """Perform transformation on gene expression count matrix
     count_df: rows are genes, columns are individual ID
     """
-    count_df = pd.read_csv(pheno_path, sep="\t", dtype={"#chr": str, "#Chr": str})
-    # filter genes with zero expression (first step of edger_cpm);
-    # Note: do this firstly here to avoid incorrect row numbers
-    count_df = count_df[count_df.iloc[:, 4:].sum(axis=1) > 0]
+    count_df = pl.read_csv(
+        pheno_path,
+        separator="\t",
+        infer_schema_length=10000,
+    )
+    expr_cols = count_df.columns[4:]
+
+    if "#chr" in count_df.columns:
+        count_df = count_df.with_columns(pl.col("#chr").cast(pl.Utf8))
+    if "#Chr" in count_df.columns:
+        count_df = count_df.with_columns(pl.col("#Chr").cast(pl.Utf8))
+
+    # filter genes with zero expression (first step of edger_cpm)
+    # (must be done before transforms to keep row counts correct)
+    count_df = count_df.filter(pl.sum_horizontal(pl.col(expr_cols)) > 0)
 
     if method == "log1p":
-        count_df.iloc[:, 4:] = np.log1p(count_df.iloc[:, 4:])  # prevent log(0)
+        count_df = count_df.with_columns([pl.col(name).log1p().alias(name) for name in expr_cols])
     elif method == "tmm":
         # use edger TMM method to calculate size factor and convert to counts per million
-        tmm_counts_df = qtl.norm.edger_cpm(count_df.iloc[:, 4:], normalized_lib_sizes=True)
-        # # mask is filter by gene
+        tmm_counts = qtl.norm.edger_cpm(
+            count_df.select(pl.col(expr_cols)).to_numpy(),
+            normalized_lib_sizes=True,
+        )
         # inverse normal transformation on each gene (row)
-        norm_df = qtl.norm.inverse_normal_transform(tmm_counts_df)
-        if count_df.shape[0] == norm_df.shape[0]:
-            count_df.iloc[:, 4:] = norm_df
+        norm_df = np.asarray(qtl.norm.inverse_normal_transform(tmm_counts))
+        if norm_df.shape[0] == count_df.height:
+            count_df = count_df.with_columns([pl.Series(name, norm_df[:, i]) for i, name in enumerate(expr_cols)])
         else:
             raise ValueError("row number doesn't match")
     else:
