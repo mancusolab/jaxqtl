@@ -38,19 +38,14 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "importlib-metadata; python_version<\"3.11\"",
-    "jaxlib",
     "jax",
     "jaxtyping",
     "equinox",
     "lineax",
     "optimistix",
-    "typing_extensions",
     "genoio>=0.1.0",
-    "pandas_plink",
     "polars",
     "qtl",
-    "cyvcf2",
     "pyarrow",
 ]
 
@@ -129,7 +124,6 @@ lines-after-imports = 2
 lines-between-types = 1
 known-local-folder = ["src"]
 section-order = ["future", "standard-library", "third-party", "jax-ecosystem", "first-party", "local-folder"]
-extra-standard-library = ["typing_extensions"]
 order-by-type = false
 
 [tool.ruff.lint.isort.sections]
@@ -143,16 +137,6 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix"]
 [tool.ty.environment]
 python-version = "3.11"
 extra-paths = ["scripts"]
-
-[tool.ty.analysis]
-allowed-unresolved-imports = [
-    "hippogriffe",
-    "mkdocstrings",
-    "mkdocstrings_python",
-    "pandas_plink",
-    "polars",
-    "pyarrow",
-]
 
 [tool.ty.src]
 include = ["src", "tests", "scripts"]

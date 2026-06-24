@@ -172,7 +172,7 @@ class CGSolve(AbstractLinearSolve):
 
         # CG solve using normal equation which solve A^t A x = A^t b
         # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
-        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        ncg_solver = lx.Normal(lx.CG(atol=1e-5, rtol=1e-5))
         operator = lx.MatrixLinearOperator(w_half_X)
         b = w_half * r
         sol = lx.linear_solve(operator, b, solver=ncg_solver)
@@ -198,7 +198,7 @@ class CGSolve(AbstractLinearSolve):
         X = jnp.asarray(X)
         r = jnp.asarray(r)
         # CG solve using normal equation which solve A^t A x = A^t b
-        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        ncg_solver = lx.Normal(lx.CG(atol=1e-5, rtol=1e-5))
         operator = lx.MatrixLinearOperator(X)
         sol = lx.linear_solve(operator, r, solver=ncg_solver)
 
