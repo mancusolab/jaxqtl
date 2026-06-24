@@ -1,0 +1,36 @@
+{% extends "_base/class.html.jinja" %}
+{% block heading scoped %}
+  {%- import "_display_aliases.html.jinja" as aliases -%}
+  {% if config.show_symbol_type_heading -%}
+    <code class="doc-symbol doc-symbol-heading doc-symbol-class"></code>
+  {%- endif %}
+  <code class="doc-class-signature">
+    <span class="doc doc-object-name doc-class-name">{{ class_name }}</span>
+    {%- if config.show_bases and class.bases -%}
+      (
+      {%- for base in class.resolved_bases -%}
+        {%- if base.path.startswith("jaxqtl.") -%}
+          {%- set base_label = "jaxqtl." ~ base.name -%}
+          <a href="#{{ base_label }}">{{ base_label }}</a>
+        {%- else -%}
+          {{ aliases.normalize(base.path) }}
+        {%- endif -%}
+        {%- if not loop.last %}, {% endif -%}
+      {%- else -%}
+        {%- for expression in class.bases -%}
+          {{ aliases.normalize(expression) }}
+          {%- if not loop.last %}, {% endif -%}
+        {%- endfor -%}
+      {%- endfor -%}
+      )
+    {%- endif -%}
+  </code>
+  {% if class.relative_filepath and class.lineno -%}
+    <a class="doc-source-link" href="https://github.com/mancusolab/jaxqtl/blob/main/{{ class.relative_filepath }}#L{{ class.lineno }}" target="_blank" rel="noopener">[source]</a>
+  {%- endif %}
+
+{% endblock heading %}
+{% block bases scoped %}
+    {% if config.show_bases and class.bases %}
+    {% endif %}
+{% endblock bases %}

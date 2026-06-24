@@ -327,7 +327,7 @@ def saddlepoint_pvalue(
 
     A scalar p-value (or log p-value) for the observed score statistic.
     """
-    is_discrete = isinstance(cgf, (PoissonCGF, NegativeBinomialCGF))
+    is_discrete = isinstance(cgf, PoissonCGF | NegativeBinomialCGF)
 
     g_resid = jnp.asarray(g_resid, dtype=float)
     score = jnp.asarray(score, dtype=float)

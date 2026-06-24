@@ -5,10 +5,9 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Literal
 
+import genoio
 import numpy as np
 import polars as pl
-
-import genoio
 
 
 GenotypeSource = Literal["bfile", "pfile", "vcf", "bgen"]

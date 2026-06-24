@@ -112,7 +112,7 @@ def read_offset_tsvlike(
 ) -> pl.DataFrame:
     """Read an offset file with an IID column and a single numeric offset column."""
     if column is not None:
-        if not isinstance(column, (str, int)):
+        if not isinstance(column, str | int):
             raise ValueError(f"Column must be of type `str` or `int`, if not `None`. Found {type(column)}.")
         df_offset = read_plink_style_tsvlike(path_or_filename, keep_columns=[column])  # type: ignore
     else:

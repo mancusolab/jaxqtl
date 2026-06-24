@@ -115,7 +115,7 @@ class ExpressionData:
             raise ValueError("Cannot specify both `keep_individuals` and `drop_individuals`")
         if keep_pheno and drop_pheno:
             raise ValueError("Cannot specify both `keep_pheno` and `drop_pheno`")
-        if not isinstance(path_or_filename, (str, PathLike)):
+        if not isinstance(path_or_filename, str | PathLike):
             raise ValueError(f"`path_or_filename` must be `str` or `PathLike`, not {type(path_or_filename)}")
 
         # load using a lazy frame to speed things up in Rust-based parsing before moving into Python space

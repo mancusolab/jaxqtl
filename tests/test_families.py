@@ -90,7 +90,7 @@ def test_family_calc_weight_shapes_and_finiteness(family, disp):
 )
 def test_family_sample_shapes_and_mean_approx(family, disp):
     # Monte Carlo check that E[y] ≈ mu using a fixed PRNG stream.
-    if isinstance(family, (Gaussian,)):
+    if isinstance(family, Gaussian):
         mu = jnp.linspace(-1.0, 1.0, 64)
     elif isinstance(family, Binomial):
         mu = jnp.linspace(0.1, 0.9, 64)

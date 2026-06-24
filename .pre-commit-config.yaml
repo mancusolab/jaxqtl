@@ -25,7 +25,11 @@ repos:
       args: [--fix]
     - id: ruff-format
 
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: 'v1.7.1'  # Use the sha / tag you want to point at
+- repo: local
   hooks:
-  - id: mypy
+  - id: ty
+    name: ty (advisory)
+    description: Type-check with ty without blocking commits while the baseline is cleaned up.
+    entry: .venv/bin/ty check --exit-zero src tests scripts
+    language: system
+    pass_filenames: false

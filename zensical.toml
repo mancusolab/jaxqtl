@@ -1,0 +1,135 @@
+[project]
+strict = true
+site_name = "jaxQTL"
+site_description = "The documentation for the jaxQTL software library."
+site_url = "https://mancusolab.github.io/jaxqtl"
+
+repo_url = "https://github.com/mancusolab/jaxqtl"
+repo_name = "mancusolab/jaxqtl"
+edit_uri = ""
+
+extra_css = ["_static/custom_css.css"]
+
+extra_javascript = [
+    "_static/mathjax.js",
+    "https://polyfill.io/v3/polyfill.min.js?features=es6",
+    "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
+]
+
+nav = [
+    "index.md",
+    { "User Guide" = [
+        "guide/model.md",
+        "guide/cis.md",
+        "guide/trans.md",
+        "guide/util.md",
+        "guide/files.md",
+    ] },
+    { "API" = [
+        { "Statistical Models" = [
+            "api/models/glm.md",
+            "api/models/families.md",
+            "api/models/links.md",
+        ] },
+        { "Inference" = [
+            "api/inference/infer.md",
+            "api/inference/solvers.md",
+            "api/inference/stderr.md",
+        ] },
+        { "Hypothesis Testing" = [
+            "api/hypothesis/variant.md",
+            "api/hypothesis/gene.md",
+        ] },
+        { "Data Management" = [
+            "api/data/geno.md",
+            "api/data/pheno.md",
+            "api/data/other.md",
+        ] },
+        { "molQTL Mapping" = [
+            "api/mapping/cis.md",
+            "api/mapping/trans.md",
+        ] },
+    ] },
+    { "Misc" = [
+        "authors.md",
+        "versions.md",
+        "license.md",
+        "conduct.md",
+        "cite.md",
+    ] },
+]
+
+[project.theme]
+variant = "classic"
+features = [
+    "navigation.sections",
+    "toc.integrate",
+    "header.autohide",
+]
+favicon = "_static/favicon.png"
+custom_dir = "docs/_overrides"
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: light)"
+scheme = "default"
+primary = "indigo"
+accent = "indigo"
+toggle = { icon = "material/brightness-7", name = "Switch to dark mode" }
+
+[[project.theme.palette]]
+media = "(prefers-color-scheme: dark)"
+scheme = "slate"
+primary = "indigo"
+accent = "indigo"
+toggle = { icon = "material/brightness-4", name = "Switch to light mode" }
+
+[project.theme.icon]
+repo = "fontawesome/brands/github"
+logo = "material/chart-bell-curve-cumulative"
+
+[project.markdown_extensions.pymdownx.arithmatex]
+generic = true
+
+[project.markdown_extensions.pymdownx.superfences]
+
+[project.markdown_extensions.pymdownx.details]
+
+[project.markdown_extensions.pymdownx.snippets]
+base_path = "docs"
+
+[project.markdown_extensions.admonition]
+
+[project.markdown_extensions.toc]
+permalink = "¤"
+toc_depth = 4
+
+[project.plugins.search]
+separator = '[\\s\\-,:!=\\[\\]()"/]+|(?!\\b)(?=[A-Z][a-z])|\\.(?!\\d)|&[lg]t;'
+
+[project.plugins.autorefs]
+
+[project.plugins.mkdocstrings]
+custom_templates = "docs/_templates"
+
+[project.plugins.mkdocstrings.handlers.python]
+paths = ["src"]
+load_external_modules = true
+
+[project.plugins.mkdocstrings.handlers.python.options]
+force_inspection = true
+show_source = false
+heading_level = 4
+show_root_heading = true
+show_symbol_type_heading = true
+show_symbol_type_toc = true
+filters = ["!^_", "^__init__$"]
+inherited_members = true
+members_order = "source"
+docstring_style = "google"
+show_if_no_docstring = true
+line_length = 80
+modernize_annotations = false
+annotations_path = "brief"
+show_overloads = false
+show_signature_annotations = true
+separate_signature = false

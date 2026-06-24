@@ -221,7 +221,7 @@ class Gaussian(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (float("-inf"), float("inf"))
 
     def __init__(self, glink: AbstractLink = IdentityLink()):
-        r"""** Arguments: **
+        r"""**Arguments:**
 
         - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.IdentityLink`][]).
@@ -299,7 +299,7 @@ class Gamma(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def __init__(self, glink: AbstractLink = InverseLink()):
-        r"""** Arguments: **
+        r"""**Arguments:**
 
         - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.InverseLink`][]).
@@ -367,7 +367,7 @@ class Binomial(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (0.0, 1.0)
 
     def __init__(self, glink: AbstractLink = LogitLink()):
-        r"""** Arguments: **
+        r"""**Arguments:**
 
         - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogitLink`][]).
@@ -429,7 +429,7 @@ class Poisson(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def __init__(self, glink: AbstractLink = LogLink()):
-        r"""** Arguments: **
+        r"""**Arguments:**
 
         - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogLink`][]).
@@ -487,7 +487,7 @@ class NegativeBinomial(ExponentialFamily):
     _bounds: ClassVar[tuple[float, float]] = (jnp.finfo(float).eps, float("inf"))
 
     def __init__(self, glink: AbstractLink = LogLink()):
-        r"""** Arguments: **
+        r"""**Arguments:**
 
         - `glink`: [`jaxqtl.distribution.AbstractLink`][] mapping $\mu \mapsto \eta$
             (defaults to [`jaxqtl.distribution.LogLink`][]).

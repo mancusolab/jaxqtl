@@ -76,10 +76,15 @@ cd jaxqtl
 uv venv
 source .venv/bin/activate  # or use uv run
 
-uv pip install -e .
+# install runtime + dev dependencies
+uv sync --frozen --extra dev
 
-# (optional) install extra docs dependencies
-uv pip install -e .[docs]
+# (optional) install docs dependencies
+uv sync --frozen --extra docs
+
+# build docs locally
+uv run zensical build --strict --clean
+rm -rf site
 ```
 
 ## Example

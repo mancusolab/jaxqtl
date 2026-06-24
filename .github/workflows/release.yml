@@ -1,0 +1,100 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  distributions:
+    name: Distributions
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v6
+
+      - name: Set up Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.11"
+
+      - name: Set up uv
+        uses: astral-sh/setup-uv@v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Build distributions
+        run: |
+          rm -rf dist
+          uv build
+
+      - name: Install and smoke-test wheel
+        shell: bash
+        run: |
+          uv venv smoke-venv --python 3.11
+          uv pip install --python smoke-venv dist/*.whl
+          smoke-venv/bin/python - <<'PY'
+          import jaxqtl
+          print(f"imported jaxqtl from {jaxqtl.__file__}")
+          PY
+
+      - name: Install and smoke-test sdist
+        shell: bash
+        run: |
+          uv venv sdist-smoke-venv --python 3.11
+          uv pip install --python sdist-smoke-venv dist/*.tar.gz
+          sdist-smoke-venv/bin/python - <<'PY'
+          import jaxqtl
+
+          print(f"imported jaxqtl from {jaxqtl.__file__}")
+          PY
+
+      - name: Upload workflow artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: distributions
+          path: dist/*
+
+      - name: Upload release asset
+        if: github.event_name == 'release'
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/*
+
+      - name: Prune uv cache
+        if: always()
+        run: uv cache prune --ci
+
+  publish:
+    name: Publish to PyPI
+    runs-on: ubuntu-latest
+    needs: [distributions]
+    if: github.event_name == 'release' || github.event_name == 'workflow_dispatch'
+
+    permissions:
+      contents: read
+      id-token: write
+
+    environment:
+      name: pypi
+      url: https://pypi.org/p/jaxqtl
+
+    steps:
+      - name: Download distributions
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Show distributions
+        run: ls -lh dist
+
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
