@@ -52,9 +52,9 @@ class _AbstractInit(eqx.Module):
 
     def __call__(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
+        X: Array,
+        y: Array,
+        offset: Array,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
@@ -64,9 +64,9 @@ class _AbstractInit(eqx.Module):
     @abstractmethod
     def init(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
+        X: Array,
+        y: Array,
+        offset: Array,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
@@ -85,9 +85,9 @@ class _NBInit(_AbstractInit):
 
     def init(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
+        X: Array,
+        y: Array,
+        offset: Array,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
@@ -119,9 +119,9 @@ class _SimpleInit(_AbstractInit):
 
     def init(
         self,
-        X: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
+        X: Array,
+        y: Array,
+        offset: Array,
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,

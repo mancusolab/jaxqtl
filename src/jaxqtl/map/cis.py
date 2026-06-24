@@ -9,7 +9,7 @@ import jax
 import jax.random as rdm
 
 from jax import numpy as jnp
-from jaxtyping import ArrayLike, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray
 
 from ..distribution import NegativeBinomial
 from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
@@ -202,10 +202,10 @@ def _empty_cis_columns(gene_test) -> dict[str, Any]:
 
 @eqx.filter_jit
 def map_cis_single(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    offset: ArrayLike,
+    X: Array,
+    G: Array,
+    y: Array,
+    offset: Array,
     snp_test: AbstractHypothesisTest,
     gene_test: AbstractAggregateTest,
     key: PRNGKeyArray,
@@ -236,7 +236,7 @@ def map_cis_single(
 def _process_cis_result(
     cis_data: CisData,
     test_result: TestResult,
-    perm_result: tuple[ArrayLike, Any],
+    perm_result: tuple[Array, Any],
     key: PRNGKeyArray,
 ):
     """Process the results for a gene under the cis-scan and format for output"""

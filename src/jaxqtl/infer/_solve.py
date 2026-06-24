@@ -6,7 +6,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 import lineax as lx
 
-from jaxtyping import Array, ArrayLike
+from jaxtyping import Array
 
 
 class AbstractLinearSolve(eqx.Module):
@@ -24,9 +24,9 @@ class AbstractLinearSolve(eqx.Module):
     @abstractmethod
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         r"""Solve a weighted least-squares problem.
 
@@ -48,8 +48,8 @@ class AbstractLinearSolve(eqx.Module):
     @abstractmethod
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         r"""Solve an unweighted least-squares problem.
 
@@ -76,9 +76,9 @@ class QRSolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         X = jnp.asarray(X)
         r = jnp.asarray(r)
@@ -93,8 +93,8 @@ class QRSolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         X = jnp.asarray(X)
         r = jnp.asarray(r)
@@ -111,9 +111,9 @@ class CholeskySolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         X = jnp.asarray(X)
         r = jnp.asarray(r)
@@ -127,8 +127,8 @@ class CholeskySolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         X = jnp.asarray(X)
         r = jnp.asarray(r)
@@ -148,9 +148,9 @@ class CGSolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         r"""Solve weighted least squares using a normal-equation CG method.
 
@@ -181,8 +181,8 @@ class CGSolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         r"""Solve unweighted least squares using a normal-equation CG method.
 

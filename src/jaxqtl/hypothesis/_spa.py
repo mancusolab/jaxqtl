@@ -300,7 +300,7 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 @eqx.filter_jit
 def saddlepoint_pvalue(
     score: ScalarLike,
-    g_resid: ArrayLike,
+    g_resid: Array,
     cgf: CumulantGeneratingFunction[CGFStateT],
     state: CGFStateT,
     scale: ScalarLike = 1.0,

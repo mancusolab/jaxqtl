@@ -7,7 +7,7 @@ from jax import grad, lax
 from jax.numpy import linalg as jnla
 from jax.scipy import stats as jaxstats
 from jax.scipy.special import polygamma
-from jaxtyping import Array, ArrayLike, ScalarLike
+from jaxtyping import Array, ScalarLike
 
 from ..distribution import ExponentialFamily
 from ._solve import AbstractLinearSolve
@@ -27,10 +27,10 @@ class SolveResult(NamedTuple):
 
 @eqx.filter_jit
 def irls(
-    X: ArrayLike,
-    y: ArrayLike,
-    offset: ArrayLike,
-    eta: ArrayLike,
+    X: Array,
+    y: Array,
+    offset: Array,
+    eta: Array,
     family: ExponentialFamily,
     solver: AbstractLinearSolve,
     max_iter: int = 1000,
@@ -96,8 +96,8 @@ def irls(
 
 @eqx.filter_jit
 def lstsq(
-    X: ArrayLike,
-    y: ArrayLike,
+    X: Array,
+    y: Array,
     solver: AbstractLinearSolve,
 ) -> SolveResult:
     r"""Solve an unweighted least-squares problem.
@@ -138,8 +138,8 @@ class BetaParams(NamedTuple):
 
 @eqx.filter_jit
 def infer_beta_params(
-    p_perm: ArrayLike,
-    init: ArrayLike,
+    p_perm: Array,
+    init: Array,
     step_size=0.1,
     tol=1e-3,
     max_iter=500,

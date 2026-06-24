@@ -128,7 +128,7 @@ class PowerLink(AbstractLink):
 
         Derivative $g'(\mu)$ evaluated at $\mu$.
         """
-        return _grad_per_sample(self, mu)
+        return _grad_per_sample(self, jnp.asarray(mu))
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         r"""Compute $g^{-1}'(\eta)$ for the power link.
@@ -141,7 +141,7 @@ class PowerLink(AbstractLink):
 
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
-        return _grad_per_sample(self.inverse, eta)
+        return _grad_per_sample(self.inverse, jnp.asarray(eta))
 
 
 class IdentityLink(AbstractLink):
@@ -244,7 +244,7 @@ class LogitLink(AbstractLink):
 
         Derivative $g'(\mu)$ evaluated at $\mu$.
         """
-        return _grad_per_sample(self, mu)
+        return _grad_per_sample(self, jnp.asarray(mu))
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         r"""Compute $g^{-1}'(\eta)$ for the logit link.
@@ -257,7 +257,7 @@ class LogitLink(AbstractLink):
 
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
-        return _grad_per_sample(self.inverse, eta)
+        return _grad_per_sample(self.inverse, jnp.asarray(eta))
 
 
 class InverseLink(AbstractLink):
@@ -302,7 +302,7 @@ class InverseLink(AbstractLink):
 
         Derivative $g'(\mu)$ evaluated at $\mu$.
         """
-        return _grad_per_sample(self, mu)
+        return _grad_per_sample(self, jnp.asarray(mu))
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         r"""Compute $g^{-1}'(\eta)$ for the inverse link.
@@ -315,7 +315,7 @@ class InverseLink(AbstractLink):
 
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
-        return _grad_per_sample(self.inverse, eta)
+        return _grad_per_sample(self.inverse, jnp.asarray(eta))
 
 
 class LogLink(AbstractLink):
@@ -360,7 +360,7 @@ class LogLink(AbstractLink):
 
         Derivative $g'(\mu)$ evaluated at $\mu$.
         """
-        return _grad_per_sample(self, mu)
+        return _grad_per_sample(self, jnp.asarray(mu))
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         r"""Compute $g^{-1}'(\eta)$ for the log link.
@@ -373,7 +373,7 @@ class LogLink(AbstractLink):
 
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
-        return _grad_per_sample(self.inverse, eta)
+        return _grad_per_sample(self.inverse, jnp.asarray(eta))
 
 
 class NBLink(AbstractLink):
@@ -437,7 +437,7 @@ class NBLink(AbstractLink):
 
         Derivative $g'(\mu)$ evaluated at $\mu$.
         """
-        return _grad_per_sample(self, mu)
+        return _grad_per_sample(self, jnp.asarray(mu))
 
     def inverse_deriv(self, eta: ArrayLike) -> Array:
         r"""Compute $g^{-1}'(\eta)$ for this Negative Binomial-specific link.
@@ -450,16 +450,16 @@ class NBLink(AbstractLink):
 
         Derivative $g^{-1}'(\eta)$ evaluated at $\eta$.
         """
-        return _grad_per_sample(self.inverse, eta)
+        return _grad_per_sample(self.inverse, jnp.asarray(eta))
 
 
-def _clipped_expit(x: ArrayLike) -> Array:
+def _clipped_expit(x: Array) -> Array:
     x = jnp.asarray(x)
     finfo = jnp.finfo(jnp.result_type(x))
     return jnp.clip(nn.sigmoid(x), min=finfo.tiny, max=1.0 - finfo.eps)
 
 
-def _grad_per_sample(func, x: ArrayLike) -> Array:
+def _grad_per_sample(func, x: Array) -> Array:
     """Get gradient for each sample
     x.shape = (n,1), eg. x can be mu or eta
     need to convert x to (n,) in order to apply vmap and grad

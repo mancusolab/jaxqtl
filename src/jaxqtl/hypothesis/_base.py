@@ -86,10 +86,10 @@ class AbstractHypothesisTest(eqx.Module):
 
 
 def _residualize_genotypes(
-    X: ArrayLike,
-    G: ArrayLike,
-    resid_covar: ArrayLike,
-    glm_wt: ArrayLike,
+    X: Array,
+    G: Array,
+    resid_covar: Array,
+    glm_wt: Array,
 ) -> Array:
     r"""Residualize `G` against columns of `X` under a weighted inner product.
 
@@ -115,9 +115,9 @@ def _residualize_genotypes(
 
 
 def _score_from_residuals(
-    y_resid: ArrayLike,
-    g_resid: ArrayLike,
-    glm_wt: ArrayLike,
+    y_resid: Array,
+    g_resid: Array,
+    glm_wt: Array,
 ) -> tuple[Array, Array, Array, Array, Array]:
     r"""Compute score statistics from residualized outcome and genotypes.
 

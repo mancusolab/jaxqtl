@@ -549,9 +549,7 @@ class NegativeBinomial(ExponentialFamily):
         disp = jnp.asarray(disp)
         return mu + disp * (mu**2)
 
-    def _log_alpha_score_and_hessian(
-        self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, log_alpha: ScalarLike
-    ) -> tuple[Array, Array]:
+    def _log_alpha_score_and_hessian(self, X: Array, y: Array, eta: Array, log_alpha: Array) -> tuple[Array, Array]:
         """
         internally take exponential such as to take derivative wrt 1/alpha
         """
