@@ -38,19 +38,14 @@ classifiers = [
     "Programming Language :: Python :: Implementation :: PyPy",
 ]
 dependencies = [
-    "importlib-metadata; python_version<\"3.11\"",
-    "jaxlib",
     "jax",
     "jaxtyping",
     "equinox",
     "lineax",
     "optimistix",
-    "typing_extensions",
     "genoio>=0.1.0",
-    "pandas_plink",
     "polars",
     "qtl",
-    "cyvcf2",
     "pyarrow",
 ]
 
@@ -63,14 +58,18 @@ Issues = "https://github.com/mancusolab/jaxqtl/issues"
 Source = "https://github.com/mancusolab/jaxqtl"
 
 [project.optional-dependencies]
+dev = [
+  "coverage[toml]",
+  "pytest",
+  "pytest-cov",
+  "statsmodels",
+  "ruff>=0.0.243",
+  "ty>=0.0.44",
+]
 docs = [
-  "hippogriffe==0.2.0",
-  "mkdocs==1.6.1",
-  "mkdocs-include-exclude-files==0.1.0",
-  "mkdocs-ipynb==0.1.0",
-  "mkdocs-material==9.6.7",
-  "mkdocstrings[python]==0.28.3",
-  "pymdown-extensions==10.14.3"
+  "mkdocstrings-python>=1.12",
+  "mkdocstrings>=0.29",
+  "zensical>=0.0.37",
 ]
 
 [tool.hatch.version]
@@ -91,8 +90,8 @@ dependencies = [
 ]
 
 [tool.hatch.envs.test.scripts]
-run-coverage = "pytest --cov-config=pyproject.toml --cov=pkg --cov=tests"
-run = "run-coverage --no-cov"
+run-coverage = "pytest -p no:capture --cov-config=pyproject.toml --cov=jaxqtl --cov=tests"
+run = "pytest -p no:capture"
 
 [[tool.hatch.envs.all.matrix]]
 python = ["3.11", "3.12", "3.13", "3.14"]
@@ -100,9 +99,12 @@ python = ["3.11", "3.12", "3.13", "3.14"]
 [tool.hatch.envs.lint]
 detached = true
 dependencies = [
-    "mypy>=1.0.0",
+    "ty>=0.0.44",
     "ruff>=0.0.243",
 ]
+
+[tool.hatch.envs.lint.scripts]
+typecheck = "ty check src tests scripts"
 
 [tool.ruff]
 target-version = "py311"
@@ -113,7 +115,7 @@ testpaths = ["tests"]
 
 [tool.ruff.lint]
 select = ["E", "F", "I001", "UP"]
-ignore = ["E402", "E721", "E731", "E741", "F722", "UP038", "TID252"]
+ignore = ["E402", "E721", "E731", "E741", "F722", "TID252"]
 
 [tool.ruff.lint.isort]
 known-first-party = ["jaxqtl"]
@@ -122,7 +124,6 @@ lines-after-imports = 2
 lines-between-types = 1
 known-local-folder = ["src"]
 section-order = ["future", "standard-library", "third-party", "jax-ecosystem", "first-party", "local-folder"]
-extra-standard-library = ["typing_extensions"]
 order-by-type = false
 
 [tool.ruff.lint.isort.sections]
@@ -133,9 +134,12 @@ jax-ecosystem = ["equinox", "jax", "jaxtyping", "lineax", "optimistix"]
 # Tests can use magic values, assertions, and relative imports
 "tests/**/*" = ["PLR2004", "S101", "TID252"]
 
-[tool.mypy]
-allow_redefinition = true
-exclude = ["docs/"]
+[tool.ty.environment]
+python-version = "3.11"
+extra-paths = ["scripts"]
+
+[tool.ty.src]
+include = ["src", "tests", "scripts"]
 
 [tool.coverage.run]
 source_pkgs = ["jaxqtl", "tests"]

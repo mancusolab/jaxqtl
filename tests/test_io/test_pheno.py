@@ -33,10 +33,7 @@ def test_bed_transform_y_log1p_filters_zero_rows_and_transforms_columns(tmp_path
 def test_bed_transform_y_tmm_applies_external_transforms(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     path = _write_bed(
         tmp_path,
-        "#Chr\tstart\tend\tgene\ts1\ts2\n"
-        "X\t10\t20\tgene1\t1\t2\n"
-        "X\t30\t40\tgene2\t0\t0\n"
-        "X\t50\t60\tgene3\t3\t4\n",
+        "#Chr\tstart\tend\tgene\ts1\ts2\nX\t10\t20\tgene1\t1\t2\nX\t30\t40\tgene2\t0\t0\nX\t50\t60\tgene3\t3\t4\n",
     )
     captured: dict[str, np.ndarray] = {}
 
@@ -64,7 +61,7 @@ def test_bed_transform_y_tmm_applies_external_transforms(monkeypatch: pytest.Mon
 def test_bed_transform_y_unsupported_mode_raises_error(tmp_path: Path) -> None:
     path = _write_bed(
         tmp_path,
-        "#chr\tstart\tend\tgene\ts1\n" "1\t100\t200\tgene1\t1\n",
+        "#chr\tstart\tend\tgene\ts1\n1\t100\t200\tgene1\t1\n",
     )
 
     with pytest.raises(ValueError, match="Unsupported mode"):

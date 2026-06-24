@@ -2,12 +2,16 @@ import jax.numpy as jnp
 
 from jax import lax
 from jax.scipy.special import betainc, gammaincc
-from jaxtyping import ArrayLike
+from jaxtyping import Array, ArrayLike
 
 
-def t_cdf(value: ArrayLike, df: float, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0):
+def t_cdf(value: ArrayLike, df: ArrayLike, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0) -> Array:
     # Ref: https://en.wikipedia.org/wiki/Student's_t-distribution#Related_distributions
     # X^2 ~ F(1, df) -> df / (df + X^2) ~ Beta(df/2, 0.5)
+    value = jnp.asarray(value)
+    df = jnp.asarray(df)
+    loc = jnp.asarray(loc)
+    scale = jnp.asarray(scale)
     scaled = (value - loc) / scale
     scaled_squared = scaled * scaled
     beta_value = df / (df + scaled_squared)

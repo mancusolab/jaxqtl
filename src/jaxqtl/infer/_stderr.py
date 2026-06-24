@@ -4,7 +4,7 @@ import equinox as eqx
 import jax.numpy as jnp
 
 from jax.numpy import linalg as jnpla
-from jaxtyping import Array, ArrayLike, ScalarLike
+from jaxtyping import Array, ScalarLike
 
 from ..distribution._expfam import ExponentialFamily
 
@@ -21,11 +21,11 @@ class AbstractVarianceEstimator(eqx.Module):
     def __call__(
         self,
         family: ExponentialFamily,
-        X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        mu: ArrayLike,
-        weight: ArrayLike,
+        X: Array,
+        y: Array,
+        eta: Array,
+        mu: Array,
+        weight: Array,
         disp: ScalarLike = 1.0,
     ) -> Array:
         r"""Estimate the coefficient covariance matrix for a fitted GLM.
@@ -57,11 +57,11 @@ class FisherInfoError(AbstractVarianceEstimator):
     def __call__(
         self,
         family: ExponentialFamily,
-        X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        mu: ArrayLike,
-        weight: ArrayLike,
+        X: Array,
+        y: Array,
+        eta: Array,
+        mu: Array,
+        weight: Array,
         disp: ScalarLike = 1.0,
     ) -> Array:
         r"""Compute the Fisher information covariance estimate.
@@ -80,6 +80,7 @@ class FisherInfoError(AbstractVarianceEstimator):
 
         Coefficient covariance matrix with shape `(p, p)`.
         """
+        X = jnp.asarray(X)
         weight = jnp.atleast_1d(weight)
         infor = (X * weight[:, jnp.newaxis]).T @ X
         asmpt_cov = jnpla.inv(infor)
@@ -97,11 +98,11 @@ class HuberError(AbstractVarianceEstimator):
     def __call__(
         self,
         family: ExponentialFamily,
-        X: ArrayLike,
-        y: ArrayLike,
-        eta: ArrayLike,
-        mu: ArrayLike,
-        weight: ArrayLike,
+        X: Array,
+        y: Array,
+        eta: Array,
+        mu: Array,
+        weight: Array,
         disp: ScalarLike = 1.0,
     ) -> Array:
         r"""Compute the robust Huber-White covariance estimate.
@@ -120,6 +121,10 @@ class HuberError(AbstractVarianceEstimator):
 
         Coefficient covariance matrix with shape `(p, p)`.
         """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        eta = jnp.asarray(eta)
+        mu = jnp.asarray(mu)
         variance = family.variance(mu, disp)
         mu_eta = family.glink.inverse_deriv(eta)
 

@@ -6,7 +6,7 @@ import jax.numpy.linalg as jnpla
 import jax.scipy.linalg as jspla
 import lineax as lx
 
-from jaxtyping import Array, ArrayLike
+from jaxtyping import Array
 
 
 class AbstractLinearSolve(eqx.Module):
@@ -24,9 +24,9 @@ class AbstractLinearSolve(eqx.Module):
     @abstractmethod
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         r"""Solve a weighted least-squares problem.
 
@@ -48,8 +48,8 @@ class AbstractLinearSolve(eqx.Module):
     @abstractmethod
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         r"""Solve an unweighted least-squares problem.
 
@@ -76,10 +76,13 @@ class QRSolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         w_half = jnp.sqrt(weights)
         w_half_r = w_half * r
         w_half_X = X * w_half[:, jnp.newaxis]
@@ -90,9 +93,11 @@ class QRSolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         Q, R = jnpla.qr(X)
         return jspla.solve_triangular(R, Q.T @ r)
 
@@ -106,10 +111,13 @@ class CholeskySolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         Xw = X * weights[:, jnp.newaxis]
         XtWX = Xw.T @ X
         XtWy = Xw.T @ r
@@ -119,9 +127,11 @@ class CholeskySolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         XtX = X.T @ X
         Xty = X.T @ r
         factor = jspla.cho_factor(XtX, lower=True)
@@ -138,9 +148,9 @@ class CGSolve(AbstractLinearSolve):
 
     def wgt_lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
-        weights: ArrayLike,
+        X: Array,
+        r: Array,
+        weights: Array,
     ) -> Array:
         r"""Solve weighted least squares using a normal-equation CG method.
 
@@ -154,12 +164,15 @@ class CGSolve(AbstractLinearSolve):
 
         Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
+        weights = jnp.asarray(weights)
         w_half = jnp.sqrt(weights)
         w_half_X = X * w_half[:, jnp.newaxis]
 
         # CG solve using normal equation which solve A^t A x = A^t b
         # Here we solve (XtWX) beta = XtW b, so A = X * sqrt(W), b = sqrt(W) * r
-        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        ncg_solver = lx.Normal(lx.CG(atol=1e-5, rtol=1e-5))
         operator = lx.MatrixLinearOperator(w_half_X)
         b = w_half * r
         sol = lx.linear_solve(operator, b, solver=ncg_solver)
@@ -168,8 +181,8 @@ class CGSolve(AbstractLinearSolve):
 
     def lstsq(
         self,
-        X: ArrayLike,
-        r: ArrayLike,
+        X: Array,
+        r: Array,
     ) -> Array:
         r"""Solve unweighted least squares using a normal-equation CG method.
 
@@ -182,8 +195,10 @@ class CGSolve(AbstractLinearSolve):
 
         Coefficient vector $\hat\beta$ with shape `(p,)`.
         """
+        X = jnp.asarray(X)
+        r = jnp.asarray(r)
         # CG solve using normal equation which solve A^t A x = A^t b
-        ncg_solver = lx.NormalCG(atol=1e-5, rtol=1e-5)
+        ncg_solver = lx.Normal(lx.CG(atol=1e-5, rtol=1e-5))
         operator = lx.MatrixLinearOperator(X)
         sol = lx.linear_solve(operator, r, solver=ncg_solver)
 

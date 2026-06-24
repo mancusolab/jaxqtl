@@ -7,7 +7,7 @@ from jax import grad, lax
 from jax.numpy import linalg as jnla
 from jax.scipy import stats as jaxstats
 from jax.scipy.special import polygamma
-from jaxtyping import Array, ArrayLike, ScalarLike
+from jaxtyping import Array, ScalarLike
 
 from ..distribution import ExponentialFamily
 from ._solve import AbstractLinearSolve
@@ -27,10 +27,10 @@ class SolveResult(NamedTuple):
 
 @eqx.filter_jit
 def irls(
-    X: ArrayLike,
-    y: ArrayLike,
-    offset: ArrayLike,
-    eta: ArrayLike,
+    X: Array,
+    y: Array,
+    offset: Array,
+    eta: Array,
     family: ExponentialFamily,
     solver: AbstractLinearSolve,
     max_iter: int = 1000,
@@ -57,6 +57,11 @@ def irls(
 
     A [`jaxqtl.infer.SolveResult`][] containing fitted coefficients, dispersion, and convergence metadata.
     """
+    X = jnp.asarray(X)
+    y = jnp.asarray(y)
+    offset = jnp.asarray(offset)
+    eta = jnp.asarray(eta)
+    disp_init = jnp.asarray(disp_init)
     n, p = X.shape
 
     def body_fun(val: tuple):
@@ -91,8 +96,8 @@ def irls(
 
 @eqx.filter_jit
 def lstsq(
-    X: ArrayLike,
-    y: ArrayLike,
+    X: Array,
+    y: Array,
     solver: AbstractLinearSolve,
 ) -> SolveResult:
     r"""Solve an unweighted least-squares problem.
@@ -109,6 +114,8 @@ def lstsq(
 
     A [`jaxqtl.infer.SolveResult`][] with `disp` set to 1 and `num_iters` set to 1.
     """
+    X = jnp.asarray(X)
+    y = jnp.asarray(y)
     beta = solver.lstsq(X, y)
     alpha = jnp.array(1)
     converged = jnp.array(True)
@@ -124,15 +131,15 @@ class BetaParams(NamedTuple):
     indicator.
     """
 
-    k: float
-    n: float
-    converged: bool
+    k: Array
+    n: Array
+    converged: Array
 
 
 @eqx.filter_jit
 def infer_beta_params(
-    p_perm: ArrayLike,
-    init: ArrayLike,
+    p_perm: Array,
+    init: Array,
     step_size=0.1,
     tol=1e-3,
     max_iter=500,
@@ -156,10 +163,15 @@ def infer_beta_params(
     A [`jaxqtl.infer.BetaParams`][] with fitted parameters and a convergence indicator.
     """
 
-    def loglik(params, p: ArrayLike) -> Array:
+    p_perm = jnp.asarray(p_perm)
+    init = jnp.asarray(init)
+    step_size = jnp.asarray(step_size)
+    tol = jnp.asarray(tol)
+
+    def loglik(params: Array, p: Array) -> Array:
         return jnp.sum(jaxstats.beta.logpdf(p, params[0], params[1]))
 
-    def info_and_christoffel(params: ArrayLike, p: ArrayLike) -> tuple[Array, Array]:
+    def info_and_christoffel(params: Array, p: Array) -> tuple[Array, Array]:
         # Compute the Fisher information matrix for Beta(k, n) and the Christoffel symbols of the second kind.
         # These are used to take a second-order natural-gradient step while keeping parameters on R_+^2.
         k, n = params

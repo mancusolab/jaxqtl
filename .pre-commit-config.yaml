@@ -18,14 +18,21 @@ repos:
   - id: mixed-line-ending
     args: ['--fix=auto']  # replace 'auto' with 'lf' to enforce Linux/Mac line endings or 'crlf' for Windows
 
-- repo: https://github.com/charliermarsh/ruff-pre-commit
-  rev: 'v0.1.7'
+- repo: local
   hooks:
-    - id: ruff
-      args: [--fix]
-    - id: ruff-format
-
-- repo: https://github.com/pre-commit/mirrors-mypy
-  rev: 'v1.7.1'  # Use the sha / tag you want to point at
-  hooks:
-  - id: mypy
+  - id: ruff-check
+    name: ruff check
+    entry: uv run ruff check src tests scripts
+    language: system
+    pass_filenames: false
+  - id: ruff-format
+    name: ruff format check
+    entry: uv run ruff format --check src tests scripts
+    language: system
+    pass_filenames: false
+  - id: ty
+    name: ty
+    description: Type-check with ty.
+    entry: uv run ty check src tests scripts
+    language: system
+    pass_filenames: false

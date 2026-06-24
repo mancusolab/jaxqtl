@@ -300,7 +300,7 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 @eqx.filter_jit
 def saddlepoint_pvalue(
     score: ScalarLike,
-    g_resid: ArrayLike,
+    g_resid: Array,
     cgf: CumulantGeneratingFunction[CGFStateT],
     state: CGFStateT,
     scale: ScalarLike = 1.0,
@@ -327,7 +327,7 @@ def saddlepoint_pvalue(
 
     A scalar p-value (or log p-value) for the observed score statistic.
     """
-    is_discrete = isinstance(cgf, (PoissonCGF, NegativeBinomialCGF))
+    is_discrete = isinstance(cgf, PoissonCGF | NegativeBinomialCGF)
 
     g_resid = jnp.asarray(g_resid, dtype=float)
     score = jnp.asarray(score, dtype=float)
@@ -460,6 +460,10 @@ class SpaTest(AbstractHypothesisTest):
 
         A [`jaxqtl.hypothesis.TestResult`][] containing per-variant SPA p-values.
         """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         cgf_state = self.cgf.init(glmstate_cov_only)
 

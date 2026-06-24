@@ -9,7 +9,7 @@ import jax
 import jax.random as rdm
 
 from jax import numpy as jnp
-from jaxtyping import ArrayLike, PRNGKeyArray
+from jaxtyping import Array, PRNGKeyArray
 
 from ..distribution import NegativeBinomial
 from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
@@ -55,7 +55,7 @@ def map_cis(
         raise ValueError("`mode` must be 'cis' or 'nominal'")
 
     # Only cis mode needs PRNG state: permutations and lead-SNP tie breaking both consume keys.
-    key = rdm.key(seed) if mode == "cis" else None
+    key = rdm.key(seed)
     include_nb_alpha = isinstance(snp_test.model.family, NegativeBinomial)
     pending = []
     pending_rows = 0
@@ -149,7 +149,7 @@ def _empty_result_frame(mode: Literal["cis", "nominal"], snp_test, gene_test) ->
     return pl.DataFrame(schema=columns)
 
 
-def _empty_nominal_columns() -> dict[str, pl.DataType]:
+def _empty_nominal_columns() -> dict[str, Any]:
     return {
         "phenotype_id": pl.Utf8,
         "chrom": pl.Utf8,
@@ -168,7 +168,7 @@ def _empty_nominal_columns() -> dict[str, pl.DataType]:
     }
 
 
-def _empty_cis_columns(gene_test) -> dict[str, pl.DataType]:
+def _empty_cis_columns(gene_test) -> dict[str, Any]:
     columns = {
         "phenotype_id": pl.Utf8,
         "chrom": pl.Utf8,
@@ -202,10 +202,10 @@ def _empty_cis_columns(gene_test) -> dict[str, pl.DataType]:
 
 @eqx.filter_jit
 def map_cis_single(
-    X: ArrayLike,
-    G: ArrayLike,
-    y: ArrayLike,
-    offset: ArrayLike,
+    X: Array,
+    G: Array,
+    y: Array,
+    offset: Array,
     snp_test: AbstractHypothesisTest,
     gene_test: AbstractAggregateTest,
     key: PRNGKeyArray,
@@ -236,7 +236,7 @@ def map_cis_single(
 def _process_cis_result(
     cis_data: CisData,
     test_result: TestResult,
-    perm_result: tuple[ArrayLike, Any],
+    perm_result: tuple[Array, Any],
     key: PRNGKeyArray,
 ):
     """Process the results for a gene under the cis-scan and format for output"""
@@ -250,6 +250,8 @@ def _process_cis_result(
         vdx = ties_ind
 
     adj_pvalue, aux = perm_result
+    adj_pvalue = jnp.asarray(adj_pvalue)
+    vdx_int = int(vdx)
 
     # this is kind of hacky but if aux is not None we did a beta-approximation
     if aux is not None:
@@ -258,7 +260,7 @@ def _process_cis_result(
         shape_n = float(beta_params.n)
         nc_estimate = float(nc_estimate)
         perm_converged = bool(beta_params.converged) and bool(opt_status)
-        lead_adj_pvalue = float(adj_pvalue[vdx])
+        lead_adj_pvalue = float(adj_pvalue[vdx_int])
         method = "BETA"
     else:
         shape_k = float("nan")
@@ -268,14 +270,14 @@ def _process_cis_result(
         lead_adj_pvalue = float(adj_pvalue)
         method = "ACAT"
 
-    snp = cis_data.get_snp_info(vdx)
+    snp = cis_data.get_snp_info(vdx_int)
     if jnp.ndim(test_result.disp) > 0:
-        nb_alpha = float(test_result.disp[vdx])
+        nb_alpha = float(test_result.disp[vdx_int])
     else:
         nb_alpha = float(test_result.disp)
 
     if jnp.ndim(test_result.converged) > 0:
-        glm_converged = bool(test_result.converged[vdx])
+        glm_converged = bool(test_result.converged[vdx_int])
     else:
         glm_converged = bool(test_result.converged)
 
@@ -294,9 +296,9 @@ def _process_cis_result(
         "shape2": shape_n,
         "nc_estimate": nc_estimate,
         "perm_converged": perm_converged,
-        "beta": float(test_result.beta[vdx]),
-        "se": float(test_result.se[vdx]),
-        "pvalue": float(test_result.p[vdx]),
+        "beta": float(test_result.beta[vdx_int]),
+        "se": float(test_result.se[vdx_int]),
+        "pvalue": float(test_result.p[vdx_int]),
         "pvalue_adj": lead_adj_pvalue,
         "adj_method": method,
         "nb_alpha": nb_alpha,

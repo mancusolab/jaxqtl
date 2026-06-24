@@ -1,0 +1,7 @@
+{%- macro normalize(text) -%}
+  {{- text|string
+    | replace("typing.Union[jax.Array, numpy.ndarray, numpy.bool, numpy.number, bool, int, float, complex]", "ArrayLike")
+    | replace("typing.Union[jax.Array,numpy.ndarray,numpy.bool,numpy.number,bool,int,float,complex]", "ArrayLike")
+    | replace("equinox._module._module.Module", "equinox.Module")
+  -}}
+{%- endmacro -%}

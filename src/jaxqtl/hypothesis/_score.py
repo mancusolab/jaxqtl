@@ -40,6 +40,11 @@ class ScoreTest(AbstractHypothesisTest):
 
         A [`jaxqtl.hypothesis.TestResult`][] containing per-variant score-test statistics.
         """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
+
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         y_resid = glmstate_cov_only.resid
 

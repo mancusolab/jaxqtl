@@ -49,8 +49,9 @@ def read_plink_style_tsvlike(
         raise ValueError("Cannot specify both `keep_columns` and `drop_columns`")
 
     # peek to pull out header, if any
-    open_f = gzip.open if str(path_or_filename).endswith(".gz") else open
-    with open_f(path_or_filename, "rt") as file:  # type: ignore
+    name = str(path_or_filename)
+    open_f = gzip.open if name.endswith(".gz") else open
+    with open_f(name, "rt") as file:
         obs_columns = file.readline().split()
         if len(obs_columns) == 0:
             raise ValueError(f"Invalid format for {path_or_filename}")
@@ -94,7 +95,7 @@ def read_plink_style_tsvlike(
         raise ValueError(f"File {path_or_filename} only has `{iid_col}` column and no other observations")
 
     df = pl.read_csv(
-        path_or_filename,
+        name,
         separator="\t",
         columns=columns,
         null_values=["NA", "", "NULL", "NaN", "nan"],
@@ -112,7 +113,7 @@ def read_offset_tsvlike(
 ) -> pl.DataFrame:
     """Read an offset file with an IID column and a single numeric offset column."""
     if column is not None:
-        if not isinstance(column, (str, int)):
+        if not isinstance(column, str | int):
             raise ValueError(f"Column must be of type `str` or `int`, if not `None`. Found {type(column)}.")
         df_offset = read_plink_style_tsvlike(path_or_filename, keep_columns=[column])  # type: ignore
     else:
@@ -135,9 +136,10 @@ def read_single_column_file(
 ) -> list:
     """Read a newline-delimited single-column text (optionally gzipped) into a list."""
     output = []
-    open_f = gzip.open if str(path_or_filename).endswith(".gz") else open
+    name = str(path_or_filename)
+    open_f = gzip.open if name.endswith(".gz") else open
 
-    with open_f(path_or_filename, "rt") as file:  # type: ignore
+    with open_f(name, "rt") as file:
         first = file.readline()
         if first and first[0] != "#":
             output.append(first.strip())
