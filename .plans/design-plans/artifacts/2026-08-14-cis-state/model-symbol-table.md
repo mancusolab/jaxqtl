@@ -16,9 +16,9 @@ The design uses `ell_c` for cell library size and `L` for the sparse shifted-log
 | `r` | State-factor rank | `1 <= r < min(M, q)` | scalar | `state.md` | Explicit rank is always supported |
 | `d` | Number of small nuisance columns | nonnegative integer | scalar | design clarification | Includes state main effects and adjusted covariates |
 | `i,c,g,j,k,h` | Donor, cell, gene, variant, state, and chromosome indices | integer index | scalar | `state.md` | Bounds follow corresponding dimensions |
-| `X_count` | Raw state-construction counts | nonnegative integers | sparse `M x q` | `state.md` | Never CPM-normalized or densely transformed |
+| `X_count` | Raw state-construction counts | canonical nonnegative integers `<=2^53` | sparse `M x q` | `state.md` + numerical contract | Duplicate sums are checked before and after consolidation; PFlog translates each column in integer arithmetic before float64 moments so large unit-scale differences are retained |
 | `mu_g` | Mean raw count for gene `g` in selected cells | nonnegative real | scalar per gene | `state.md` | PFlog sufficient statistic |
-| `v_g` | Raw-count variance for gene `g` | nonnegative real | scalar per gene | `state.md` | Uses the reference estimator convention |
+| `v_g` | Raw-count sample variance for gene `g` | nonnegative real | scalar per gene | `state.md` + CIPHER reference | Uses cancellation-safe centered `ddof=1`; only scale-tolerated negative roundoff is snapped to zero before positive-variance filtering |
 | `A_PF`, `A_PF,h` | Total and chromosome-specific PFlog numerator sums | real | scalar | confirmed clarification | Sum of `mu_g^2 * (v_g - mu_g)` |
 | `B_PF`, `B_PF,h` | Total and chromosome-specific PFlog denominator sums | nonnegative real | scalar | confirmed clarification | Sum of `mu_g^4` |
 | `alpha_-h` | LOCO PFlog overdispersion | positive finite real | scalar | confirmed clarification | `(A_PF - A_PF,h) / (B_PF - B_PF,h)`; never silently clipped |
@@ -38,14 +38,14 @@ The design uses `ell_c` for cell library size and `L` for the sparse shifted-log
 | `D` | Required donor covariates | finite real | `N x d_D` | confirmed clarification | Includes genotype PCs, age, sex, and other donor characteristics |
 | `X_nuis` | Small cell-level nuisance design after construction | finite real | `M x d` | `state.md` + clarification | Includes `S`, `C`, and `D x S`; donor-constant main effects are absent |
 | `beta` | Non-donor nuisance coefficients | real | `d` | `state.md` | Fitted with absorbed IRLS |
-| `phi` | NB2 dispersion | nonnegative finite real | scalar | `state.md` | `Var(Y)=mu+phi*mu^2`; distinct from PFlog `alpha` |
+| `phi` | NB2 dispersion | positive finite real | scalar | clarified implementation domain | `Var(Y)=mu+phi*mu^2`; log-dispersion fitting/sampling excludes the exact Poisson boundary; distinct from PFlog `alpha` |
 | `mu` | Fitted focal-gene mean | positive finite real | `M` | `state.md` | Log mean includes offset, donor effect, and nuisance design |
 | `w` | NB IRLS weight | positive finite real | `M` | `state.md` | `mu/(1+phi*mu)` |
 | `z` | IRLS working response after offset convention | finite real | `M` | `state.md` | Donor-centered within each iteration |
 | `q_score` | GLM score residual | finite real | `M` | `state.md` | `(Y-mu)/(1+phi*mu)` |
 | `G_raw` | Donor-level cis dosage | finite dosage | `N x p_raw` | `state.md` | Never expanded to cells |
 | `G` | Valid standardized genotype matrix | finite, column mean zero and scale one | `N x p` | confirmed clarification | Monomorphic/invalid variants are removed and reported |
-| `Gamma` | Cis-by-state interaction coefficients | real | `p x r` | `state.md` | `Gamma_jk ~ Normal(0,tau)`; no public feature weights |
+| `Gamma` | Cis-by-state interaction coefficients | real | `p x r` | `state.md` | `Gamma_jk = sqrt(tau) Z_jk`, `Z_jk ~ Normal(0,1)`; no public feature weights |
 | `H` | Conceptual interaction design | real | `M x (p*r)` | `state.md` | `H[c,(j,k)] = G[donor(c),j] * S[c,k]`; never materialized |
 | `A_score` | Donor-state aggregation | real | `N x r` | `state.md` | Row `i` is `sum_{c in i} q_score[c] S[c,:]` |
 | `U` | Full interaction-score matrix | real | `p x r` | `state.md` | `G^T A_score` |
