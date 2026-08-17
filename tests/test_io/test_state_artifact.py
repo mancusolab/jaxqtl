@@ -84,10 +84,13 @@ def _manifest(
     *,
     cell_ids: tuple[str, ...] = ("cell-0", "cell-λ"),
     donor_ids: tuple[str, ...] = ("donor-0",),
+    gene_ids: tuple[str, ...] = ("gene-0", "gene-β"),
+    rank: int = 1,
+    maxiter: int = 20,
+    seed: int = 7,
     configuration: dict[str, Any] | None = None,
 ):
     contract = _contract()
-    gene_ids = ("gene-0", "gene-β")
     cell_hash = contract.identifier_order_hash((("cell_id", cell_ids),))
     donor_hash = contract.identifier_order_hash((("donor_id", donor_ids),))
     gene_hash = contract.identifier_order_hash((("gene_id", gene_ids),))
@@ -96,7 +99,7 @@ def _manifest(
             chromosome=chromosome,
             n_cells=len(cell_ids),
             n_genes=len(gene_ids),
-            rank=1,
+            rank=rank,
             factors_dtype="<f8",
             loadings_dtype="<f8",
             singular_values_dtype="<f8",
@@ -104,7 +107,7 @@ def _manifest(
             pflog_diagnostics={
                 "alpha": 1.25,
                 "alpha_source": "auto",
-                "retained_gene_count": 2,
+                "retained_gene_count": len(gene_ids),
                 "excluded_gene_count": 0,
                 "numerator": 5.0,
                 "denominator": 4.0,
@@ -112,8 +115,8 @@ def _manifest(
                 "excluded_denominator": 0.0,
             },
             filtering_diagnostics={
-                "input_gene_count": 2,
-                "active_gene_count": 2,
+                "input_gene_count": len(gene_ids),
+                "active_gene_count": len(gene_ids),
                 "transform_excluded_gene_count": 0,
             },
             donor_counts=(len(cell_ids),),
@@ -121,13 +124,13 @@ def _manifest(
             balance_donors=True,
             solver_configuration={
                 "solver": "propack",
-                "seed": 7,
+                "seed": seed,
                 "tol": 1e-8,
-                "maxiter": 20,
-                "propack_kmax": 3,
+                "maxiter": maxiter,
+                "propack_kmax": min(len(cell_ids) + 1, len(gene_ids) + 1, maxiter),
                 "arpack_ncv": None,
             },
-            singular_values=(2.5,),
+            singular_values=tuple(2.5 / (index + 1) for index in range(rank)),
             convergence_residuals={
                 "sigma_floor": 2.5e-8,
                 "residual_limit": 1e-7,
@@ -148,13 +151,21 @@ def _manifest(
         elif path == "donors.parquet":
             payloads.append(contract._PayloadRecord(path, "b" * 64, "parquet", None, None, len(donor_ids)))
         elif parts[-1] == "genes.parquet":
-            payloads.append(contract._PayloadRecord(path, "c" * 64, "parquet", None, None, 2))
+            payloads.append(contract._PayloadRecord(path, "c" * 64, "parquet", None, None, len(gene_ids)))
         elif parts[-1] == "factors.npy":
-            payloads.append(contract._PayloadRecord(path, "d" * 64, "npy", (len(cell_ids), 1), "<f8", None))
+            payloads.append(contract._PayloadRecord(path, "d" * 64, "npy", (len(cell_ids), rank), "<f8", None))
         elif parts[-1] == "loadings.npy":
-            payloads.append(contract._PayloadRecord(path, "e" * 64, "npy", (2, 1), "<f8", None))
+            payloads.append(contract._PayloadRecord(path, "e" * 64, "npy", (len(gene_ids), rank), "<f8", None))
         else:
-            payloads.append(contract._PayloadRecord(path, "f" * 64, "npy", (1,), "<f8", None))
+            payloads.append(contract._PayloadRecord(path, "f" * 64, "npy", (rank,), "<f8", None))
+    resolved_configuration = _configuration(chromosomes) if configuration is None else configuration
+    if configuration is None:
+        resolved_configuration = {
+            **resolved_configuration,
+            "rank": rank,
+            "maxiter": maxiter,
+            "seed": seed,
+        }
     return contract.StateArtifactManifest(
         artifact_type=contract.ARTIFACT_TYPE,
         schema_version=contract.SCHEMA_VERSION,
@@ -168,7 +179,7 @@ def _manifest(
         completed_chromosomes=chromosomes,
         n_cells=len(cell_ids),
         n_donors=len(donor_ids),
-        configuration=_configuration(chromosomes) if configuration is None else configuration,
+        configuration=resolved_configuration,
         provenance=_provenance(),
         chromosomes=chromosome_records,
         payloads=tuple(payloads),
@@ -420,6 +431,55 @@ def test_decoder_accepts_dimension_clipped_propack_kmax() -> None:
     encoded["chromosomes"]["01"]["solver"]["propack_kmax"] = 20
     with pytest.raises(ValueError, match="dimension-clipped effective value"):
         contract.decode_manifest(json.dumps(encoded))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("propack-maxiter", "PROPACK maxiter.*at least rank"),
+        ("root-seed", "configuration.seed.*unsigned 64-bit"),
+        ("chromosome-seed", "solver configuration.seed.*unsigned 64-bit"),
+    ],
+)
+def test_decoder_rejects_unreplayable_solver_domains(mutation: str, message: str) -> None:
+    contract = _contract()
+    if mutation == "propack-maxiter":
+        encoded = contract.manifest_to_dict(
+            _manifest(
+                cell_ids=("cell-0", "cell-1", "cell-2"),
+                gene_ids=("gene-0", "gene-1", "gene-2"),
+                rank=2,
+                maxiter=2,
+            )
+        )
+        encoded["configuration"]["maxiter"] = 1
+        encoded["chromosomes"]["01"]["solver"]["maxiter"] = 1
+        encoded["chromosomes"]["01"]["solver"]["propack_kmax"] = 1
+    else:
+        encoded = _manifest_dict()
+        if mutation == "root-seed":
+            encoded["configuration"]["seed"] = 2**64
+        else:
+            encoded["chromosomes"]["01"]["solver"]["seed"] = 2**64
+
+    with pytest.raises(ValueError, match=message):
+        contract.decode_manifest(json.dumps(encoded))
+
+
+def test_decoder_accepts_solver_domain_boundaries() -> None:
+    contract = _contract()
+    manifest = _manifest(
+        cell_ids=("cell-0", "cell-1", "cell-2"),
+        gene_ids=("gene-0", "gene-1", "gene-2"),
+        rank=2,
+        maxiter=2,
+        seed=2**64 - 1,
+    )
+
+    decoded = contract.decode_manifest(contract.encode_manifest(manifest))
+
+    assert decoded.configuration["maxiter"] == decoded.configuration["rank"] == 2
+    assert decoded.configuration["seed"] == 2**64 - 1
 
 
 @pytest.mark.parametrize(
@@ -690,6 +750,43 @@ def _factor_result(
     )
 
 
+def _rank_two_factor_result(
+    chromosome: str,
+    *,
+    maxiter: int,
+    seed: int,
+) -> StateFactorResult:
+    base = _factor_result(chromosome)
+    factors = np.asarray([[1.0, 2.0], [-1.0, -2.0], [0.0, 0.0]], dtype=np.float64)
+    loadings = np.asarray([[1.0, 0.0], [0.0, 1.0], [0.0, 0.0]], dtype=np.float64)
+    singular_values = np.asarray([2.5, 1.5], dtype=np.float64)
+    active_gene_indices = np.arange(3, dtype=np.int64)
+    for array in (factors, loadings, singular_values, active_gene_indices):
+        array.flags.writeable = False
+    diagnostics = replace(
+        base.diagnostics,
+        alpha_retained_gene_count=3,
+        input_gene_count=3,
+        active_gene_indices=active_gene_indices,
+        rank=2,
+        seed=seed,
+        maxiter=maxiter,
+        propack_kmax=min(4, maxiter),
+        loading_orthogonality_error=0.0,
+        singular_values=singular_values,
+        operator_shape=(3, 3),
+        transformed_shape=(3, 3),
+        factors_shape=(3, 2),
+        loadings_shape=(3, 2),
+    )
+    return StateFactorResult(
+        factors=factors,
+        loadings=loadings,
+        singular_values=singular_values,
+        diagnostics=diagnostics,
+    )
+
+
 def _writer_arguments(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> tuple[Path, dict[str, Any]]:
     cells, genes, donor_ids, donor_counts, inputs = _artifact_inputs(tmp_path)
     destination = tmp_path / "state-artifact"
@@ -721,6 +818,29 @@ def _writer_arguments(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> 
             "verbose": False,
         },
     }
+
+
+def _rank_two_writer_arguments(
+    tmp_path: Path,
+    *,
+    maxiter: int,
+    seed: int,
+) -> tuple[Path, dict[str, Any], StateFactorResult]:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["gene_metadata"] = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "gene_id": ["gene-0", "gene-β", "gene-2"],
+            "chrom": ["X", "Y", "MT"],
+        }
+    )
+    arguments["configuration"] = {
+        **arguments["configuration"],
+        "rank": 2,
+        "maxiter": maxiter,
+        "seed": seed,
+    }
+    return destination, arguments, _rank_two_factor_result("1", maxiter=maxiter, seed=seed)
 
 
 def _write_artifact(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> Path:
@@ -790,6 +910,129 @@ def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) 
     np.testing.assert_array_equal(chromosome.factors, [[1.0], [-1.0], [0.0]])
     np.testing.assert_array_equal(chromosome.loadings, [[0.8], [0.6]])
     np.testing.assert_array_equal(chromosome.singular_values, [2.5])
+    assert pl.read_parquet(destination / "chromosomes/01/genes.parquet")["chrom"].to_list() == ["X", "MT"]
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing", "gene metadata.*chrom"),
+        ("alias", "canonical chromosome"),
+        ("integer", "canonical chromosome"),
+    ],
+)
+def test_writer_requires_canonical_shared_gene_chromosomes(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    genes = arguments["gene_metadata"]
+    if mutation == "missing":
+        arguments["gene_metadata"] = genes.drop("chrom")
+    elif mutation == "alias":
+        arguments["gene_metadata"] = genes.with_columns(pl.Series("chrom", ["chrX", "MT"]))
+    else:
+        arguments["gene_metadata"] = genes.with_columns(pl.Series("chrom", [1, 2]))
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert not destination.exists()
+
+
+def test_writer_rejects_retained_gene_set_that_disagrees_with_loco_exclusion(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["gene_metadata"] = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "gene_id": ["focal", "gene-0", "gene-β"],
+            "chrom": ["1", "X", "MT"],
+        }
+    )
+    wrong_active_indices = np.asarray([0, 2], dtype=np.int64)
+    wrong_active_indices.flags.writeable = False
+    result = _factor_result("1")
+    diagnostics = replace(
+        result.diagnostics,
+        input_gene_count=3,
+        transform_excluded_gene_count=1,
+        active_gene_indices=wrong_active_indices,
+    )
+
+    with pytest.raises(ValueError, match="active gene indices.*LOCO exclusion"):
+        qtl_io.write_state_artifact(
+            destination,
+            iter([replace(result, diagnostics=diagnostics)]),
+            **arguments,
+        )
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("missing", "gene metadata.*chrom"),
+        ("invalid", "canonical chromosome"),
+        ("focal-leakage", "excluded chromosome"),
+    ],
+)
+def test_loader_rejects_rehashed_retained_gene_chromosome_mutations(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    relative_path = "chromosomes/01/genes.parquet"
+    path = destination / relative_path
+    genes = pl.read_parquet(path)
+    if mutation == "missing":
+        genes = genes.drop("chrom")
+    elif mutation == "invalid":
+        genes = genes.with_columns(pl.Series("chrom", ["chrX", "MT"]))
+    else:
+        genes = genes.with_columns(pl.Series("chrom", ["1", "MT"]))
+    genes.write_parquet(path)
+    _update_payload_hash(destination, relative_path)
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+def test_writer_and_loader_accept_factor_solver_domain_boundaries(tmp_path: Path) -> None:
+    destination, arguments, result = _rank_two_writer_arguments(
+        tmp_path,
+        maxiter=2,
+        seed=2**64 - 1,
+    )
+
+    manifest = qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+    loaded = qtl_io.load_state_artifact(destination)
+
+    assert manifest.configuration["maxiter"] == manifest.configuration["rank"] == 2
+    assert loaded.manifest.configuration["seed"] == 2**64 - 1
+
+
+def test_writer_rejects_propack_maxiter_below_rank(tmp_path: Path) -> None:
+    destination, arguments, result = _rank_two_writer_arguments(tmp_path, maxiter=1, seed=7)
+
+    with pytest.raises(ValueError, match="PROPACK maxiter.*at least rank"):
+        qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+
+    assert not destination.exists()
+
+
+def test_writer_rejects_seed_above_uint64(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["configuration"] = {**arguments["configuration"], "seed": 2**64}
+    result = _factor_result("1")
+    result = replace(result, diagnostics=replace(result.diagnostics, seed=2**64))
+
+    with pytest.raises(ValueError, match="unsigned 64-bit"):
+        qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+
+    assert not destination.exists()
 
 
 @pytest.mark.parametrize("field", ["factors", "loadings", "singular_values"])
@@ -1302,6 +1545,37 @@ def test_loader_rejects_invalid_types_and_contradictory_replay_configuration(
     _write_manifest_dict(destination, manifest)
 
     with pytest.raises((TypeError, ValueError), match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("propack-maxiter", "PROPACK maxiter.*at least rank"),
+        ("seed", "unsigned 64-bit"),
+    ],
+)
+def test_loader_rejects_coordinated_unreplayable_solver_domains(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    if mutation == "propack-maxiter":
+        destination, arguments, result = _rank_two_writer_arguments(tmp_path, maxiter=2, seed=7)
+        qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+    else:
+        destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    if mutation == "propack-maxiter":
+        manifest["configuration"]["maxiter"] = 1
+        manifest["chromosomes"]["01"]["solver"]["maxiter"] = 1
+        manifest["chromosomes"]["01"]["solver"]["propack_kmax"] = 1
+    else:
+        manifest["configuration"]["seed"] = 2**64
+        manifest["chromosomes"]["01"]["solver"]["seed"] = 2**64
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises(ValueError, match=message):
         qtl_io.load_state_artifact(destination)
 
 

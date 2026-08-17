@@ -34,6 +34,7 @@ from ._state_artifact_contract import (
     _validate_cell_type_selection,
     _validate_state_factor_payload_numerics,
     _validated_chromosome_set,
+    _validated_gene_chromosomes,
     ARTIFACT_TYPE,
     canonical_chromosome_key,
     canonical_payload_inventory,
@@ -290,7 +291,7 @@ def _validated_metadata(
         ("matrix_index", "cell_id", "donor_id", cell_type_column),
         context="cell metadata",
     )
-    _required_columns(gene_metadata, ("matrix_index", "gene_id"), context="gene metadata")
+    _required_columns(gene_metadata, ("matrix_index", "gene_id", "chrom"), context="gene metadata")
     if cell_metadata.height == 0:
         raise ValueError("cell metadata cannot be empty")
     if gene_metadata.height == 0:
@@ -299,6 +300,7 @@ def _validated_metadata(
     _ordered_matrix_indices(gene_metadata, context="gene metadata")
     cell_ids = _identifier_column(cell_metadata, "cell_id", context="cell metadata")
     gene_ids = _identifier_column(gene_metadata, "gene_id", context="gene metadata")
+    _validated_gene_chromosomes(gene_metadata["chrom"].to_list(), context="gene metadata chrom")
     _validate_cell_type_selection(
         cell_metadata[cell_type_column].to_list(),
         selected_cell_type=selected_cell_type,
@@ -424,11 +426,18 @@ def _validated_factor_result(
     loadings = np.asarray(result.loadings)
     singular_values = np.asarray(result.singular_values)
     rank = diagnostics.rank
-    active_genes = _active_gene_metadata(gene_metadata, np.asarray(diagnostics.active_gene_indices))
+    active_gene_indices = np.asarray(diagnostics.active_gene_indices)
+    active_genes = _active_gene_metadata(gene_metadata, active_gene_indices)
     if diagnostics.input_gene_count != gene_metadata.height:
         raise ValueError(f"chromosome {chromosome} input gene count disagrees with shared gene metadata")
     if diagnostics.transform_excluded_gene_count != gene_metadata.height - active_genes.height:
         raise ValueError(f"chromosome {chromosome} transform-excluded gene count disagrees with active genes")
+    excluded_gene_chromosome = str(int(chromosome))
+    expected_active_gene_indices = np.flatnonzero(
+        np.asarray(gene_metadata["chrom"].to_list(), dtype=np.str_) != excluded_gene_chromosome
+    )
+    if not np.array_equal(active_gene_indices, expected_active_gene_indices):
+        raise ValueError(f"chromosome {chromosome} active gene indices disagree with the LOCO exclusion")
     if factors.shape != (n_cells, rank) or tuple(diagnostics.factors_shape) != factors.shape:
         raise ValueError(f"chromosome {chromosome} factor shape disagrees with cells, rank, or diagnostics")
     if loadings.shape != (active_genes.height, rank) or tuple(diagnostics.loadings_shape) != loadings.shape:
@@ -860,7 +869,7 @@ def _load_state_artifact(
         record = chromosome_manifests[chromosome]
         genes = _load_frame(
             root / prefix / "genes.parquet",
-            required_columns=("matrix_index", "gene_id"),
+            required_columns=("matrix_index", "gene_id", "chrom"),
             context=f"chromosome {chromosome} gene metadata",
         )
         if genes.height != record.n_genes:
@@ -870,8 +879,14 @@ def _load_state_artifact(
             gene_ids = _identifier_column(genes, "gene_id", context="gene metadata order")
         except ValueError as error:
             raise ValueError(f"chromosome {chromosome} gene metadata order is incompatible") from error
+        gene_chromosomes = _validated_gene_chromosomes(
+            genes["chrom"].to_list(),
+            context=f"chromosome {chromosome} gene metadata chrom",
+        )
         if identifier_order_hash((("gene_id", gene_ids),)) != record.gene_order_hash:
             raise ValueError(f"chromosome {chromosome} gene metadata order is incompatible with the manifest")
+        if str(int(chromosome)) in gene_chromosomes:
+            raise ValueError(f"chromosome {chromosome} gene metadata retains a gene from the excluded chromosome")
         factors = _verified_array(root / prefix / "factors.npy", payloads[f"{prefix}/factors.npy"])
         loadings = _verified_array(root / prefix / "loadings.npy", payloads[f"{prefix}/loadings.npy"])
         singular_values = _verified_array(

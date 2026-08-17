@@ -15,6 +15,8 @@ from typing import Any, cast, Literal
 
 import numpy as np
 
+from ._single_cell_contract import _canonical_chromosome
+
 
 SCHEMA_VERSION = 1
 ARTIFACT_TYPE = "jaxqtl-state-factor"
@@ -33,6 +35,7 @@ THREAD_ENVIRONMENT_VARIABLES = (
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _FLOAT64_EPS = float(np.finfo(np.float64).eps)
 _FLOAT64_TINY = float(np.finfo(np.float64).tiny)
+_MAX_UINT64 = 2**64 - 1
 _ARTIFACT_FIELDS = (
     "artifact_type",
     "schema_version",
@@ -352,6 +355,27 @@ def _nonnegative_integer(value: object, *, name: str) -> int:
     return value
 
 
+def _unsigned_64_bit_integer(value: object, *, name: str) -> int:
+    normalized = _nonnegative_integer(value, name=name)
+    if normalized > _MAX_UINT64:
+        raise ValueError(f"{name} must fit in an unsigned 64-bit integer")
+    return normalized
+
+
+def _validated_gene_chromosomes(values: Sequence[object], *, context: str) -> tuple[str, ...]:
+    """Require ingress-canonical chromosome strings without accepting aliases."""
+    normalized = tuple(values)
+    if any(not isinstance(value, str) for value in normalized):
+        raise TypeError(f"{context} values must use canonical chromosome strings")
+    try:
+        canonical = tuple(_canonical_chromosome(value) for value in normalized)
+    except ValueError as error:
+        raise ValueError(f"{context} values must use canonical chromosome labels 1-22, X, Y, or MT") from error
+    if canonical != normalized:
+        raise ValueError(f"{context} values must use canonical chromosome labels 1-22, X, Y, or MT")
+    return cast(tuple[str, ...], normalized)
+
+
 def _boolean(value: object, *, name: str) -> bool:
     if not isinstance(value, bool):
         raise TypeError(f"{name} must be a boolean")
@@ -525,12 +549,14 @@ def _validate_solver_configuration(record: _ChromosomeManifest) -> None:
     solver = configuration["solver"]
     if solver not in {"propack", "arpack"}:
         raise ValueError(f"{context}.solver must be 'propack' or 'arpack'")
-    _nonnegative_integer(configuration["seed"], name=f"{context}.seed")
+    _unsigned_64_bit_integer(configuration["seed"], name=f"{context}.seed")
     _finite_float(configuration["tol"], name=f"{context}.tol", positive=True)
     maxiter = _positive_integer(configuration["maxiter"], name=f"{context}.maxiter")
     propack_kmax = configuration["propack_kmax"]
     arpack_ncv = configuration["arpack_ncv"]
     if solver == "propack":
+        if maxiter < record.rank:
+            raise ValueError(f"{context}.PROPACK maxiter must be at least rank")
         effective_kmax = min(record.n_cells + 1, record.n_genes + 1, maxiter)
         if _positive_integer(propack_kmax, name=f"{context}.propack_kmax") != effective_kmax:
             raise ValueError(f"{context}.propack_kmax disagrees with the dimension-clipped effective value")
@@ -659,7 +685,7 @@ def _validate_configuration(manifest: StateArtifactManifest) -> Mapping[str, Any
     if cell_type is not None and (not isinstance(cell_type, str) or not cell_type):
         raise TypeError("configuration.cell_type must be a nonempty string or null")
     rank = _positive_integer(configuration["rank"], name="configuration.rank")
-    seed = _nonnegative_integer(configuration["seed"], name="configuration.seed")
+    seed = _unsigned_64_bit_integer(configuration["seed"], name="configuration.seed")
     maxiter = _positive_integer(configuration["maxiter"], name="configuration.maxiter")
     tol = _finite_float(configuration["tol"], name="configuration.tol", positive=True)
     ncv_value = configuration["ncv"]
@@ -669,6 +695,8 @@ def _validate_configuration(manifest: StateArtifactManifest) -> Mapping[str, Any
         raise ValueError("configuration.solver must be 'propack' or 'arpack'")
     if solver == "propack" and ncv is not None:
         raise ValueError("configuration.ncv must be null for PROPACK")
+    if solver == "propack" and maxiter < rank:
+        raise ValueError("configuration.PROPACK maxiter must be at least rank")
     if solver == "arpack" and ncv is None:
         raise ValueError("configuration.ncv is required for ARPACK")
     pflog_alpha = configuration["pflog_alpha"]
