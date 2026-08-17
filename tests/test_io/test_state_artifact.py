@@ -963,6 +963,16 @@ def test_loader_rejects_incompatible_expected_alignment_and_configuration(tmp_pa
         qtl_io.load_state_artifact(destination, expected_configuration={"rank": 2})
 
 
+def test_loader_rejects_canonically_duplicate_expected_gene_keys(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+
+    with pytest.raises(ValueError, match="duplicate canonical expected gene key.*01"):
+        qtl_io.load_state_artifact(
+            destination,
+            expected_gene_ids={"1": ("wrong-order",), "01": ("gene-0", "gene-β")},
+        )
+
+
 def test_loader_rejects_unexpected_files_outside_the_fixed_layout(tmp_path: Path) -> None:
     destination = _write_artifact(tmp_path)
     (destination / "extra.bin").write_bytes(b"not declared")

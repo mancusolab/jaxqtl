@@ -666,7 +666,12 @@ def _load_state_artifact(
     manifest = decode_manifest(manifest_path.read_bytes())
     normalized_expected_genes = None
     if expected_gene_ids is not None:
-        normalized_expected_genes = {canonical_chromosome_key(key): value for key, value in expected_gene_ids.items()}
+        normalized_expected_genes = {}
+        for key, value in expected_gene_ids.items():
+            canonical_key = canonical_chromosome_key(key)
+            if canonical_key in normalized_expected_genes:
+                raise ValueError(f"duplicate canonical expected gene key: {canonical_key}")
+            normalized_expected_genes[canonical_key] = value
     validate_manifest(
         manifest,
         expected_cell_ids=expected_cell_ids,
