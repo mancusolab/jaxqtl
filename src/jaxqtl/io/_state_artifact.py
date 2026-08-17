@@ -102,12 +102,29 @@ def _publication_os_error(error_number: int, final_path: Path) -> OSError:
     return OSError(error_number, os.strerror(error_number), final_path)
 
 
+def _publication_platform() -> str:
+    """Return the runtime platform used by the owned publication adapter."""
+    return sys.platform
+
+
+def _load_process_library() -> ctypes.CDLL:
+    """Load the process C library used by the owned publication adapter."""
+    return ctypes.CDLL(None, use_errno=True)
+
+
 def _publish_directory_noreplace(staging: Path, final_path: Path) -> None:
     """Atomically publish without replacement, or fail closed if unsupported."""
-    libc = ctypes.CDLL(None, use_errno=True)
     source = os.fsencode(staging)
     destination = os.fsencode(final_path)
-    if sys.platform == "darwin":
+    publication_platform = _publication_platform()
+    if publication_platform not in {"darwin", "linux"} and not publication_platform.startswith("linux"):
+        raise OSError(
+            errno.ENOTSUP,
+            "atomic no-replace directory publication is unsupported on this platform",
+            final_path,
+        )
+    libc = _load_process_library()
+    if publication_platform == "darwin":
         try:
             rename = libc.renamex_np
         except AttributeError as error:
@@ -119,7 +136,7 @@ def _publish_directory_noreplace(staging: Path, final_path: Path) -> None:
         rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
         rename.restype = ctypes.c_int
         result = rename(source, destination, _DARWIN_RENAME_EXCL)
-    elif sys.platform.startswith("linux"):
+    elif publication_platform.startswith("linux"):
         try:
             rename = libc.renameat2
         except AttributeError as error:
@@ -142,12 +159,6 @@ def _publish_directory_noreplace(staging: Path, final_path: Path) -> None:
             _LINUX_AT_FDCWD,
             destination,
             _LINUX_RENAME_NOREPLACE,
-        )
-    else:
-        raise OSError(
-            errno.ENOTSUP,
-            "atomic no-replace directory publication is unsupported on this platform",
-            final_path,
         )
     if result != 0:
         raise _publication_os_error(ctypes.get_errno(), final_path)

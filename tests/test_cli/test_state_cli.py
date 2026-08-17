@@ -65,6 +65,34 @@ def _single_cell_inputs(tmp_path: Path, *, mixed: bool = False) -> dict[str, Pat
     return paths
 
 
+def _invalid_automatic_alpha_inputs(tmp_path: Path) -> dict[str, Path]:
+    counts = sparse.csr_array(np.tile(np.asarray([1, 2, 3, 4], dtype=np.int64), (8, 1)))
+    cells = pl.DataFrame(
+        {
+            "matrix_index": np.arange(counts.shape[0], dtype=np.int64),
+            "cell_id": [f"cell-{index}" for index in range(counts.shape[0])],
+            "donor_id": ["d0", "d0", "d0", "d1", "d1", "d1", "d2", "d3"],
+            "cell_type": ["B"] * counts.shape[0],
+        }
+    )
+    genes = pl.DataFrame(
+        {
+            "matrix_index": np.arange(counts.shape[1], dtype=np.int64),
+            "gene_id": [f"gene-{index}" for index in range(counts.shape[1])],
+            "chrom": ["X"] * counts.shape[1],
+        }
+    )
+    paths = {
+        "counts": tmp_path / "invalid-auto-counts.npz",
+        "cells": tmp_path / "invalid-auto-cells.parquet",
+        "genes": tmp_path / "invalid-auto-genes.parquet",
+    }
+    sparse.save_npz(paths["counts"], counts)
+    cells.write_parquet(paths["cells"])
+    genes.write_parquet(paths["genes"])
+    return paths
+
+
 def _argv(
     tmp_path: Path,
     paths: dict[str, Path],
@@ -344,6 +372,33 @@ def test_state_factor_single_chromosome_end_to_end_roundtrip(tmp_path: Path) -> 
     assert result.factors.shape == (8, 1)
     assert result.loadings.shape == (4, 1)
     assert result.singular_values.shape == (1,)
+
+
+def test_explicit_alpha_publishes_when_automatic_estimation_is_invalid(tmp_path: Path) -> None:
+    paths = _invalid_automatic_alpha_inputs(tmp_path)
+
+    automatic_status, _, automatic_stderr = _run(
+        [*_argv(tmp_path, paths, out_name="automatic"), "--no-center-within-donor"]
+    )
+    override_status, _, override_stderr = _run(
+        [
+            *_argv(tmp_path, paths, out_name="override"),
+            "--pflog-alpha",
+            "0.125",
+            "--no-center-within-donor",
+        ]
+    )
+
+    assert automatic_status == 1
+    assert "automatic PFlog denominator must be finite and strictly positive" in automatic_stderr
+    assert override_status == 0, override_stderr
+    loaded = load_state_artifact(tmp_path / "override")
+    diagnostics = loaded.manifest.chromosomes[0].pflog_diagnostics
+    assert diagnostics["alpha_source"] == "override"
+    assert diagnostics["alpha"] == pytest.approx(0.125)
+    assert diagnostics["retained_gene_count"] == 0
+    assert diagnostics["numerator"] == 0.0
+    assert diagnostics["denominator"] == 0.0
 
 
 @pytest.mark.parametrize("destination_kind", ["directory", "broken-symlink"])

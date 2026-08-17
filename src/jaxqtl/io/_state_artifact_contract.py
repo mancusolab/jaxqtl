@@ -32,7 +32,6 @@ THREAD_ENVIRONMENT_VARIABLES = (
 
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _FLOAT64_EPS = float(np.finfo(np.float64).eps)
-_DERIVED_DIAGNOSTIC_RTOL = 8.0 * _FLOAT64_EPS
 _ARTIFACT_FIELDS = (
     "artifact_type",
     "schema_version",
@@ -367,7 +366,7 @@ def _finite_float(value: object, *, name: str, positive: bool = False, nonnegati
 
 
 def _validate_derived_float(value: float, expected: float, *, name: str) -> None:
-    if not math.isclose(value, expected, rel_tol=_DERIVED_DIAGNOSTIC_RTOL, abs_tol=0.0):
+    if value != expected:
         raise ValueError(f"{name} disagrees with the derived float64 algorithm contract")
 
 
@@ -460,13 +459,24 @@ def _validate_pflog_diagnostics(record: _ChromosomeManifest) -> None:
     alpha_source = diagnostics["alpha_source"]
     if alpha_source not in {"auto", "override"}:
         raise ValueError(f"{context}.alpha_source must be 'auto' or 'override'")
-    _positive_integer(diagnostics["retained_gene_count"], name=f"{context}.retained_gene_count")
+    retained_gene_count = _nonnegative_integer(
+        diagnostics["retained_gene_count"],
+        name=f"{context}.retained_gene_count",
+    )
     _nonnegative_integer(diagnostics["excluded_gene_count"], name=f"{context}.excluded_gene_count")
     numerator = _finite_float(diagnostics["numerator"], name=f"{context}.numerator")
-    denominator = _finite_float(diagnostics["denominator"], name=f"{context}.denominator", positive=True)
+    denominator = _finite_float(
+        diagnostics["denominator"],
+        name=f"{context}.denominator",
+        nonnegative=True,
+    )
     if alpha_source == "auto":
+        if retained_gene_count <= 0:
+            raise ValueError(f"{context}.retained_gene_count must be positive for automatic PFlog")
         if numerator <= 0.0:
             raise ValueError(f"{context}.numerator must be strictly positive for automatic PFlog")
+        if denominator <= 0.0:
+            raise ValueError(f"{context}.denominator must be strictly positive for automatic PFlog")
         expected_alpha = numerator / denominator
         _validate_derived_float(
             alpha,

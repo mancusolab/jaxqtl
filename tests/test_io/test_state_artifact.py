@@ -3,10 +3,12 @@
 
 from __future__ import annotations
 
+import errno
 import hashlib
 import importlib
 import importlib.util
 import json
+import math
 import os
 import shutil
 
@@ -434,6 +436,58 @@ def test_decoder_rejects_derived_replay_diagnostics_outside_algorithm_contract(
         contract.decode_manifest(json.dumps(encoded))
 
 
+@pytest.mark.parametrize(
+    ("field", "section", "message"),
+    [
+        ("alpha", "pflog", "automatic PFlog alpha"),
+        ("sigma_floor", "convergence", "sigma_floor.*derived"),
+        ("residual_limit", "convergence", "residual_limit.*derived"),
+    ],
+)
+def test_decoder_rejects_one_ulp_mutations_of_derived_replay_diagnostics(
+    field: str,
+    section: str,
+    message: str,
+) -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+    diagnostics = encoded["chromosomes"]["01"][section]
+    diagnostics[field] = math.nextafter(diagnostics[field], math.inf)
+
+    with pytest.raises(ValueError, match=message):
+        contract.decode_manifest(json.dumps(encoded))
+
+
+@pytest.mark.parametrize(
+    ("retained_gene_count", "numerator", "denominator"),
+    [
+        (1, -0.25, 0.5),
+        (0, 0.0, 0.0),
+    ],
+)
+def test_override_manifest_accepts_failed_automatic_fit_diagnostics(
+    retained_gene_count: int,
+    numerator: float,
+    denominator: float,
+) -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+    encoded["configuration"]["pflog_alpha"] = 0.125
+    diagnostics = encoded["chromosomes"]["01"]["pflog"]
+    diagnostics.update(
+        alpha=0.125,
+        alpha_source="override",
+        retained_gene_count=retained_gene_count,
+        numerator=numerator,
+        denominator=denominator,
+    )
+
+    decoded = contract.decode_manifest(json.dumps(encoded))
+
+    assert decoded.chromosomes[0].pflog_diagnostics["alpha_source"] == "override"
+    assert decoded.chromosomes[0].pflog_diagnostics["retained_gene_count"] == retained_gene_count
+
+
 def test_pure_alignment_and_configuration_validation() -> None:
     contract = _contract()
     manifest = _manifest()
@@ -533,7 +587,12 @@ def _artifact_inputs(
     return cells, genes, ("donor-0", "donor-β"), (2, 1), inputs
 
 
-def _factor_result(chromosome: str, *, bad_shape: bool = False) -> StateFactorResult:
+def _factor_result(
+    chromosome: str,
+    *,
+    bad_shape: bool = False,
+    failed_automatic_fit_override: float | None = None,
+) -> StateFactorResult:
     factors = np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64)
     if bad_shape:
         factors = factors[:2]
@@ -544,12 +603,12 @@ def _factor_result(chromosome: str, *, bad_shape: bool = False) -> StateFactorRe
     for array in (factors, loadings, singular_values, active_gene_indices, donor_counts):
         array.flags.writeable = False
     diagnostics = StateFactorDiagnostics(
-        alpha=1.25,
-        alpha_source="auto",
-        alpha_retained_gene_count=2,
+        alpha=1.25 if failed_automatic_fit_override is None else failed_automatic_fit_override,
+        alpha_source="auto" if failed_automatic_fit_override is None else "override",
+        alpha_retained_gene_count=2 if failed_automatic_fit_override is None else 0,
         alpha_excluded_gene_count=0,
-        alpha_numerator=5.0,
-        alpha_denominator=4.0,
+        alpha_numerator=5.0 if failed_automatic_fit_override is None else 0.0,
+        alpha_denominator=4.0 if failed_automatic_fit_override is None else 0.0,
         alpha_excluded_numerator=0.0,
         alpha_excluded_denominator=0.0,
         excluded_chromosome=chromosome,
@@ -685,6 +744,42 @@ def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) 
     np.testing.assert_array_equal(chromosome.factors, [[1.0], [0.0], [-1.0]])
     np.testing.assert_array_equal(chromosome.loadings, [[0.8], [0.6]])
     np.testing.assert_array_equal(chromosome.singular_values, [2.5])
+
+
+def test_override_with_failed_automatic_fit_diagnostics_writes_and_loads(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["configuration"]["pflog_alpha"] = 0.125
+    result = _factor_result("1", failed_automatic_fit_override=0.125)
+
+    manifest = qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+    loaded = qtl_io.load_state_artifact(destination)
+
+    assert manifest.chromosomes[0].pflog_diagnostics["retained_gene_count"] == 0
+    assert loaded.manifest.chromosomes[0].pflog_diagnostics == manifest.chromosomes[0].pflog_diagnostics
+
+
+@pytest.mark.parametrize(
+    ("field", "section", "message"),
+    [
+        ("alpha", "pflog", "automatic PFlog alpha"),
+        ("sigma_floor", "convergence", "sigma_floor.*derived"),
+        ("residual_limit", "convergence", "residual_limit.*derived"),
+    ],
+)
+def test_loader_rejects_one_ulp_mutations_of_derived_replay_diagnostics(
+    tmp_path: Path,
+    field: str,
+    section: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    diagnostics = manifest["chromosomes"]["01"][section]
+    diagnostics[field] = math.nextafter(diagnostics[field], math.inf)
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
 
 
 @pytest.mark.parametrize(
@@ -844,6 +939,48 @@ def test_writer_atomically_refuses_destination_created_during_publication(
     assert destination.is_dir()
     assert destination.stat().st_ino == published_inode
     assert list(destination.iterdir()) == []
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
+def test_writer_fails_closed_when_atomic_publication_platform_is_unsupported(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = importlib.import_module("jaxqtl.io._state_artifact")
+    destination, arguments = _writer_arguments(tmp_path)
+    monkeypatch.setattr(artifact, "_publication_platform", lambda: "unsupported-test-os", raising=False)
+
+    with pytest.raises(OSError, match="unsupported on this platform") as exc_info:
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert exc_info.value.errno == errno.ENOTSUP
+    assert not destination.exists()
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
+@pytest.mark.parametrize(
+    ("platform_name", "message"),
+    [
+        ("darwin", "unavailable on this Darwin runtime"),
+        ("linux", "requires renameat2 on Linux"),
+    ],
+)
+def test_writer_fails_closed_when_atomic_publication_libc_symbol_is_unavailable(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    platform_name: str,
+    message: str,
+) -> None:
+    artifact = importlib.import_module("jaxqtl.io._state_artifact")
+    destination, arguments = _writer_arguments(tmp_path)
+    monkeypatch.setattr(artifact, "_publication_platform", lambda: platform_name, raising=False)
+    monkeypatch.setattr(artifact, "_load_process_library", lambda: object(), raising=False)
+
+    with pytest.raises(OSError, match=message) as exc_info:
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert exc_info.value.errno == errno.ENOTSUP
+    assert not destination.exists()
     assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
 
 
