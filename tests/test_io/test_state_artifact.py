@@ -1,17 +1,27 @@
-# pattern: Functional Core
+# pattern: Mixed (unavoidable)
+# Reason: The phase-owned test module covers the paired pure contract and real-filesystem shell boundary.
 
 from __future__ import annotations
 
+import hashlib
 import importlib
 import importlib.util
 import json
+import shutil
 
 from dataclasses import replace
+from pathlib import Path
 from typing import Any
 
+import numpy as np
+import polars as pl
 import pytest
 
 from hypothesis import example, given, settings, strategies as st
+
+import jaxqtl.io as qtl_io
+
+from jaxqtl.state import StateFactorDiagnostics, StateFactorResult
 
 
 _FULL_AUTOSOMES = tuple(f"{chromosome:02d}" for chromosome in range(1, 23))
@@ -392,3 +402,378 @@ def test_encoded_manifest_is_standard_json() -> None:
 
     assert decoded["schema_version"] == 1
     assert decoded["requested_chromosomes"] == ["01"]
+
+
+def _artifact_inputs(
+    tmp_path: Path,
+) -> tuple[pl.DataFrame, pl.DataFrame, tuple[str, ...], tuple[int, ...], dict[str, Path]]:
+    tmp_path.mkdir(parents=True, exist_ok=True)
+    cells = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "cell_id": ["cell-0", "cell-λ", "cell-2"],
+            "donor_id": ["donor-0", "donor-0", "donor-β"],
+            "cell_type": ["B", "B", "B"],
+            "quality": [0.9, 0.8, 0.7],
+        }
+    )
+    genes = pl.DataFrame(
+        {
+            "matrix_index": [0, 1],
+            "gene_id": ["gene-0", "gene-β"],
+            "chrom": ["X", "MT"],
+        }
+    )
+    inputs = {
+        "counts": tmp_path / "source-counts.npz",
+        "cells": tmp_path / "source-cells.parquet",
+        "genes": tmp_path / "source-genes.parquet",
+    }
+    inputs["counts"].write_bytes((b"bounded-input-chunk-" * 5000) + b"counts")
+    cells.write_parquet(inputs["cells"])
+    genes.write_parquet(inputs["genes"])
+    return cells, genes, ("donor-0", "donor-β"), (2, 1), inputs
+
+
+def _factor_result(chromosome: str, *, bad_shape: bool = False) -> StateFactorResult:
+    factors = np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64)
+    if bad_shape:
+        factors = factors[:2]
+    loadings = np.asarray([[0.8], [0.6]], dtype=np.float64)
+    singular_values = np.asarray([2.5], dtype=np.float64)
+    active_gene_indices = np.asarray([0, 1], dtype=np.int64)
+    donor_counts = np.asarray([2, 1], dtype=np.int64)
+    for array in (factors, loadings, singular_values, active_gene_indices, donor_counts):
+        array.flags.writeable = False
+    diagnostics = StateFactorDiagnostics(
+        alpha=1.25,
+        alpha_source="auto",
+        alpha_retained_gene_count=2,
+        alpha_excluded_gene_count=0,
+        alpha_numerator=5.0,
+        alpha_denominator=4.0,
+        alpha_excluded_numerator=0.0,
+        alpha_excluded_denominator=0.0,
+        excluded_chromosome=chromosome,
+        active_gene_indices=active_gene_indices,
+        rank=1,
+        solver="propack",
+        seed=7,
+        tol=1e-8,
+        maxiter=20,
+        propack_kmax=20,
+        arpack_ncv=None,
+        sigma_floor=2.5e-8,
+        residual_limit=1e-7,
+        max_forward_residual=1e-10,
+        max_adjoint_residual=2e-10,
+        loading_orthogonality_error=3e-10,
+        singular_values=singular_values,
+        donor_counts=donor_counts,
+        singleton_donor_count=1,
+        center_within_donor=True,
+        balance_donors=True,
+        operator_shape=(3, 2),
+        transformed_shape=(3, 2),
+        transformed_nnz=5,
+        factors_shape=(3, 1),
+        loadings_shape=(2, 1),
+    )
+    return StateFactorResult(
+        factors=factors,
+        loadings=loadings,
+        singular_values=singular_values,
+        diagnostics=diagnostics,
+    )
+
+
+def _writer_arguments(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> tuple[Path, dict[str, Any]]:
+    cells, genes, donor_ids, donor_counts, inputs = _artifact_inputs(tmp_path)
+    destination = tmp_path / "state-artifact"
+    return destination, {
+        "requested_chromosomes": chromosomes,
+        "cell_metadata": cells,
+        "gene_metadata": genes,
+        "donor_ids": donor_ids,
+        "donor_counts": donor_counts,
+        "input_paths": inputs,
+        "cell_type_column": "cell_type",
+        "selected_cell_type": "B",
+        "allow_mixed_cell_types": False,
+        "configuration": {
+            "mode": "loco" if len(chromosomes) == 22 else "single",
+            "rank": 1,
+            "solver": "propack",
+            "tol": 1e-8,
+            "maxiter": 20,
+            "seed": 7,
+            "platform": "cpu",
+        },
+    }
+
+
+def _write_artifact(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> Path:
+    destination, arguments = _writer_arguments(tmp_path, chromosomes)
+    qtl_io.write_state_artifact(
+        destination,
+        (_factor_result(chromosome) for chromosome in chromosomes),
+        **arguments,
+    )
+    return destination
+
+
+def _read_manifest_dict(destination: Path) -> dict[str, Any]:
+    return json.loads((destination / "manifest.json").read_text(encoding="utf-8"))
+
+
+def _write_manifest_dict(destination: Path, manifest: dict[str, Any]) -> None:
+    (destination / "manifest.json").write_text(
+        json.dumps(manifest, ensure_ascii=False, allow_nan=False, sort_keys=True, separators=(",", ":")) + "\n",
+        encoding="utf-8",
+    )
+
+
+def _sha256(path: Path) -> str:
+    digest = hashlib.sha256()
+    with path.open("rb") as stream:
+        while chunk := stream.read(8192):
+            digest.update(chunk)
+    return digest.hexdigest()
+
+
+def _update_payload_hash(destination: Path, relative_path: str) -> None:
+    manifest = _read_manifest_dict(destination)
+    payload = next(payload for payload in manifest["payloads"] if payload["path"] == relative_path)
+    payload["sha256"] = _sha256(destination / relative_path)
+    _write_manifest_dict(destination, manifest)
+
+
+def test_backend_neutral_artifact_surface_is_reexported() -> None:
+    assert hasattr(qtl_io, "StateArtifactManifest")
+    assert hasattr(qtl_io, "StateArtifactResult")
+    assert hasattr(qtl_io, "write_state_artifact")
+    assert hasattr(qtl_io, "load_state_artifact")
+    assert not hasattr(qtl_io, "_PayloadRecord")
+    assert not hasattr(qtl_io, "SCHEMA_VERSION")
+
+
+def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    manifest = qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert destination.is_dir()
+    assert isinstance(manifest, qtl_io.StateArtifactManifest)
+    loaded = qtl_io.load_state_artifact(destination)
+    chromosome = loaded.chromosome("1")
+    assert isinstance(loaded, qtl_io.StateArtifactResult)
+    assert loaded.root == destination
+    assert loaded.cell_ids == ("cell-0", "cell-λ", "cell-2")
+    assert loaded.donor_ids == ("donor-0", "donor-β")
+    assert chromosome.gene_ids == ("gene-0", "gene-β")
+    assert isinstance(chromosome.factors, np.memmap)
+    assert isinstance(chromosome.loadings, np.memmap)
+    assert isinstance(chromosome.singular_values, np.memmap)
+    assert not chromosome.factors.flags.writeable
+    assert not chromosome.loadings.flags.writeable
+    assert not chromosome.singular_values.flags.writeable
+    np.testing.assert_array_equal(chromosome.factors, [[1.0], [0.0], [-1.0]])
+    np.testing.assert_array_equal(chromosome.loadings, [[0.8], [0.6]])
+    np.testing.assert_array_equal(chromosome.singular_values, [2.5])
+
+
+def test_roundtrip_preserves_metadata_hashes_diagnostics_and_replay_provenance(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+
+    assert pl.read_parquet(destination / "cells.parquet").to_dict(as_series=False) == {
+        "matrix_index": [0, 1, 2],
+        "cell_id": ["cell-0", "cell-λ", "cell-2"],
+        "donor_id": ["donor-0", "donor-0", "donor-β"],
+        "cell_type": ["B", "B", "B"],
+        "quality": [0.9, 0.8, 0.7],
+    }
+    assert pl.read_parquet(destination / "donors.parquet").to_dict(as_series=False) == {
+        "donor_index": [0, 1],
+        "donor_id": ["donor-0", "donor-β"],
+        "cell_count": [2, 1],
+    }
+    assert manifest["inputs"] == {
+        name: _sha256(tmp_path / f"source-{name}.{'npz' if name == 'counts' else 'parquet'}")
+        for name in ("counts", "cells", "genes")
+    }
+    assert len(manifest["payloads"]) == 6
+    assert all(payload["sha256"] == _sha256(destination / payload["path"]) for payload in manifest["payloads"])
+    chromosome = manifest["chromosomes"]["01"]
+    assert chromosome["pflog"]["alpha"] == 1.25
+    assert chromosome["filtering"] == {"active_gene_count": 2, "excluded_gene_count": 0}
+    assert chromosome["donor_counts"] == [2, 1]
+    assert chromosome["solver"]["solver"] == "propack"
+    assert chromosome["singular_values"] == [2.5]
+    assert chromosome["convergence"]["max_forward_residual"] == 1e-10
+    provenance = manifest["provenance"]
+    assert provenance["platform"] == "cpu"
+    assert set(provenance["package_versions"]) == {"numpy", "scipy", "polars", "pyarrow", "jax", "jaxlib", "jaxqtl"}
+    assert set(provenance["blas_lapack"]) == {"numpy", "scipy"}
+    assert set(provenance["thread_environment"]) == set(_contract().THREAD_ENVIRONMENT_VARIABLES)
+
+
+def test_22_chromosome_roundtrip_is_complete_and_ordered(tmp_path: Path) -> None:
+    chromosomes = tuple(str(chromosome) for chromosome in range(1, 23))
+    destination = _write_artifact(tmp_path, chromosomes)
+
+    loaded = qtl_io.load_state_artifact(destination)
+    assert loaded.manifest.requested_chromosomes == _FULL_AUTOSOMES
+    assert loaded.manifest.completed_chromosomes == _FULL_AUTOSOMES
+    assert tuple(result.chromosome for result in loaded.chromosomes) == _FULL_AUTOSOMES
+    assert len(loaded.manifest.payloads) == 90
+    assert (destination / "chromosomes" / "22" / "factors.npy").is_file()
+
+
+def test_equivalent_writes_have_byte_identical_manifests(tmp_path: Path) -> None:
+    first = _write_artifact(tmp_path / "first")
+    second = _write_artifact(tmp_path / "second")
+
+    assert (first / "manifest.json").read_bytes() == (second / "manifest.json").read_bytes()
+
+
+def test_writer_refuses_existing_destination_without_modification(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    destination.mkdir()
+    sentinel = destination / "keep.txt"
+    sentinel.write_text("preserve", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert sentinel.read_text(encoding="utf-8") == "preserve"
+    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+
+
+def test_loader_rejects_staging_directory(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+    staging = tmp_path / "copied.staging-observable"
+    shutil.copytree(destination, staging)
+
+    with pytest.raises(ValueError, match="staging"):
+        qtl_io.load_state_artifact(staging)
+
+
+def test_factor_iterator_failure_after_one_chromosome_leaves_no_artifact_or_staging(tmp_path: Path) -> None:
+    chromosomes = tuple(str(chromosome) for chromosome in range(1, 23))
+    destination, arguments = _writer_arguments(tmp_path, chromosomes)
+
+    def failing_results():
+        yield _factor_result("1")
+        raise RuntimeError("observable factor failure")
+
+    with pytest.raises(RuntimeError, match="observable factor failure"):
+        qtl_io.write_state_artifact(destination, failing_results(), **arguments)
+
+    assert not destination.exists()
+    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+
+
+def test_validation_failure_after_one_chromosome_leaves_no_artifact_or_staging(tmp_path: Path) -> None:
+    chromosomes = tuple(str(chromosome) for chromosome in range(1, 23))
+    destination, arguments = _writer_arguments(tmp_path, chromosomes)
+    results = iter([_factor_result("1"), _factor_result("2", bad_shape=True)])
+
+    with pytest.raises(ValueError, match="factor shape"):
+        qtl_io.write_state_artifact(destination, results, **arguments)
+
+    assert not destination.exists()
+    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("schema", "schema version"),
+        ("missing-payload", "missing payload"),
+        ("corrupt-bytes", "SHA-256"),
+        ("manifest-hash", "SHA-256"),
+    ],
+)
+def test_loader_rejects_schema_missing_and_corrupt_payloads(tmp_path: Path, mutation: str, message: str) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    factor_path = destination / "chromosomes/01/factors.npy"
+    if mutation == "schema":
+        manifest["schema_version"] = 2
+        _write_manifest_dict(destination, manifest)
+    elif mutation == "missing-payload":
+        factor_path.unlink()
+    elif mutation == "corrupt-bytes":
+        with factor_path.open("ab") as stream:
+            stream.write(b"corruption")
+    else:
+        payload = next(payload for payload in manifest["payloads"] if payload["path"].endswith("factors.npy"))
+        payload["sha256"] = "0" * 64
+        _write_manifest_dict(destination, manifest)
+
+    with pytest.raises((ValueError, FileNotFoundError), match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("filename", "array", "message"),
+    [
+        ("factors.npy", np.ones((2, 1), dtype=np.float64), "shape"),
+        ("loadings.npy", np.ones((2, 1), dtype=np.float32), "dtype"),
+        ("singular_values.npy", np.ones((2,), dtype=np.float64), "shape"),
+    ],
+)
+def test_loader_rejects_array_shape_and_dtype_mutation(
+    tmp_path: Path,
+    filename: str,
+    array: np.ndarray,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    relative_path = f"chromosomes/01/{filename}"
+    with (destination / relative_path).open("wb") as stream:
+        np.save(stream, array, allow_pickle=False)
+    _update_payload_hash(destination, relative_path)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("relative_path", "message"),
+    [
+        ("cells.parquet", "cell metadata order"),
+        ("donors.parquet", "donor metadata order"),
+        ("chromosomes/01/genes.parquet", "gene metadata order"),
+    ],
+)
+def test_loader_rejects_shuffled_metadata(tmp_path: Path, relative_path: str, message: str) -> None:
+    destination = _write_artifact(tmp_path)
+    path = destination / relative_path
+    frame = pl.read_parquet(path).reverse()
+    frame.write_parquet(path)
+    _update_payload_hash(destination, relative_path)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+def test_loader_rejects_incompatible_expected_alignment_and_configuration(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+
+    with pytest.raises(ValueError, match="cell order"):
+        qtl_io.load_state_artifact(destination, expected_cell_ids=("cell-2", "cell-λ", "cell-0"))
+    with pytest.raises(ValueError, match="donor order"):
+        qtl_io.load_state_artifact(destination, expected_donor_ids=("donor-β", "donor-0"))
+    with pytest.raises(ValueError, match="gene order"):
+        qtl_io.load_state_artifact(destination, expected_gene_ids={"01": ("gene-β", "gene-0")})
+    with pytest.raises(ValueError, match="configuration"):
+        qtl_io.load_state_artifact(destination, expected_configuration={"rank": 2})
+
+
+def test_loader_rejects_unexpected_files_outside_the_fixed_layout(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+    (destination / "extra.bin").write_bytes(b"not declared")
+
+    with pytest.raises(ValueError, match="unexpected payload"):
+        qtl_io.load_state_artifact(destination)
