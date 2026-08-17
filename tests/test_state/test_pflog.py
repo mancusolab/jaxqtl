@@ -126,6 +126,27 @@ def _dense_operator_reference(
     return operator, np.flatnonzero(active), weights
 
 
+def _translated_center_reference(values: np.ndarray, *, axis: int = 0) -> np.ndarray:
+    minimum = np.min(values, axis=axis, keepdims=True)
+    maximum = np.max(values, axis=axis, keepdims=True)
+    anchor = minimum / 2.0 + maximum / 2.0
+    deviations = values - anchor
+    return deviations - np.sum(deviations / values.shape[axis], axis=axis, keepdims=True)
+
+
+def _extreme_centering_operator(*, n_rows: int, donor_index: np.ndarray, center_donors: bool):
+    state = _state_api()
+    counts = sparse.eye(n_rows, dtype=np.int64, format="csr")
+    return state.pflog_operator(
+        sparse.csr_array(counts),
+        np.full(n_rows, "1"),
+        donor_index,
+        alpha=0.1,
+        center_donors=center_donors,
+        balance_donors=False,
+    )
+
+
 def test_pflog_statistics_api_is_available_from_state_package() -> None:
     state = _state_api()
 
@@ -603,6 +624,42 @@ def test_feature_centering_is_overflow_safe_for_equal_maximum_inputs(method: str
     np.testing.assert_array_equal(result, np.zeros_like(result))
 
 
+def test_feature_centering_preserves_adjacent_maximum_contrast_in_forward_vector() -> None:
+    operator = _extreme_centering_operator(
+        n_rows=2,
+        donor_index=np.asarray([0, 0]),
+        center_donors=False,
+    )
+    maximum = np.finfo(np.float64).max
+    adjacent = np.nextafter(maximum, 0.0)
+    values = np.asarray([maximum, adjacent])
+    transformed_scale = np.log1p(0.4)
+    expected = transformed_scale * _translated_center_reference(values)
+
+    result = operator.matvec(values)
+
+    np.testing.assert_allclose(result, expected, rtol=2e-15, atol=0.0)
+    assert np.sum(result) == 0.0
+
+
+def test_feature_centering_handles_adjacent_and_symmetric_extremes_in_forward_block() -> None:
+    operator = _extreme_centering_operator(
+        n_rows=2,
+        donor_index=np.asarray([0, 0]),
+        center_donors=False,
+    )
+    maximum = np.finfo(np.float64).max
+    adjacent = np.nextafter(maximum, 0.0)
+    values = np.asarray([[maximum, maximum], [adjacent, -maximum]])
+    transformed_scale = np.log1p(0.4)
+    expected = transformed_scale * _translated_center_reference(values)
+
+    result = operator.matmat(values)
+
+    np.testing.assert_allclose(result, expected, rtol=2e-15, atol=0.0)
+    np.testing.assert_array_equal(np.sum(result, axis=0), np.zeros(values.shape[1]))
+
+
 @pytest.mark.parametrize("method", ["rmatvec", "rmatmat"])
 def test_donor_centering_is_overflow_safe_for_equal_maximum_inputs(method: str) -> None:
     state = _state_api()
@@ -622,6 +679,56 @@ def test_donor_centering_is_overflow_safe_for_equal_maximum_inputs(method: str) 
     result = getattr(operator, method)(values)
 
     np.testing.assert_array_equal(result, np.zeros_like(result))
+
+
+def test_donor_centering_preserves_adjacent_maximum_contrast_in_adjoint_vector() -> None:
+    donor_index = np.asarray([0, 0, 1, 1])
+    operator = _extreme_centering_operator(n_rows=4, donor_index=donor_index, center_donors=True)
+    maximum = np.finfo(np.float64).max
+    adjacent = np.nextafter(maximum, 0.0)
+    values = np.asarray([maximum, adjacent, 0.0, 0.0])
+    donor_centered = values.copy()
+    for donor in range(operator.diagnostics.n_donors):
+        rows = donor_index == donor
+        donor_centered[rows] = _translated_center_reference(values[rows])
+    transformed_scale = np.log1p(0.4)
+    expected = _translated_center_reference(transformed_scale * donor_centered)
+
+    result = operator.rmatvec(values)
+
+    np.testing.assert_allclose(result, expected, rtol=2e-15, atol=0.0)
+    for donor in range(operator.diagnostics.n_donors):
+        assert np.sum(result[donor_index == donor]) == 0.0
+
+
+def test_donor_centering_handles_adjacent_and_symmetric_extremes_in_adjoint_block() -> None:
+    donor_index = np.asarray([0, 0, 1, 1])
+    operator = _extreme_centering_operator(n_rows=4, donor_index=donor_index, center_donors=True)
+    maximum = np.finfo(np.float64).max
+    adjacent = np.nextafter(maximum, 0.0)
+    values = np.asarray(
+        [
+            [maximum, maximum],
+            [adjacent, -maximum],
+            [0.0, 0.0],
+            [0.0, 0.0],
+        ]
+    )
+    donor_centered = np.empty_like(values)
+    for donor in range(operator.diagnostics.n_donors):
+        rows = donor_index == donor
+        donor_centered[rows] = _translated_center_reference(values[rows])
+    transformed_scale = np.log1p(0.4)
+    expected = _translated_center_reference(transformed_scale * donor_centered)
+
+    result = operator.rmatmat(values)
+
+    np.testing.assert_allclose(result, expected, rtol=2e-15, atol=0.0)
+    for donor in range(operator.diagnostics.n_donors):
+        np.testing.assert_array_equal(
+            np.sum(result[donor_index == donor], axis=0),
+            np.zeros(values.shape[1]),
+        )
 
 
 @pytest.mark.parametrize(

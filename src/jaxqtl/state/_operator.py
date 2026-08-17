@@ -151,6 +151,24 @@ def _checked_finite_result(values: np.ndarray, *, method: str, stage: str) -> np
     return values
 
 
+def _checked_midpoint_anchor(
+    minimum: np.ndarray,
+    maximum: np.ndarray,
+    *,
+    method: str,
+    stage: str,
+) -> np.ndarray:
+    minimum = _checked_finite_result(minimum, method=method, stage=f"{stage} minimum reduction")
+    maximum = _checked_finite_result(maximum, method=method, stage=f"{stage} maximum reduction")
+    with np.errstate(over="ignore", invalid="ignore"):
+        minimum_half = minimum / 2.0
+        maximum_half = maximum / 2.0
+        anchor = minimum_half + maximum_half
+    _checked_finite_result(minimum_half, method=method, stage=f"{stage} minimum midpoint scaling")
+    _checked_finite_result(maximum_half, method=method, stage=f"{stage} maximum midpoint scaling")
+    return _checked_finite_result(anchor, method=method, stage=f"{stage} midpoint construction")
+
+
 @final
 @dataclass(frozen=True, slots=True)
 class PFLogOperator:
@@ -178,9 +196,33 @@ class PFLogOperator:
         return np.dtype(np.float64)
 
     def _feature_center(self, values: np.ndarray, *, method: str) -> np.ndarray:
+        minimum = np.min(values, axis=0, keepdims=True)
+        maximum = np.max(values, axis=0, keepdims=True)
+        anchor = _checked_midpoint_anchor(
+            minimum,
+            maximum,
+            method=method,
+            stage="feature centering",
+        )
         with np.errstate(over="ignore", invalid="ignore"):
-            feature_means = np.sum(values / values.shape[0], axis=0)
-            centered = values - feature_means
+            deviations = values - anchor
+        deviations = _checked_finite_result(deviations, method=method, stage="feature centering deviations")
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled_deviations = deviations / values.shape[0]
+        scaled_deviations = _checked_finite_result(
+            scaled_deviations,
+            method=method,
+            stage="feature centering scaled deviations",
+        )
+        with np.errstate(over="ignore", invalid="ignore"):
+            deviation_mean = np.sum(scaled_deviations, axis=0, keepdims=True)
+        deviation_mean = _checked_finite_result(
+            deviation_mean,
+            method=method,
+            stage="feature centering deviation mean",
+        )
+        with np.errstate(over="ignore", invalid="ignore"):
+            centered = deviations - deviation_mean
         return _checked_finite_result(centered, method=method, stage="feature centering")
 
     def _donor_center(self, values: np.ndarray, *, method: str) -> np.ndarray:
@@ -188,20 +230,39 @@ class PFLogOperator:
             return values
         donor_counts = self.diagnostics.donor_counts
         cell_donor_counts = donor_counts[self._donor_index]
-        if values.ndim == 1:
-            with np.errstate(over="ignore", invalid="ignore"):
-                donor_means = np.bincount(
-                    self._donor_index,
-                    weights=values / cell_donor_counts,
-                    minlength=self.diagnostics.n_donors,
-                )
-        else:
-            donor_means = np.zeros((self.diagnostics.n_donors, values.shape[1]), dtype=np.float64)
-            with np.errstate(over="ignore", invalid="ignore"):
-                np.add.at(donor_means, self._donor_index, values / cell_donor_counts[:, None])
+        matrix = values[:, None] if values.ndim == 1 else values
+        donor_minima = np.full((self.diagnostics.n_donors, matrix.shape[1]), np.inf, dtype=np.float64)
+        donor_maxima = np.full((self.diagnostics.n_donors, matrix.shape[1]), -np.inf, dtype=np.float64)
+        np.minimum.at(donor_minima, self._donor_index, matrix)
+        np.maximum.at(donor_maxima, self._donor_index, matrix)
+        donor_anchors = _checked_midpoint_anchor(
+            donor_minima,
+            donor_maxima,
+            method=method,
+            stage="donor centering",
+        )
         with np.errstate(over="ignore", invalid="ignore"):
-            centered = values - donor_means[self._donor_index]
-        return _checked_finite_result(centered, method=method, stage="donor centering")
+            deviations = matrix - donor_anchors[self._donor_index]
+        deviations = _checked_finite_result(deviations, method=method, stage="donor centering deviations")
+        with np.errstate(over="ignore", invalid="ignore"):
+            scaled_deviations = deviations / cell_donor_counts[:, None]
+        scaled_deviations = _checked_finite_result(
+            scaled_deviations,
+            method=method,
+            stage="donor centering scaled deviations",
+        )
+        donor_deviation_means = np.zeros_like(donor_anchors)
+        with np.errstate(over="ignore", invalid="ignore"):
+            np.add.at(donor_deviation_means, self._donor_index, scaled_deviations)
+        donor_deviation_means = _checked_finite_result(
+            donor_deviation_means,
+            method=method,
+            stage="donor centering deviation means",
+        )
+        with np.errstate(over="ignore", invalid="ignore"):
+            centered = deviations - donor_deviation_means[self._donor_index]
+        centered = _checked_finite_result(centered, method=method, stage="donor centering")
+        return centered[:, 0] if values.ndim == 1 else centered
 
     def _balance(self, values: np.ndarray, *, method: str) -> np.ndarray:
         with np.errstate(over="ignore", invalid="ignore"):
