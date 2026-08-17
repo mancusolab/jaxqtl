@@ -1,6 +1,7 @@
 import importlib
 
 from dataclasses import FrozenInstanceError
+from pathlib import Path
 
 import numpy as np
 import polars as pl
@@ -72,6 +73,23 @@ def _duplicate_csr(data: list[int | float], *, dtype) -> sparse.csr_array:
         (values, np.zeros(len(values), dtype=np.int32), np.array([0, len(values), len(values), len(values)])),
         shape=(3, 3),
     )
+
+
+def _write_single_cell_inputs(
+    tmp_path: Path,
+    counts,
+    *,
+    cells: pl.DataFrame | None = None,
+    genes: pl.DataFrame | None = None,
+) -> tuple[Path, Path, Path]:
+    default_cells, default_genes = _metadata()
+    counts_path = tmp_path / "counts.npz"
+    cells_path = tmp_path / "cells.parquet"
+    genes_path = tmp_path / "genes.parquet"
+    sparse.save_npz(counts_path, counts)
+    (default_cells if cells is None else cells).write_parquet(cells_path)
+    (default_genes if genes is None else genes).write_parquet(genes_path)
+    return counts_path, cells_path, genes_path
 
 
 def test_sparse_single_cell_contract_is_available_from_io_package() -> None:
@@ -334,3 +352,207 @@ def test_rejects_empty_or_reserved_cell_type_column_name() -> None:
         _normalizer()(counts, cells, genes, cell_type_column="")
     with pytest.raises(ValueError, match="cell_type_column.*distinct"):
         _normalizer()(counts, cells, genes, cell_type_column="donor_id")
+
+
+def test_sparse_single_cell_loader_is_available_from_io_package() -> None:
+    assert callable(getattr(qtl_io, "load_sparse_single_cell", None)), (
+        "load_sparse_single_cell is not available from jaxqtl.io"
+    )
+
+
+def test_loads_projected_npz_and_parquet_inputs_once_in_matrix_order(tmp_path: Path) -> None:
+    counts = sparse.csr_array(
+        np.asarray(
+            [
+                [1, 0, 2],
+                [0, 3, 0],
+                [4, 0, 5],
+            ],
+            dtype=np.int32,
+        )
+    )
+    cells, genes = _metadata()
+    cells = cells.with_columns(pl.lit("not projected").alias("unused_cell_column"))
+    genes = genes.with_columns(pl.lit(999).alias("unused_gene_column"))
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(
+        tmp_path,
+        counts,
+        cells=cells,
+        genes=genes,
+    )
+
+    result = qtl_io.load_sparse_single_cell(
+        counts_path,
+        cells_path,
+        genes_path,
+        cell_type_column="cell_type",
+    )
+
+    assert isinstance(result.counts, sparse.csr_array)
+    np.testing.assert_array_equal(result.counts.toarray(), counts.toarray())
+    assert result.cell_metadata.columns == ["matrix_index", "cell_id", "donor_id", "cell_type"]
+    assert result.gene_metadata.columns == ["matrix_index", "gene_id", "chrom"]
+    assert result.cell_ids.tolist() == ["cell-0", "cell-1", "cell-2"]
+    assert result.gene_ids.tolist() == ["gene-0", "gene-1", "gene-2"]
+    assert result.gene_chromosomes.tolist() == ["1", "X", "MT"]
+    assert result.copy_events == ("npz_materialized",)
+
+
+def test_loads_csc_npz_and_reports_conversion_events(tmp_path: Path) -> None:
+    counts = sparse.csc_array(np.diag(np.asarray([1, 2, 3], dtype=np.int16)))
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(tmp_path, counts)
+
+    result = qtl_io.load_sparse_single_cell(
+        counts_path,
+        cells_path,
+        genes_path,
+        cell_type_column="cell_type",
+    )
+
+    assert isinstance(result.counts, sparse.csr_array)
+    assert result.counts.dtype == np.dtype(np.int16)
+    assert result.copy_events == ("npz_materialized", "csc_to_csr")
+
+
+def test_loader_reports_missing_count_file_with_path_context(tmp_path: Path) -> None:
+    cells, genes = _metadata()
+    cells_path = tmp_path / "cells.parquet"
+    genes_path = tmp_path / "genes.parquet"
+    cells.write_parquet(cells_path)
+    genes.write_parquet(genes_path)
+    missing_counts = tmp_path / "missing-counts.npz"
+
+    with pytest.raises(ValueError, match=r"count NPZ.*missing-counts\.npz"):
+        qtl_io.load_sparse_single_cell(
+            missing_counts,
+            cells_path,
+            genes_path,
+            cell_type_column="cell_type",
+        )
+
+
+@pytest.mark.parametrize(
+    ("missing_metadata", "message"),
+    [
+        ("cell", r"cell metadata Parquet.*missing-cells\.parquet"),
+        ("gene", r"gene metadata Parquet.*missing-genes\.parquet"),
+    ],
+)
+def test_loader_reports_missing_metadata_file_with_path_context(
+    tmp_path: Path,
+    missing_metadata: str,
+    message: str,
+) -> None:
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(
+        tmp_path,
+        sparse.csr_array(np.eye(3, dtype=np.int8)),
+    )
+    if missing_metadata == "cell":
+        cells_path = tmp_path / "missing-cells.parquet"
+    else:
+        genes_path = tmp_path / "missing-genes.parquet"
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_sparse_single_cell(
+            counts_path,
+            cells_path,
+            genes_path,
+            cell_type_column="cell_type",
+        )
+
+
+@pytest.mark.parametrize(
+    ("metadata", "dropped_column", "message"),
+    [
+        ("cell", "donor_id", "cell metadata.*donor_id"),
+        ("gene", "chrom", "gene metadata.*chrom"),
+    ],
+)
+def test_loader_reports_projected_parquet_schema_failures(
+    tmp_path: Path,
+    metadata: str,
+    dropped_column: str,
+    message: str,
+) -> None:
+    counts = sparse.csr_array(np.eye(3, dtype=np.int8))
+    cells, genes = _metadata()
+    if metadata == "cell":
+        cells = cells.drop(dropped_column)
+    else:
+        genes = genes.drop(dropped_column)
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(
+        tmp_path,
+        counts,
+        cells=cells,
+        genes=genes,
+    )
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_sparse_single_cell(
+            counts_path,
+            cells_path,
+            genes_path,
+            cell_type_column="cell_type",
+        )
+
+
+def test_loader_rejects_unsupported_sparse_npz_family(tmp_path: Path) -> None:
+    counts = sparse.coo_array(np.eye(3, dtype=np.int8))
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(tmp_path, counts)
+
+    with pytest.raises(TypeError, match="CSR or CSC"):
+        qtl_io.load_sparse_single_cell(
+            counts_path,
+            cells_path,
+            genes_path,
+            cell_type_column="cell_type",
+        )
+
+
+def test_loader_exposes_transposed_non_square_orientation_error(tmp_path: Path) -> None:
+    counts = sparse.csr_array(np.asarray([[1, 0], [0, 2], [3, 0]], dtype=np.int16))
+    cells = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "cell_id": ["cell-0", "cell-1", "cell-2"],
+            "donor_id": ["donor-0", "donor-0", "donor-1"],
+            "cell_type": ["B", "B", "T"],
+        }
+    )
+    genes = pl.DataFrame(
+        {
+            "matrix_index": [0, 1],
+            "gene_id": ["gene-0", "gene-1"],
+            "chrom": ["1", "2"],
+        }
+    )
+    transposed = counts.T.tocsr()
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(
+        tmp_path,
+        transposed,
+        cells=cells,
+        genes=genes,
+    )
+
+    with pytest.raises(ValueError, match="cell metadata axis length"):
+        qtl_io.load_sparse_single_cell(
+            counts_path,
+            cells_path,
+            genes_path,
+            cell_type_column="cell_type",
+        )
+
+
+def test_loader_rejects_empty_cell_type_column_before_scanning(tmp_path: Path) -> None:
+    counts_path, cells_path, genes_path = _write_single_cell_inputs(
+        tmp_path,
+        sparse.csr_array(np.eye(3, dtype=np.int8)),
+    )
+
+    with pytest.raises(ValueError, match="cell_type_column.*nonempty"):
+        qtl_io.load_sparse_single_cell(
+            counts_path,
+            cells_path,
+            genes_path,
+            cell_type_column="",
+        )
