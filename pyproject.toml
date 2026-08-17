@@ -90,6 +90,7 @@ dependencies = [
     "hypothesis>=6.165",
     "pytest",
     "pytest-cov",
+    "statsmodels",
 ]
 
 [tool.hatch.envs.test.scripts]
