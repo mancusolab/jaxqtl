@@ -380,6 +380,53 @@ def test_existing_output_is_rejected_before_ingress_or_factorization(
     assert calls == []
 
 
+@pytest.mark.parametrize(
+    ("destination_kind", "message"),
+    [
+        ("missing-parent", "parent directory does not exist"),
+        ("non-directory-parent", "parent directory does not exist"),
+        ("reserved-staging-namespace", "reserved staging namespace"),
+    ],
+)
+def test_invalid_output_path_is_rejected_before_ingress_or_factorization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    destination_kind: str,
+    message: str,
+) -> None:
+    paths = _single_cell_inputs(tmp_path)
+    if destination_kind == "missing-parent":
+        destination = tmp_path / "missing-parent" / "state-artifact"
+    elif destination_kind == "non-directory-parent":
+        parent = tmp_path / "not-a-directory"
+        parent.write_text("file", encoding="utf-8")
+        destination = parent / "state-artifact"
+    else:
+        destination = tmp_path / ".jaxqtl-state-artifact-staging-user-output"
+    argv = _argv(tmp_path, paths)
+    argv[argv.index("--out") + 1] = str(destination)
+    calls: list[str] = []
+    original_load = cli.load_sparse_single_cell
+
+    def tracked_load(*args, **kwargs):
+        calls.append("load")
+        return original_load(*args, **kwargs)
+
+    def tracked_factor(*args, **kwargs):
+        del args, kwargs
+        calls.append("factor")
+        return object()
+
+    monkeypatch.setattr(cli, "load_sparse_single_cell", tracked_load)
+    monkeypatch.setattr(cli, "construct_state_factor", tracked_factor)
+
+    status, _, stderr = _run(argv)
+
+    assert status == 1
+    assert message in stderr
+    assert calls == []
+
+
 def test_state_factor_loco_dispatch_writes_all_autosomes(tmp_path: Path) -> None:
     paths = _single_cell_inputs(tmp_path)
     argv = _argv(tmp_path, paths, out_name="loco")

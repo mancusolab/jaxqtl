@@ -6,8 +6,6 @@ import math
 import re
 import sys
 
-from pathlib import Path
-
 import numpy as np
 import polars as pl
 import pyarrow as pa
@@ -45,6 +43,7 @@ from .io import (
     select_single_cell_data,
     write_state_artifact,
 )
+from .io._state_artifact import _preflight_state_artifact_destination
 from .log import cli_logging
 from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState
@@ -767,9 +766,7 @@ def _validate_state_factor_shapes(args, selected, requested_chromosomes: tuple[s
 
 def _state_factor(args, log) -> int:
     try:
-        output_path = Path(args.out)
-        if output_path.exists() or output_path.is_symlink():
-            raise FileExistsError(f"state artifact destination already exists: {output_path}")
+        _preflight_state_artifact_destination(args.out)
         log.info("Loading and selecting sparse single-cell data.")
         source = load_sparse_single_cell(
             args.counts,

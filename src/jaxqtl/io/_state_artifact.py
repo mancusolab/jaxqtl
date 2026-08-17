@@ -50,6 +50,19 @@ _HASH_CHUNK_SIZE = 1024 * 1024
 _STAGING_DIRECTORY_PREFIX = ".jaxqtl-state-artifact-staging-"
 
 
+def _preflight_state_artifact_destination(destination: str | os.PathLike[str]) -> Path:
+    """Reject deterministic destination failures before artifact computation."""
+    final_path = Path(destination)
+    if final_path.name.startswith(_STAGING_DIRECTORY_PREFIX):
+        raise ValueError(f"state artifact destination uses the reserved staging namespace: {final_path}")
+    if final_path.exists() or final_path.is_symlink():
+        raise FileExistsError(f"state artifact destination already exists: {final_path}")
+    parent = final_path.parent
+    if not parent.is_dir():
+        raise FileNotFoundError(f"state artifact parent directory does not exist or is not a directory: {parent}")
+    return final_path
+
+
 def _sha256_file(path: Path) -> str:
     import hashlib
 
@@ -501,14 +514,8 @@ def write_state_artifact(
         If inputs, streamed results, writes, hashes, or staged validation fail. The staging
         directory is removed and no final artifact is exposed.
     """
-    final_path = Path(destination)
-    if final_path.name.startswith(_STAGING_DIRECTORY_PREFIX):
-        raise ValueError(f"state artifact destination uses the reserved staging namespace: {final_path}")
-    if final_path.exists() or final_path.is_symlink():
-        raise FileExistsError(f"state artifact destination already exists: {final_path}")
+    final_path = _preflight_state_artifact_destination(destination)
     parent = final_path.parent
-    if not parent.is_dir():
-        raise FileNotFoundError(f"state artifact parent directory does not exist: {parent}")
     chromosomes = _validated_chromosome_set(requested_chromosomes, require_canonical=False)
     (
         canonical_cells,
