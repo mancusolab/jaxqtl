@@ -123,7 +123,11 @@ def _validated_vector(values, *, size: int, method: str) -> np.ndarray:
         raise TypeError(f"{method} input must contain real numerical values")
     if np.issubdtype(array.dtype, np.complexfloating):
         raise TypeError(f"{method} input must contain real numerical values")
-    return np.asarray(array, dtype=np.float64)
+    with np.errstate(over="ignore", invalid="ignore"):
+        normalized = np.asarray(array, dtype=np.float64)
+    if not np.isfinite(normalized).all():
+        raise ValueError(f"{method} input must contain only finite values")
+    return normalized
 
 
 def _validated_matrix(values, *, rows: int, method: str) -> np.ndarray:
@@ -134,7 +138,17 @@ def _validated_matrix(values, *, rows: int, method: str) -> np.ndarray:
         raise TypeError(f"{method} input must contain real numerical values")
     if np.issubdtype(array.dtype, np.complexfloating):
         raise TypeError(f"{method} input must contain real numerical values")
-    return np.asarray(array, dtype=np.float64)
+    with np.errstate(over="ignore", invalid="ignore"):
+        normalized = np.asarray(array, dtype=np.float64)
+    if not np.isfinite(normalized).all():
+        raise ValueError(f"{method} input must contain only finite values")
+    return normalized
+
+
+def _checked_finite_result(values: np.ndarray, *, method: str, stage: str) -> np.ndarray:
+    if not np.isfinite(values).all():
+        raise ArithmeticError(f"{method} produced nonfinite values during {stage}")
+    return values
 
 
 @final
@@ -163,30 +177,39 @@ class PFLogOperator:
         r"""Return the fixed float64 action dtype."""
         return np.dtype(np.float64)
 
-    def _feature_center(self, values: np.ndarray) -> np.ndarray:
-        return values - np.mean(values, axis=0)
+    def _feature_center(self, values: np.ndarray, *, method: str) -> np.ndarray:
+        with np.errstate(over="ignore", invalid="ignore"):
+            feature_means = np.sum(values / values.shape[0], axis=0)
+            centered = values - feature_means
+        return _checked_finite_result(centered, method=method, stage="feature centering")
 
-    def _donor_center(self, values: np.ndarray) -> np.ndarray:
+    def _donor_center(self, values: np.ndarray, *, method: str) -> np.ndarray:
         if not self.config.center_donors:
             return values
         donor_counts = self.diagnostics.donor_counts
+        cell_donor_counts = donor_counts[self._donor_index]
         if values.ndim == 1:
-            totals = np.bincount(
-                self._donor_index,
-                weights=values,
-                minlength=self.diagnostics.n_donors,
-            )
-            donor_means = totals / donor_counts
+            with np.errstate(over="ignore", invalid="ignore"):
+                donor_means = np.bincount(
+                    self._donor_index,
+                    weights=values / cell_donor_counts,
+                    minlength=self.diagnostics.n_donors,
+                )
         else:
-            totals = np.zeros((self.diagnostics.n_donors, values.shape[1]), dtype=np.float64)
-            np.add.at(totals, self._donor_index, values)
-            donor_means = totals / donor_counts[:, None]
-        return values - donor_means[self._donor_index]
+            donor_means = np.zeros((self.diagnostics.n_donors, values.shape[1]), dtype=np.float64)
+            with np.errstate(over="ignore", invalid="ignore"):
+                np.add.at(donor_means, self._donor_index, values / cell_donor_counts[:, None])
+        with np.errstate(over="ignore", invalid="ignore"):
+            centered = values - donor_means[self._donor_index]
+        return _checked_finite_result(centered, method=method, stage="donor centering")
 
-    def _balance(self, values: np.ndarray) -> np.ndarray:
-        if values.ndim == 1:
-            return self._sqrt_cell_weights * values
-        return self._sqrt_cell_weights[:, None] * values
+    def _balance(self, values: np.ndarray, *, method: str) -> np.ndarray:
+        with np.errstate(over="ignore", invalid="ignore"):
+            if values.ndim == 1:
+                balanced = self._sqrt_cell_weights * values
+            else:
+                balanced = self._sqrt_cell_weights[:, None] * values
+        return _checked_finite_result(balanced, method=method, stage="donor balancing")
 
     def matvec(self, vector) -> np.ndarray:
         r"""Apply the PFlog operator to one active-gene vector.
@@ -203,13 +226,19 @@ class PFLogOperator:
         **Raises:**
 
         ValueError
-            If the input shape is incompatible with the operator.
+            If the input shape is incompatible with the operator or values are
+            nonfinite.
         TypeError
             If the input is not real numerical data.
+        ArithmeticError
+            If finite inputs overflow during the operator action.
         """
         values = _validated_vector(vector, size=self.shape[1], method="matvec")
-        cells = np.asarray(self._transformed_counts @ self._feature_center(values), dtype=np.float64)
-        return self._balance(self._donor_center(cells))
+        centered = self._feature_center(values, method="matvec")
+        with np.errstate(over="ignore", invalid="ignore"):
+            cells = np.asarray(self._transformed_counts @ centered, dtype=np.float64)
+        cells = _checked_finite_result(cells, method="matvec", stage="sparse multiplication")
+        return self._balance(self._donor_center(cells, method="matvec"), method="matvec")
 
     def rmatvec(self, vector) -> np.ndarray:
         r"""Apply the exact transpose to one cell vector.
@@ -226,14 +255,19 @@ class PFLogOperator:
         **Raises:**
 
         ValueError
-            If the input shape is incompatible with the operator.
+            If the input shape is incompatible with the operator or values are
+            nonfinite.
         TypeError
             If the input is not real numerical data.
+        ArithmeticError
+            If finite inputs overflow during the operator action.
         """
         values = _validated_vector(vector, size=self.shape[0], method="rmatvec")
-        centered = self._donor_center(self._balance(values))
-        features = np.asarray(self._transformed_counts.T @ centered, dtype=np.float64)
-        return self._feature_center(features)
+        centered = self._donor_center(self._balance(values, method="rmatvec"), method="rmatvec")
+        with np.errstate(over="ignore", invalid="ignore"):
+            features = np.asarray(self._transformed_counts.T @ centered, dtype=np.float64)
+        features = _checked_finite_result(features, method="rmatvec", stage="sparse multiplication")
+        return self._feature_center(features, method="rmatvec")
 
     def matmat(self, matrix) -> np.ndarray:
         r"""Apply the PFlog operator to a block of active-gene vectors.
@@ -250,13 +284,19 @@ class PFLogOperator:
         **Raises:**
 
         ValueError
-            If the input shape is incompatible with the operator.
+            If the input shape is incompatible with the operator or values are
+            nonfinite.
         TypeError
             If the input is not real numerical data.
+        ArithmeticError
+            If finite inputs overflow during the operator action.
         """
         values = _validated_matrix(matrix, rows=self.shape[1], method="matmat")
-        cells = np.asarray(self._transformed_counts @ self._feature_center(values), dtype=np.float64)
-        return self._balance(self._donor_center(cells))
+        centered = self._feature_center(values, method="matmat")
+        with np.errstate(over="ignore", invalid="ignore"):
+            cells = np.asarray(self._transformed_counts @ centered, dtype=np.float64)
+        cells = _checked_finite_result(cells, method="matmat", stage="sparse multiplication")
+        return self._balance(self._donor_center(cells, method="matmat"), method="matmat")
 
     def rmatmat(self, matrix) -> np.ndarray:
         r"""Apply the exact transpose to a block of cell vectors.
@@ -273,14 +313,19 @@ class PFLogOperator:
         **Raises:**
 
         ValueError
-            If the input shape is incompatible with the operator.
+            If the input shape is incompatible with the operator or values are
+            nonfinite.
         TypeError
             If the input is not real numerical data.
+        ArithmeticError
+            If finite inputs overflow during the operator action.
         """
         values = _validated_matrix(matrix, rows=self.shape[0], method="rmatmat")
-        centered = self._donor_center(self._balance(values))
-        features = np.asarray(self._transformed_counts.T @ centered, dtype=np.float64)
-        return self._feature_center(features)
+        centered = self._donor_center(self._balance(values, method="rmatmat"), method="rmatmat")
+        with np.errstate(over="ignore", invalid="ignore"):
+            features = np.asarray(self._transformed_counts.T @ centered, dtype=np.float64)
+        features = _checked_finite_result(features, method="rmatmat", stage="sparse multiplication")
+        return self._feature_center(features, method="rmatmat")
 
 
 def pflog_operator(

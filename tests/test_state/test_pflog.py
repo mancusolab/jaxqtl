@@ -581,6 +581,87 @@ def test_extreme_finite_alpha_count_transform_matches_high_precision_reference()
     assert result[1] == 0.0
 
 
+@pytest.mark.parametrize("method", ["matvec", "matmat"])
+def test_feature_centering_is_overflow_safe_for_equal_maximum_inputs(method: str) -> None:
+    state = _state_api()
+    counts, chromosomes, donor_index = _operator_fixture()
+    operator = state.pflog_operator(
+        sparse.csr_array(counts),
+        chromosomes,
+        donor_index,
+        alpha=0.5,
+        center_donors=False,
+        balance_donors=False,
+    )
+    maximum = np.finfo(np.float64).max
+    values = np.full(operator.shape[1], maximum)
+    if method == "matmat":
+        values = np.column_stack((values, values))
+
+    result = getattr(operator, method)(values)
+
+    np.testing.assert_array_equal(result, np.zeros_like(result))
+
+
+@pytest.mark.parametrize("method", ["rmatvec", "rmatmat"])
+def test_donor_centering_is_overflow_safe_for_equal_maximum_inputs(method: str) -> None:
+    state = _state_api()
+    counts, chromosomes, donor_index = _operator_fixture()
+    operator = state.pflog_operator(
+        sparse.csr_array(counts),
+        chromosomes,
+        donor_index,
+        alpha=0.5,
+        balance_donors=False,
+    )
+    maximum = np.finfo(np.float64).max
+    values = np.full(operator.shape[0], maximum)
+    if method == "rmatmat":
+        values = np.column_stack((values, values))
+
+    result = getattr(operator, method)(values)
+
+    np.testing.assert_array_equal(result, np.zeros_like(result))
+
+
+@pytest.mark.parametrize(
+    ("method", "shape"),
+    [
+        ("matvec", (4,)),
+        ("rmatvec", (5,)),
+        ("matmat", (4, 2)),
+        ("rmatmat", (5, 2)),
+    ],
+)
+@pytest.mark.parametrize("nonfinite", [np.nan, np.inf, -np.inf])
+def test_operator_actions_reject_nonfinite_inputs(method: str, shape: tuple[int, ...], nonfinite: float) -> None:
+    state = _state_api()
+    counts, chromosomes, donor_index = _operator_fixture()
+    operator = state.pflog_operator(sparse.csr_array(counts), chromosomes, donor_index, alpha=0.5)
+    values = np.zeros(shape, dtype=np.float64)
+    values.flat[0] = nonfinite
+
+    with pytest.raises(ValueError, match=rf"{method} input.*finite"):
+        getattr(operator, method)(values)
+
+
+def test_operator_actions_reject_nonfinite_results_from_finite_inputs() -> None:
+    state = _state_api()
+    counts = _counts([[1, 0], [0, 0]])
+    operator = state.pflog_operator(
+        counts,
+        np.asarray(["1", "2"]),
+        np.asarray([0, 0]),
+        alpha=1.0,
+        center_donors=False,
+        balance_donors=False,
+    )
+    maximum = np.finfo(np.float64).max
+
+    with pytest.raises(ArithmeticError, match="matvec.*nonfinite"):
+        operator.matvec(np.asarray([maximum, -maximum]))
+
+
 @pytest.mark.parametrize("alpha", [0.0, -1.0, np.nan, np.inf, -np.inf, True])
 def test_operator_rejects_invalid_alpha(alpha) -> None:
     state = _state_api()
