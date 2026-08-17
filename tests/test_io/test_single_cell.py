@@ -1,5 +1,6 @@
 import importlib
 
+from collections.abc import Sequence
 from dataclasses import FrozenInstanceError
 from pathlib import Path
 
@@ -67,7 +68,7 @@ def _normalize(
     )
 
 
-def _duplicate_csr(data: list[int | float], *, dtype) -> sparse.csr_array:
+def _duplicate_csr(data: Sequence[int | float], *, dtype) -> sparse.csr_array:
     values = np.asarray(data, dtype=dtype)
     return sparse.csr_array(
         (values, np.zeros(len(values), dtype=np.int32), np.array([0, len(values), len(values), len(values)])),
@@ -131,6 +132,12 @@ def test_result_contract_is_frozen() -> None:
 
     with pytest.raises(FrozenInstanceError):
         result.copy_events = ()
+    with pytest.raises(ValueError, match="read-only"):
+        result.counts.data[0] = 0
+    with pytest.raises(ValueError, match="read-only"):
+        result.counts.indices[0] = 1
+    with pytest.raises(ValueError, match="read-only"):
+        result.counts.indptr[0] = 1
 
 
 def test_integral_float_storage_becomes_integer_and_records_canonicalization() -> None:
@@ -181,11 +188,57 @@ def test_duplicate_sum_rejects_source_integer_dtype_overflow() -> None:
         _normalize(counts)
 
 
-def test_duplicate_float_sum_must_remain_exact_in_source_dtype() -> None:
-    counts = _duplicate_csr([2**24, 1], dtype=np.float32)
+@pytest.mark.parametrize(
+    ("dtype", "boundary"),
+    [
+        (np.float32, 2**24),
+        (np.float64, 2**53),
+    ],
+)
+@pytest.mark.parametrize(("offset", "accepted"), [(-1, True), (0, True), (1, False)])
+def test_floating_duplicate_sums_respect_source_dtype_exact_integer_boundary(
+    dtype,
+    boundary: int,
+    offset: int,
+    accepted: bool,
+) -> None:
+    values = [boundary - 2, 1] if offset == -1 else [boundary - 1, 1]
+    if offset == 1:
+        values = [boundary, 1]
+    counts = _duplicate_csr(values, dtype=dtype)
 
-    with pytest.raises(ValueError, match="duplicate.*float32"):
-        _normalize(counts)
+    if accepted:
+        result = _normalize(counts)
+        assert result.counts[0, 0] == boundary + offset
+    else:
+        with pytest.raises(ValueError, match=rf"duplicate.*{np.dtype(dtype)}|duplicate.*2\*\*53"):
+            _normalize(counts)
+
+
+@pytest.mark.parametrize("dtype", [np.float32, np.float64])
+@pytest.mark.parametrize(("position", "accepted"), [("below", True), ("at", True), ("above", False)])
+def test_floating_duplicate_sums_respect_exact_float64_integer_bound(
+    dtype,
+    position: str,
+    accepted: bool,
+) -> None:
+    bound = np.asarray(MAX_EXACT_FLOAT64_INT, dtype=dtype).item()
+    below = np.nextafter(np.asarray(bound, dtype=dtype), np.asarray(0, dtype=dtype)).item()
+    gap = int(bound) - int(below)
+    values_by_position = {
+        "below": [below, 0],
+        "at": [below, gap],
+        "above": [bound, 1],
+    }
+    counts = _duplicate_csr(values_by_position[position], dtype=dtype)
+
+    if accepted:
+        result = _normalize(counts)
+        expected = int(below) if position == "below" else MAX_EXACT_FLOAT64_INT
+        assert result.counts[0, 0] == expected
+    else:
+        with pytest.raises(ValueError, match=r"duplicate.*2\*\*53"):
+            _normalize(counts)
 
 
 def test_negative_float_duplicate_cannot_be_hidden_by_positive_cancellation() -> None:

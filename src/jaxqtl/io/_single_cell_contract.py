@@ -1,7 +1,5 @@
 # pattern: Functional Core
 
-import math
-
 from dataclasses import dataclass
 from typing import Literal, TypeAlias
 
@@ -82,23 +80,21 @@ def _validate_stored_counts(values: np.ndarray, *, context: str) -> None:
 
 
 def _checked_group_sum(values: np.ndarray, *, source_dtype: np.dtype, coordinate: tuple[int, int]) -> int:
+    total = sum(int(value) for value in values)
+    if not 0 <= total <= MAX_EXACT_FLOAT64_INT:
+        raise ValueError(f"duplicate count sum at {coordinate} exceeds the 2**53 exact float64 integer bound")
+
     if np.issubdtype(source_dtype, np.integer):
-        total = sum(int(value) for value in values)
         dtype_info = np.iinfo(source_dtype)
         if total < dtype_info.min or total > dtype_info.max:
             raise ValueError(f"duplicate count sum at {coordinate} is outside source dtype {source_dtype}")
     else:
-        float_total = float(math.fsum(float(value) for value in values))
-        if not math.isfinite(float_total) or not float_total.is_integer():
-            raise ValueError(f"duplicate count sum at {coordinate} must be a finite exact integer")
-        source_value = np.asarray(float_total, dtype=source_dtype).item()
-        if float(source_value) != float_total:
+        with np.errstate(over="ignore", invalid="ignore"):
+            source_value = np.asarray(total, dtype=source_dtype).item()
+        if not np.isfinite(source_value) or int(source_value) != total:
             raise ValueError(
                 f"duplicate count sum at {coordinate} is not exactly representable in source dtype {source_dtype}"
             )
-        total = int(float_total)
-    if not 0 <= total <= MAX_EXACT_FLOAT64_INT:
-        raise ValueError(f"duplicate count sum at {coordinate} exceeds the 2**53 exact float64 integer bound")
     return total
 
 
@@ -186,6 +182,9 @@ def _canonical_counts(counts) -> tuple[sparse.csr_array, tuple[SparseCopyEvent, 
         raise ValueError("canonicalized sparse counts must retain integer storage")
     if not canonical.has_canonical_format:
         raise ValueError("canonicalized sparse counts must have sorted indices without duplicates")
+    canonical.data.flags.writeable = False
+    canonical.indices.flags.writeable = False
+    canonical.indptr.flags.writeable = False
     return canonical, tuple(events)
 
 
