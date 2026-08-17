@@ -2,9 +2,11 @@
 
 import argparse as ap
 import logging
+import math
 import re
 import sys
 
+import numpy as np
 import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
@@ -34,13 +36,20 @@ from .infer import (
 from .io import (
     ExpressionData,
     load_genotype_dataset,
+    load_sparse_single_cell,
     read_offset_tsvlike,
     read_plink_style_tsvlike,
     read_single_column_file,
+    select_single_cell_data,
+    write_state_artifact,
 )
-from .log import get_logger
+from .log import cli_logging
 from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState
+from .state import construct_state_factor, iter_loco_state_factors
+
+
+_AUTOSOMES = tuple(str(chromosome) for chromosome in range(1, 23))
 
 
 class _SplitAction(ap.Action):
@@ -273,6 +282,133 @@ def _create_common_subp(subp, name, help):
     )
     common_p.add_argument("--out", "-o", type=str, default="jaxqtl", help="out file prefix")
     return common_p
+
+
+def _positive_integer(value: str) -> int:
+    try:
+        parsed = int(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be a positive integer") from error
+    if parsed <= 0:
+        raise ap.ArgumentTypeError("must be a positive integer")
+    return parsed
+
+
+def _positive_finite(value: str) -> float:
+    try:
+        parsed = float(value)
+    except ValueError as error:
+        raise ap.ArgumentTypeError("must be a finite positive number") from error
+    if not math.isfinite(parsed) or parsed <= 0.0:
+        raise ap.ArgumentTypeError("must be a finite positive number")
+    return parsed
+
+
+def _pflog_alpha(value: str) -> str | float:
+    if value == "auto":
+        return value
+    try:
+        return _positive_finite(value)
+    except ap.ArgumentTypeError as error:
+        raise ap.ArgumentTypeError("--pflog-alpha must be 'auto' or a finite positive number") from error
+
+
+def _create_state_factor_subp(subp):
+    state_p = subp.add_parser(
+        "state-factor",
+        help="Construct chromosome-specific single-cell state-factor artifacts.",
+        description=(
+            "Construct one chromosome-excluded or complete LOCO state-factor artifact. "
+            "The command uses the fixed CPU platform and console-only logging."
+        ),
+        formatter_class=ap.ArgumentDefaultsHelpFormatter,
+    )
+    required = state_p.add_argument_group("required inputs and solver controls")
+    required.add_argument("--counts", required=True, help="[required] SciPy sparse count matrix (.npz).")
+    required.add_argument("--cells", required=True, help="[required] Cell metadata Parquet path.")
+    required.add_argument("--genes", required=True, help="[required] Gene metadata Parquet path.")
+    required.add_argument(
+        "--cell-type-column",
+        required=True,
+        help="[required] Cell metadata column containing cell-type labels.",
+    )
+    required.add_argument("--rank", required=True, type=_positive_integer, help="[required] Strict truncated rank.")
+    required.add_argument(
+        "--solver",
+        required=True,
+        choices=("propack", "arpack"),
+        help="[required; no default] Sparse SVD solver.",
+    )
+    required.add_argument(
+        "--tol",
+        required=True,
+        type=_positive_finite,
+        help="[required; no default] Finite positive relative solver tolerance.",
+    )
+    required.add_argument(
+        "--maxiter",
+        required=True,
+        type=_positive_integer,
+        help="[required; no default] ARPACK iteration cap or PROPACK Krylov dimension.",
+    )
+    required.add_argument("--seed", required=True, type=int, help="[required; no default] Integer solver seed.")
+    required.add_argument("--out", required=True, help="[required] New artifact directory; it must not exist.")
+
+    solver = state_p.add_argument_group("solver-specific controls")
+    solver.add_argument(
+        "--ncv",
+        type=_positive_integer,
+        default=None,
+        help="[conditional] required for ARPACK; forbidden for PROPACK; rank < ncv < min(M, q_active).",
+    )
+
+    exclusion = state_p.add_mutually_exclusive_group(required=True)
+    exclusion.add_argument(
+        "--exclude-chromosome",
+        choices=_AUTOSOMES,
+        help="[required mode] Construct one factor artifact excluding this autosome.",
+    )
+    exclusion.add_argument(
+        "--loco",
+        action="store_true",
+        help="[required mode] Stream factors for canonical autosomes 1 through 22.",
+    )
+
+    selection = state_p.add_mutually_exclusive_group()
+    selection.add_argument("--cell-type", help="Select one observed cell type; omit for a single-type table.")
+    selection.add_argument(
+        "--allow-mixed-cell-types",
+        action="store_true",
+        help="Explicitly retain every observed cell type.",
+    )
+
+    fixed = state_p.add_argument_group("fixed and defaulted workflow controls")
+    fixed.add_argument(
+        "--pflog-alpha",
+        type=_pflog_alpha,
+        default="auto",
+        help="PFlog alpha estimator or explicit finite positive override (default: auto).",
+    )
+    fixed.add_argument(
+        "--center-within-donor",
+        action=ap.BooleanOptionalAction,
+        default=True,
+        help="Center features within donors.",
+    )
+    fixed.add_argument(
+        "--balance-donors",
+        action=ap.BooleanOptionalAction,
+        default=True,
+        help="Learn loadings using donor-balanced covariance.",
+    )
+    fixed.add_argument(
+        "--verbose",
+        action="store_true",
+        default=False,
+        help="Enable debug diagnostics; fixed default is false; platform is fixed: cpu.",
+    )
+    state_p.set_defaults(func=_state_factor, platform="cpu")
+    return state_p
 
 
 def _compute_expression_pcs(args, log):
@@ -600,7 +736,129 @@ def _common_setup(args, log):
     return data, family, reg_model, test, perm_test
 
 
-def main(args):
+def _validate_state_factor_shapes(args, selected, requested_chromosomes: tuple[str, ...]) -> None:
+    n_cells = selected.counts.shape[0]
+    active_dimensions = {
+        chromosome: int(np.count_nonzero(selected.gene_chromosomes != chromosome))
+        for chromosome in requested_chromosomes
+    }
+    limiting_dimension = min(min(n_cells, active_genes) for active_genes in active_dimensions.values())
+    if args.rank >= limiting_dimension:
+        raise ValueError(
+            "--rank must satisfy rank < min(M, q_active) for every requested chromosome; "
+            f"got rank={args.rank} and limiting dimension={limiting_dimension}"
+        )
+    if args.solver == "propack":
+        if args.ncv is not None:
+            raise ValueError("--ncv is forbidden for PROPACK")
+        return
+    if args.ncv is None:
+        raise ValueError("--ncv is required for ARPACK")
+    if args.ncv <= args.rank:
+        raise ValueError(f"ARPACK requires rank < ncv; got rank={args.rank} and ncv={args.ncv}")
+    if args.ncv >= limiting_dimension:
+        raise ValueError(
+            "ARPACK requires ncv < min(M, q_active) for every requested chromosome; "
+            f"got ncv={args.ncv} and limiting dimension={limiting_dimension}"
+        )
+
+
+def _state_factor(args, log) -> int:
+    try:
+        log.info("Loading and selecting sparse single-cell data.")
+        source = load_sparse_single_cell(
+            args.counts,
+            args.cells,
+            args.genes,
+            cell_type_column=args.cell_type_column,
+        )
+        selected = select_single_cell_data(
+            source,
+            cell_type=args.cell_type,
+            allow_mixed_cell_types=args.allow_mixed_cell_types,
+        )
+        requested_chromosomes = _AUTOSOMES if args.loco else (args.exclude_chromosome,)
+        _validate_state_factor_shapes(args, selected, requested_chromosomes)
+
+        factor_options = {
+            "rank": args.rank,
+            "solver": args.solver,
+            "tol": args.tol,
+            "maxiter": args.maxiter,
+            "seed": args.seed,
+            "ncv": args.ncv,
+            "pflog_alpha": args.pflog_alpha,
+            "center_within_donor": args.center_within_donor,
+            "balance_donors": args.balance_donors,
+        }
+        if args.loco:
+            factor_results = iter_loco_state_factors(
+                selected.counts,
+                selected.donor_index,
+                selected.gene_chromosomes,
+                chromosomes=requested_chromosomes,
+                **factor_options,
+            )
+        else:
+            factor_results = iter(
+                (
+                    construct_state_factor(
+                        selected.counts,
+                        selected.donor_index,
+                        selected.gene_chromosomes,
+                        exclude_chromosome=args.exclude_chromosome,
+                        **factor_options,
+                    ),
+                )
+            )
+
+        resolved_configuration = {
+            "allow_mixed_cell_types": selected.allow_mixed_cell_types,
+            "balance_donors": args.balance_donors,
+            "cell_type": selected.selected_cell_type,
+            "center_within_donor": args.center_within_donor,
+            "exclude_chromosome": args.exclude_chromosome,
+            "loco": args.loco,
+            "maxiter": args.maxiter,
+            "ncv": args.ncv,
+            "pflog_alpha": args.pflog_alpha,
+            "platform": "cpu",
+            "rank": args.rank,
+            "seed": args.seed,
+            "solver": args.solver,
+            "tol": args.tol,
+            "verbose": args.verbose,
+        }
+        manifest = write_state_artifact(
+            args.out,
+            factor_results,
+            requested_chromosomes=requested_chromosomes,
+            cell_metadata=selected.cell_metadata,
+            gene_metadata=selected.gene_metadata,
+            donor_ids=tuple(str(donor_id) for donor_id in selected.donor_ids),
+            donor_counts=tuple(int(count) for count in selected.donor_counts),
+            input_paths={"counts": args.counts, "cells": args.cells, "genes": args.genes},
+            cell_type_column=selected.cell_type_column,
+            selected_cell_type=selected.selected_cell_type,
+            allow_mixed_cell_types=selected.allow_mixed_cell_types,
+            configuration=resolved_configuration,
+        )
+        for chromosome in manifest.chromosomes:
+            residuals = chromosome.convergence_residuals
+            log.info(
+                f"state-factor chromosome {chromosome.chromosome}: rank={chromosome.rank}, "
+                f"max forward residual={residuals['max_forward_residual']}, "
+                f"max adjoint residual={residuals['max_adjoint_residual']}, "
+                f"loading orthogonality error={residuals['loading_orthogonality_error']}"
+            )
+        log.info(f"Wrote complete state-factor artifact to {args.out}.")
+        return 0
+    except (OSError, TypeError, ValueError, RuntimeError) as error:
+        log.error(f"state-factor failed: {error}")
+        return 1
+
+
+def _build_parser():
     argp = ap.ArgumentParser(
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
@@ -674,6 +932,14 @@ def main(args):
     )
     gepcs_p.set_defaults(func=_compute_expression_pcs)
 
+    _create_state_factor_subp(subp)
+
+    return argp
+
+
+def main(args):
+    argp = _build_parser()
+
     args = argp.parse_args(args)
 
     # we need to set 64bit support before any other option
@@ -685,24 +951,16 @@ def main(args):
 
     jax.config.update("jax_platform_name", args.platform)
 
-    log = get_logger(__name__, args.out)
-    if args.verbose:
-        log.setLevel(logging.DEBUG)
-    else:
-        log.setLevel(logging.INFO)
-
     # strange bug with TPU error cropping up on local machines...
     jax_logger = logging.getLogger("jax._src.xla_bridge")
     jax_logger.propagate = False
 
-    # launch w/e task was selected
-    if hasattr(args, "func"):
-        args.func(args, log)
-        log.info("Finished! Thank you!")
-    else:
-        argp.print_help()
-
-    return 0
+    disk_log_path = None if args.cmd == "state-factor" else args.out
+    with cli_logging(__name__, path=disk_log_path, verbose=args.verbose) as log:
+        status = args.func(args, log)
+        if status == 0:
+            log.info("Finished! Thank you!")
+        return status
 
 
 def run_cli():
