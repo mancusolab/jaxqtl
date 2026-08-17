@@ -47,6 +47,7 @@ dependencies = [
     "polars",
     "qtl",
     "pyarrow",
+    "scipy>=1.17",
 ]
 
 [project.scripts]

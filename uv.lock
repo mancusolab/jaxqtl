@@ -458,6 +458,7 @@ dependencies = [
     { name = "polars" },
     { name = "pyarrow" },
     { name = "qtl" },
+    { name = "scipy" },
 ]
 
 [package.optional-dependencies]
@@ -492,6 +493,7 @@ requires-dist = [
     { name = "pytest-cov", marker = "extra == 'dev'" },
     { name = "qtl" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.243" },
+    { name = "scipy", specifier = ">=1.17" },
     { name = "statsmodels", marker = "extra == 'dev'" },
     { name = "ty", marker = "extra == 'dev'", specifier = ">=0.0.44" },
     { name = "zensical", marker = "extra == 'docs'", specifier = ">=0.0.37" },
