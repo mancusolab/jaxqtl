@@ -46,6 +46,7 @@ from ._state_artifact_contract import (
 
 
 _HASH_CHUNK_SIZE = 1024 * 1024
+_STAGING_DIRECTORY_PREFIX = ".jaxqtl-state-artifact-staging-"
 
 
 def _sha256_file(path: Path) -> str:
@@ -493,6 +494,8 @@ def write_state_artifact(
         directory is removed and no final artifact is exposed.
     """
     final_path = Path(destination)
+    if final_path.name.startswith(_STAGING_DIRECTORY_PREFIX):
+        raise ValueError(f"state artifact destination uses the reserved staging namespace: {final_path}")
     if final_path.exists() or final_path.is_symlink():
         raise FileExistsError(f"state artifact destination already exists: {final_path}")
     parent = final_path.parent
@@ -514,15 +517,19 @@ def write_state_artifact(
         donor_counts=donor_counts,
     )
     input_sha256 = _validated_input_hashes(input_paths)
-    metrics = {} if approximation_metrics is None else approximation_metrics
-    unknown_metrics = set(metrics) - set(chromosomes)
-    normalized_metric_keys = {canonical_chromosome_key(key) for key in metrics}
-    if unknown_metrics and normalized_metric_keys != set(metrics):
-        metrics = {canonical_chromosome_key(key): value for key, value in metrics.items()}
+    raw_metrics = {} if approximation_metrics is None else approximation_metrics
+    if not isinstance(raw_metrics, Mapping):
+        raise TypeError("approximation_metrics must be a chromosome-keyed mapping")
+    metrics: dict[str, Mapping[str, Any]] = {}
+    for key, value in raw_metrics.items():
+        canonical_key = canonical_chromosome_key(key)
+        if canonical_key in metrics:
+            raise ValueError(f"duplicate canonical approximation metric key: {canonical_key}")
+        metrics[canonical_key] = value
     if set(metrics) - set(chromosomes):
         raise ValueError("approximation metrics contain an unrequested chromosome")
 
-    staging = Path(tempfile.mkdtemp(prefix=f"{final_path.name}.staging-", dir=parent))
+    staging = Path(tempfile.mkdtemp(prefix=_STAGING_DIRECTORY_PREFIX, dir=parent))
     published = False
     try:
         payloads = list(
@@ -639,7 +646,7 @@ def _load_state_artifact(
     expected_gene_ids: Mapping[str, Sequence[str]] | None = None,
     expected_configuration: Mapping[str, Any] | None = None,
 ) -> StateArtifactResult:
-    if ".staging-" in root.name and not allow_staging:
+    if root.name.startswith(_STAGING_DIRECTORY_PREFIX) and not allow_staging:
         raise ValueError("state artifact loader rejects staging directories")
     if not root.is_dir():
         raise FileNotFoundError(f"state artifact directory does not exist: {root}")

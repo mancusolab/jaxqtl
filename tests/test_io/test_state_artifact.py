@@ -55,6 +55,27 @@ def _provenance():
     )
 
 
+def _configuration(chromosomes: tuple[str, ...]) -> dict[str, Any]:
+    is_loco = len(chromosomes) == 22
+    return {
+        "allow_mixed_cell_types": False,
+        "balance_donors": True,
+        "cell_type": "B",
+        "center_within_donor": True,
+        "exclude_chromosome": None if is_loco else "1",
+        "loco": is_loco,
+        "maxiter": 20,
+        "ncv": None,
+        "pflog_alpha": "auto",
+        "platform": "cpu",
+        "rank": 1,
+        "seed": 7,
+        "solver": "propack",
+        "tol": 1e-8,
+        "verbose": False,
+    }
+
+
 def _manifest(
     chromosomes: tuple[str, ...] = ("01",),
     *,
@@ -140,9 +161,7 @@ def _manifest(
         completed_chromosomes=chromosomes,
         n_cells=len(cell_ids),
         n_donors=len(donor_ids),
-        configuration={"rank": 1, "mode": "loco" if len(chromosomes) == 22 else "single"}
-        if configuration is None
-        else configuration,
+        configuration=_configuration(chromosomes) if configuration is None else configuration,
         provenance=_provenance(),
         chromosomes=chromosome_records,
         payloads=tuple(payloads),
@@ -214,7 +233,12 @@ def test_exact_json_field_contract_and_manifest_is_not_a_payload() -> None:
 @example("角質-🧬")
 def test_manifest_json_roundtrip_is_canonical(label: str) -> None:
     contract = _contract()
-    manifest = _manifest(configuration={"label": label, "nested": {"z": 1, "a": [True, None]}})
+    manifest = _manifest()
+    chromosome = replace(
+        manifest.chromosomes[0],
+        approximation_metrics={"label": label, "nested": {"z": 1, "a": [True, None]}},
+    )
+    manifest = replace(manifest, chromosomes=(chromosome,))
 
     encoded = contract.encode_manifest(manifest)
     decoded = contract.decode_manifest(encoded)
@@ -338,6 +362,45 @@ def test_rejects_empty_axes_and_invalid_selection_contract() -> None:
         contract.manifest_from_dict(mixed)
 
 
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (lambda manifest: manifest.update(schema_version=True), "schema version.*integer"),
+        (
+            lambda manifest: manifest["selection"].update(allow_mixed_cell_types="yes"),
+            "allow_mixed_cell_types.*boolean",
+        ),
+        (
+            lambda manifest: manifest["chromosomes"]["01"].update(center_within_donor="yes"),
+            "center_within_donor.*boolean",
+        ),
+        (lambda manifest: manifest["configuration"].update(rank=True), "configuration.rank.*integer"),
+        (
+            lambda manifest: manifest["chromosomes"]["01"]["solver"].update(solver="arpack"),
+            "solver.*configuration",
+        ),
+        (
+            lambda manifest: manifest["chromosomes"]["01"]["convergence"].pop("max_forward_residual"),
+            "convergence.*fields",
+        ),
+        (
+            lambda manifest: manifest["chromosomes"]["01"].update(singular_values=[True]),
+            "singular values.*floating-point",
+        ),
+    ],
+)
+def test_decoder_rejects_invalid_exact_types_and_contradictory_replay_configuration(
+    mutate,
+    message: str,
+) -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+    mutate(encoded)
+
+    with pytest.raises((TypeError, ValueError), match=message):
+        contract.decode_manifest(json.dumps(encoded))
+
+
 def test_pure_alignment_and_configuration_validation() -> None:
     contract = _contract()
     manifest = _manifest()
@@ -349,7 +412,7 @@ def test_pure_alignment_and_configuration_validation() -> None:
             expected_cell_ids=("cell-0", "cell-λ"),
             expected_donor_ids=("donor-0",),
             expected_gene_ids=gene_ids,
-            expected_configuration={"rank": 1, "mode": "single"},
+            expected_configuration=_configuration(("01",)),
         )
         == manifest
     )
@@ -360,12 +423,14 @@ def test_pure_alignment_and_configuration_validation() -> None:
     with pytest.raises(ValueError, match="gene order"):
         contract.validate_manifest(manifest, expected_gene_ids={"01": ("gene-β", "gene-0")})
     with pytest.raises(ValueError, match="configuration"):
-        contract.validate_manifest(manifest, expected_configuration={"rank": 2, "mode": "single"})
+        contract.validate_manifest(manifest, expected_configuration={**_configuration(("01",)), "rank": 2})
 
 
 def test_rejects_noncanonical_json_values_and_nonfinite_diagnostics() -> None:
     contract = _contract()
-    bad_config = replace(_manifest(), configuration={"unsupported": {1, 2}})
+    manifest = _manifest()
+    bad_chromosome = replace(manifest.chromosomes[0], approximation_metrics={"unsupported": {1, 2}})
+    bad_config = replace(manifest, chromosomes=(bad_chromosome,))
     encoded = _manifest_dict()
     encoded["chromosomes"]["01"]["convergence"]["max_forward_residual"] = float("nan")
 
@@ -501,13 +566,21 @@ def _writer_arguments(tmp_path: Path, chromosomes: tuple[str, ...] = ("1",)) -> 
         "selected_cell_type": "B",
         "allow_mixed_cell_types": False,
         "configuration": {
-            "mode": "loco" if len(chromosomes) == 22 else "single",
+            "allow_mixed_cell_types": False,
+            "balance_donors": True,
+            "cell_type": "B",
+            "center_within_donor": True,
+            "exclude_chromosome": None if len(chromosomes) == 22 else "1",
+            "loco": len(chromosomes) == 22,
             "rank": 1,
             "solver": "propack",
             "tol": 1e-8,
             "maxiter": 20,
             "seed": 7,
+            "ncv": None,
+            "pflog_alpha": "auto",
             "platform": "cpu",
+            "verbose": False,
         },
     }
 
@@ -581,6 +654,17 @@ def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) 
     np.testing.assert_array_equal(chromosome.singular_values, [2.5])
 
 
+def test_published_destination_containing_staging_marker_roundtrips(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    destination = tmp_path / "published.staging-results"
+
+    qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    loaded = qtl_io.load_state_artifact(destination)
+    assert loaded.root == destination
+    assert loaded.manifest.completed_chromosomes == ("01",)
+
+
 def test_roundtrip_preserves_metadata_hashes_diagnostics_and_replay_provenance(tmp_path: Path) -> None:
     destination = _write_artifact(tmp_path)
     manifest = _read_manifest_dict(destination)
@@ -646,12 +730,23 @@ def test_writer_refuses_existing_destination_without_modification(tmp_path: Path
         qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
 
     assert sentinel.read_text(encoding="utf-8") == "preserve"
-    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
+def test_writer_rejects_canonically_duplicate_approximation_metric_keys(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["approximation_metrics"] = {"1": {"error": 0.1}, "01": {"error": 0.2}}
+
+    with pytest.raises(ValueError, match="duplicate canonical approximation.*01"):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
 
 
 def test_loader_rejects_staging_directory(tmp_path: Path) -> None:
     destination = _write_artifact(tmp_path)
-    staging = tmp_path / "copied.staging-observable"
+    staging = tmp_path / ".jaxqtl-state-artifact-staging-observable"
     shutil.copytree(destination, staging)
 
     with pytest.raises(ValueError, match="staging"):
@@ -670,7 +765,7 @@ def test_factor_iterator_failure_after_one_chromosome_leaves_no_artifact_or_stag
         qtl_io.write_state_artifact(destination, failing_results(), **arguments)
 
     assert not destination.exists()
-    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
 
 
 def test_validation_failure_after_one_chromosome_leaves_no_artifact_or_staging(tmp_path: Path) -> None:
@@ -682,7 +777,7 @@ def test_validation_failure_after_one_chromosome_leaves_no_artifact_or_staging(t
         qtl_io.write_state_artifact(destination, results, **arguments)
 
     assert not destination.exists()
-    assert list(tmp_path.glob("state-artifact.staging-*")) == []
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
 
 
 @pytest.mark.parametrize(
@@ -712,6 +807,30 @@ def test_loader_rejects_schema_missing_and_corrupt_payloads(tmp_path: Path, muta
         _write_manifest_dict(destination, manifest)
 
     with pytest.raises((ValueError, FileNotFoundError), match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("selection-type", "allow_mixed_cell_types.*boolean"),
+        ("solver-contradiction", "solver.*configuration"),
+    ],
+)
+def test_loader_rejects_invalid_types_and_contradictory_replay_configuration(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    if mutation == "selection-type":
+        manifest["selection"]["allow_mixed_cell_types"] = "yes"
+    else:
+        manifest["chromosomes"]["01"]["solver"]["solver"] = "arpack"
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises((TypeError, ValueError), match=message):
         qtl_io.load_state_artifact(destination)
 
 

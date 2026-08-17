@@ -77,6 +77,42 @@ _PROVENANCE_FIELDS = (
 )
 _PYTHON_FIELDS = ("implementation", "version")
 _SYSTEM_FIELDS = ("os", "release", "machine", "processor")
+_CONFIGURATION_FIELDS = (
+    "allow_mixed_cell_types",
+    "balance_donors",
+    "cell_type",
+    "center_within_donor",
+    "exclude_chromosome",
+    "loco",
+    "maxiter",
+    "ncv",
+    "pflog_alpha",
+    "platform",
+    "rank",
+    "seed",
+    "solver",
+    "tol",
+    "verbose",
+)
+_PFLOG_FIELDS = (
+    "alpha",
+    "alpha_source",
+    "retained_gene_count",
+    "excluded_gene_count",
+    "numerator",
+    "denominator",
+    "excluded_numerator",
+    "excluded_denominator",
+)
+_FILTERING_FIELDS = ("active_gene_count", "excluded_gene_count")
+_SOLVER_FIELDS = ("solver", "seed", "tol", "maxiter", "propack_kmax", "arpack_ncv")
+_CONVERGENCE_FIELDS = (
+    "sigma_floor",
+    "residual_limit",
+    "max_forward_residual",
+    "max_adjoint_residual",
+    "loading_orthogonality_error",
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -280,6 +316,24 @@ def _nonnegative_integer(value: object, *, name: str) -> int:
     return value
 
 
+def _boolean(value: object, *, name: str) -> bool:
+    if not isinstance(value, bool):
+        raise TypeError(f"{name} must be a boolean")
+    return value
+
+
+def _finite_float(value: object, *, name: str, positive: bool = False, nonnegative: bool = False) -> float:
+    if isinstance(value, bool) or not isinstance(value, float):
+        raise TypeError(f"{name} must be a floating-point number")
+    if not math.isfinite(value):
+        raise ValueError(f"{name} must be finite")
+    if positive and value <= 0.0:
+        raise ValueError(f"{name} must be strictly positive")
+    if nonnegative and value < 0.0:
+        raise ValueError(f"{name} must be nonnegative")
+    return value
+
+
 def _validated_sha256(value: object, *, name: str) -> str:
     if not isinstance(value, str) or _SHA256_PATTERN.fullmatch(value) is None:
         raise ValueError(f"{name} must be a lowercase SHA-256 hexadecimal digest")
@@ -329,7 +383,11 @@ def _safe_payload_path(path: str) -> PurePosixPath:
 
 
 def _validate_provenance(provenance: _ReplayProvenance) -> None:
-    if provenance.artifact_schema_version != SCHEMA_VERSION:
+    artifact_schema_version = _positive_integer(
+        provenance.artifact_schema_version,
+        name="provenance artifact schema version",
+    )
+    if artifact_schema_version != SCHEMA_VERSION:
         raise ValueError("provenance artifact schema version disagrees with the manifest schema version")
     required_strings = (
         provenance.jaxqtl_version,
@@ -358,9 +416,153 @@ def _validate_provenance(provenance: _ReplayProvenance) -> None:
         raise ValueError("state artifact platform must be fixed to cpu")
 
 
+def _validate_pflog_diagnostics(record: _ChromosomeManifest) -> None:
+    context = f"chromosome {record.chromosome} pflog"
+    diagnostics = _require_exact_fields(record.pflog_diagnostics, _PFLOG_FIELDS, context=context)
+    _finite_float(diagnostics["alpha"], name=f"{context}.alpha", positive=True)
+    if diagnostics["alpha_source"] not in {"auto", "override"}:
+        raise ValueError(f"{context}.alpha_source must be 'auto' or 'override'")
+    _positive_integer(diagnostics["retained_gene_count"], name=f"{context}.retained_gene_count")
+    _nonnegative_integer(diagnostics["excluded_gene_count"], name=f"{context}.excluded_gene_count")
+    _finite_float(diagnostics["numerator"], name=f"{context}.numerator")
+    _finite_float(diagnostics["denominator"], name=f"{context}.denominator", positive=True)
+    _finite_float(diagnostics["excluded_numerator"], name=f"{context}.excluded_numerator")
+    _finite_float(
+        diagnostics["excluded_denominator"],
+        name=f"{context}.excluded_denominator",
+        nonnegative=True,
+    )
+
+
+def _validate_filtering_diagnostics(record: _ChromosomeManifest) -> None:
+    context = f"chromosome {record.chromosome} filtering"
+    diagnostics = _require_exact_fields(record.filtering_diagnostics, _FILTERING_FIELDS, context=context)
+    active_count = _positive_integer(diagnostics["active_gene_count"], name=f"{context}.active_gene_count")
+    excluded_count = _nonnegative_integer(
+        diagnostics["excluded_gene_count"],
+        name=f"{context}.excluded_gene_count",
+    )
+    if active_count != record.n_genes:
+        raise ValueError(f"{context}.active_gene_count disagrees with the chromosome gene dimension")
+    if excluded_count != record.pflog_diagnostics["excluded_gene_count"]:
+        raise ValueError(f"{context}.excluded_gene_count disagrees with PFlog diagnostics")
+
+
+def _validate_solver_configuration(record: _ChromosomeManifest) -> None:
+    context = f"chromosome {record.chromosome} solver configuration"
+    configuration = _require_exact_fields(record.solver_configuration, _SOLVER_FIELDS, context=context)
+    solver = configuration["solver"]
+    if solver not in {"propack", "arpack"}:
+        raise ValueError(f"{context}.solver must be 'propack' or 'arpack'")
+    _nonnegative_integer(configuration["seed"], name=f"{context}.seed")
+    _finite_float(configuration["tol"], name=f"{context}.tol", positive=True)
+    maxiter = _positive_integer(configuration["maxiter"], name=f"{context}.maxiter")
+    propack_kmax = configuration["propack_kmax"]
+    arpack_ncv = configuration["arpack_ncv"]
+    if solver == "propack":
+        if _positive_integer(propack_kmax, name=f"{context}.propack_kmax") != maxiter:
+            raise ValueError(f"{context}.propack_kmax must equal maxiter")
+        if arpack_ncv is not None:
+            raise ValueError(f"{context}.arpack_ncv must be null for PROPACK")
+    else:
+        if propack_kmax is not None:
+            raise ValueError(f"{context}.propack_kmax must be null for ARPACK")
+        ncv = _positive_integer(arpack_ncv, name=f"{context}.arpack_ncv")
+        if not record.rank < ncv < min(record.n_cells, record.n_genes):
+            raise ValueError(f"{context}.arpack_ncv must satisfy rank < ncv < min(cells, genes)")
+
+
+def _validate_convergence_diagnostics(record: _ChromosomeManifest) -> None:
+    context = f"chromosome {record.chromosome} convergence"
+    diagnostics = _require_exact_fields(record.convergence_residuals, _CONVERGENCE_FIELDS, context=context)
+    _finite_float(diagnostics["sigma_floor"], name=f"{context}.sigma_floor", positive=True)
+    residual_limit = _finite_float(
+        diagnostics["residual_limit"],
+        name=f"{context}.residual_limit",
+        positive=True,
+    )
+    for field in ("max_forward_residual", "max_adjoint_residual", "loading_orthogonality_error"):
+        value = _finite_float(diagnostics[field], name=f"{context}.{field}", nonnegative=True)
+        if value > residual_limit:
+            raise ValueError(f"{context}.{field} exceeds residual_limit")
+
+
+def _validate_configuration(manifest: StateArtifactManifest) -> Mapping[str, Any]:
+    configuration = _require_exact_fields(manifest.configuration, _CONFIGURATION_FIELDS, context="configuration")
+    allow_mixed = _boolean(
+        configuration["allow_mixed_cell_types"],
+        name="configuration.allow_mixed_cell_types",
+    )
+    balance_donors = _boolean(configuration["balance_donors"], name="configuration.balance_donors")
+    center_within_donor = _boolean(
+        configuration["center_within_donor"],
+        name="configuration.center_within_donor",
+    )
+    loco = _boolean(configuration["loco"], name="configuration.loco")
+    _boolean(configuration["verbose"], name="configuration.verbose")
+    cell_type = configuration["cell_type"]
+    if cell_type is not None and (not isinstance(cell_type, str) or not cell_type):
+        raise TypeError("configuration.cell_type must be a nonempty string or null")
+    rank = _positive_integer(configuration["rank"], name="configuration.rank")
+    seed = _nonnegative_integer(configuration["seed"], name="configuration.seed")
+    maxiter = _positive_integer(configuration["maxiter"], name="configuration.maxiter")
+    tol = _finite_float(configuration["tol"], name="configuration.tol", positive=True)
+    ncv_value = configuration["ncv"]
+    ncv = None if ncv_value is None else _positive_integer(ncv_value, name="configuration.ncv")
+    solver = configuration["solver"]
+    if solver not in {"propack", "arpack"}:
+        raise ValueError("configuration.solver must be 'propack' or 'arpack'")
+    if solver == "propack" and ncv is not None:
+        raise ValueError("configuration.ncv must be null for PROPACK")
+    if solver == "arpack" and ncv is None:
+        raise ValueError("configuration.ncv is required for ARPACK")
+    pflog_alpha = configuration["pflog_alpha"]
+    if pflog_alpha != "auto":
+        _finite_float(pflog_alpha, name="configuration.pflog_alpha", positive=True)
+    if configuration["platform"] != "cpu":
+        raise ValueError("configuration.platform must be fixed to cpu")
+    exclude_chromosome = configuration["exclude_chromosome"]
+    if loco:
+        if exclude_chromosome is not None or manifest.requested_chromosomes != CANONICAL_CHROMOSOMES:
+            raise ValueError("LOCO configuration requires all autosomes and no single excluded chromosome")
+    else:
+        if not isinstance(exclude_chromosome, str):
+            raise TypeError("configuration.exclude_chromosome must be an autosome string outside LOCO mode")
+        if (canonical_chromosome_key(exclude_chromosome),) != manifest.requested_chromosomes:
+            raise ValueError("configuration exclusion disagrees with the requested chromosome")
+    if allow_mixed != manifest.allow_mixed_cell_types or cell_type != manifest.selected_cell_type:
+        raise ValueError("configuration cell selection disagrees with the manifest selection")
+
+    for record in manifest.chromosomes:
+        solver_configuration = record.solver_configuration
+        if (
+            record.rank != rank
+            or solver_configuration["solver"] != solver
+            or solver_configuration["seed"] != seed
+            or solver_configuration["tol"] != tol
+            or solver_configuration["maxiter"] != maxiter
+            or solver_configuration["arpack_ncv"] != ncv
+            or record.center_within_donor != center_within_donor
+            or record.balance_donors != balance_donors
+        ):
+            raise ValueError(
+                f"chromosome {record.chromosome} solver or preprocessing configuration "
+                "disagrees with root configuration"
+            )
+        if pflog_alpha == "auto":
+            if record.pflog_diagnostics["alpha_source"] != "auto":
+                raise ValueError(
+                    f"chromosome {record.chromosome} PFlog configuration disagrees with root configuration"
+                )
+        elif record.pflog_diagnostics["alpha_source"] != "override" or record.pflog_diagnostics["alpha"] != pflog_alpha:
+            raise ValueError(f"chromosome {record.chromosome} PFlog configuration disagrees with root configuration")
+    return configuration
+
+
 def _validate_chromosome_manifest(record: _ChromosomeManifest, *, n_cells: int, n_donors: int) -> None:
     if record.chromosome not in CANONICAL_CHROMOSOMES:
         raise ValueError("manifest chromosomes must use canonical chromosome keys 01-22")
+    _positive_integer(record.n_cells, name=f"chromosome {record.chromosome} cells")
     if record.n_cells != n_cells:
         raise ValueError(f"chromosome {record.chromosome} cell dimension disagrees with the artifact")
     _positive_integer(record.n_genes, name=f"chromosome {record.chromosome} genes")
@@ -379,14 +581,16 @@ def _validate_chromosome_manifest(record: _ChromosomeManifest, *, n_cells: int, 
         raise ValueError("donor counts must sum to the artifact cell dimension")
     if len(record.singular_values) != record.rank:
         raise ValueError("singular-values diagnostics must agree with rank")
-    if any(not math.isfinite(value) or value <= 0.0 for value in record.singular_values):
-        raise ValueError("singular values must be finite and strictly positive")
+    for value in record.singular_values:
+        _finite_float(value, name="singular values", positive=True)
     if tuple(sorted(record.singular_values, reverse=True)) != record.singular_values:
         raise ValueError("singular values must be recorded in descending order")
-    _validated_json(record.pflog_diagnostics, context="pflog diagnostics")
-    _validated_json(record.filtering_diagnostics, context="filtering diagnostics")
-    _validated_json(record.solver_configuration, context="solver configuration")
-    _validated_json(record.convergence_residuals, context="convergence diagnostics")
+    _boolean(record.center_within_donor, name=f"chromosome {record.chromosome} center_within_donor")
+    _boolean(record.balance_donors, name=f"chromosome {record.chromosome} balance_donors")
+    _validate_pflog_diagnostics(record)
+    _validate_filtering_diagnostics(record)
+    _validate_solver_configuration(record)
+    _validate_convergence_diagnostics(record)
     _validated_json(record.approximation_metrics, context="approximation metrics")
 
 
@@ -458,11 +662,13 @@ def validate_manifest(
         raise TypeError("manifest must be a StateArtifactManifest")
     if manifest.artifact_type != ARTIFACT_TYPE:
         raise ValueError(f"unsupported artifact type: {manifest.artifact_type!r}")
-    if manifest.schema_version != SCHEMA_VERSION:
+    schema_version = _positive_integer(manifest.schema_version, name="schema version")
+    if schema_version != SCHEMA_VERSION:
         raise ValueError(f"unsupported state artifact schema version: {manifest.schema_version!r}")
     if not isinstance(manifest.cell_type_column, str) or not manifest.cell_type_column:
         raise ValueError("cell type column must be a nonempty string")
-    if manifest.allow_mixed_cell_types:
+    allow_mixed_cell_types = _boolean(manifest.allow_mixed_cell_types, name="allow_mixed_cell_types")
+    if allow_mixed_cell_types:
         if manifest.selected_cell_type is not None:
             raise ValueError("mixed-cell opt-in cannot also record a selected cell type")
     elif not isinstance(manifest.selected_cell_type, str) or not manifest.selected_cell_type:
@@ -480,13 +686,13 @@ def validate_manifest(
     n_donors = _positive_integer(manifest.n_donors, name="donors")
     if n_donors > n_cells:
         raise ValueError("donors cannot outnumber cells")
-    _validated_json(manifest.configuration, context="configuration")
     _validate_provenance(manifest.provenance)
     chromosome_keys = tuple(record.chromosome for record in manifest.chromosomes)
     if chromosome_keys != requested:
         raise ValueError("chromosome diagnostics must exactly match requested chromosomes in order")
     for record in manifest.chromosomes:
         _validate_chromosome_manifest(record, n_cells=n_cells, n_donors=n_donors)
+    _validate_configuration(manifest)
     _validate_payloads(manifest)
 
     if expected_cell_ids is not None:
