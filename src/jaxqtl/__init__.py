@@ -1,3 +1,5 @@
+# pattern: Imperative Shell
+
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
 
@@ -16,4 +18,5 @@ from . import (
     infer,
     io,
     map,
+    state,
 )
