@@ -383,8 +383,12 @@ def test_pflog_operator_api_is_available_from_state_package() -> None:
     assert hasattr(state, "pflog_operator")
     assert state.__all__ == [
         "PFLogOperator",
+        "StateFactorDiagnostics",
+        "StateFactorResult",
         "compute_pflog_statistics",
+        "construct_state_factor",
         "estimate_pflog_alpha",
+        "iter_loco_state_factors",
         "pflog_operator",
     ]
 

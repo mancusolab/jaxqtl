@@ -5,7 +5,7 @@ from __future__ import annotations
 import math
 
 from collections.abc import Sequence
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import final
 
 import numpy as np
@@ -409,6 +409,33 @@ def _operator_from_validated_state(
     object.__setattr__(operator, "_donor_index", donor_index)
     object.__setattr__(operator, "_sqrt_cell_weights", sqrt_cell_weights)
     return operator
+
+
+def _operator_with_balancing(operator: PFLogOperator, *, balance_donors: bool) -> PFLogOperator:
+    """Return a balanced or unbalanced view sharing transformed sparse storage."""
+    if not isinstance(operator, PFLogOperator):
+        raise TypeError("operator must be returned by pflog_operator")
+    balance = _validated_boolean(balance_donors, name="balance_donors")
+    if operator.config.balance_donors == balance:
+        return operator
+
+    donor_counts = operator.diagnostics.donor_counts
+    if balance:
+        donor_weights = np.zeros(donor_counts.size, dtype=np.float64)
+        nonsingleton = donor_counts >= 2
+        donor_weights[nonsingleton] = 1.0 / (donor_counts.size * (donor_counts[nonsingleton] - 1))
+        cell_weights = donor_weights[operator._donor_index]
+    else:
+        cell_weights = np.ones(operator.shape[0], dtype=np.float64)
+    readonly_cell_weights = _readonly(cell_weights.copy())
+
+    return _operator_from_validated_state(
+        config=replace(operator.config, balance_donors=balance),
+        diagnostics=replace(operator.diagnostics, cell_weights=readonly_cell_weights),
+        transformed_counts=operator._transformed_counts,
+        donor_index=operator._donor_index,
+        sqrt_cell_weights=_readonly(np.sqrt(readonly_cell_weights)),
+    )
 
 
 def pflog_operator(
