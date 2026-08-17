@@ -32,6 +32,7 @@ THREAD_ENVIRONMENT_VARIABLES = (
 
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
 _FLOAT64_EPS = float(np.finfo(np.float64).eps)
+_FLOAT64_TINY = float(np.finfo(np.float64).tiny)
 _ARTIFACT_FIELDS = (
     "artifact_type",
     "schema_version",
@@ -105,7 +106,11 @@ _PFLOG_FIELDS = (
     "excluded_numerator",
     "excluded_denominator",
 )
-_FILTERING_FIELDS = ("active_gene_count", "excluded_gene_count")
+_FILTERING_FIELDS = (
+    "input_gene_count",
+    "active_gene_count",
+    "transform_excluded_gene_count",
+)
 _SOLVER_FIELDS = ("solver", "seed", "tol", "maxiter", "propack_kmax", "arpack_ncv")
 _CONVERGENCE_FIELDS = (
     "sigma_floor",
@@ -385,6 +390,8 @@ def _validated_dtype(value: object, *, name: str) -> str:
         raise ValueError(f"{name} must be a valid NumPy dtype string") from error
     if dtype.hasobject:
         raise ValueError(f"{name} cannot use object storage")
+    if dtype.str != np.dtype(np.float64).str:
+        raise ValueError(f"{name} must use the schema-v1 float64 dtype")
     return dtype.str
 
 
@@ -494,15 +501,22 @@ def _validate_pflog_diagnostics(record: _ChromosomeManifest) -> None:
 def _validate_filtering_diagnostics(record: _ChromosomeManifest) -> None:
     context = f"chromosome {record.chromosome} filtering"
     diagnostics = _require_exact_fields(record.filtering_diagnostics, _FILTERING_FIELDS, context=context)
+    input_count = _positive_integer(diagnostics["input_gene_count"], name=f"{context}.input_gene_count")
     active_count = _positive_integer(diagnostics["active_gene_count"], name=f"{context}.active_gene_count")
-    excluded_count = _nonnegative_integer(
-        diagnostics["excluded_gene_count"],
-        name=f"{context}.excluded_gene_count",
+    transform_excluded_count = _nonnegative_integer(
+        diagnostics["transform_excluded_gene_count"],
+        name=f"{context}.transform_excluded_gene_count",
     )
     if active_count != record.n_genes:
         raise ValueError(f"{context}.active_gene_count disagrees with the chromosome gene dimension")
-    if excluded_count != record.pflog_diagnostics["excluded_gene_count"]:
-        raise ValueError(f"{context}.excluded_gene_count disagrees with PFlog diagnostics")
+    if active_count + transform_excluded_count != input_count:
+        raise ValueError(f"{context} active and transform-excluded counts must sum to input_gene_count")
+    alpha_excluded_count = cast(int, record.pflog_diagnostics["excluded_gene_count"])
+    if alpha_excluded_count > transform_excluded_count:
+        raise ValueError(f"{context} PFlog-fit exclusion cannot exceed transform exclusion")
+    alpha_retained_count = cast(int, record.pflog_diagnostics["retained_gene_count"])
+    if alpha_retained_count + alpha_excluded_count > input_count:
+        raise ValueError(f"{context} PFlog-fit gene counts cannot exceed input_gene_count")
 
 
 def _validate_solver_configuration(record: _ChromosomeManifest) -> None:
@@ -517,8 +531,9 @@ def _validate_solver_configuration(record: _ChromosomeManifest) -> None:
     propack_kmax = configuration["propack_kmax"]
     arpack_ncv = configuration["arpack_ncv"]
     if solver == "propack":
-        if _positive_integer(propack_kmax, name=f"{context}.propack_kmax") != maxiter:
-            raise ValueError(f"{context}.propack_kmax must equal maxiter")
+        effective_kmax = min(record.n_cells + 1, record.n_genes + 1, maxiter)
+        if _positive_integer(propack_kmax, name=f"{context}.propack_kmax") != effective_kmax:
+            raise ValueError(f"{context}.propack_kmax disagrees with the dimension-clipped effective value")
         if arpack_ncv is not None:
             raise ValueError(f"{context}.arpack_ncv must be null for PROPACK")
     else:
@@ -551,6 +566,80 @@ def _validate_convergence_diagnostics(record: _ChromosomeManifest) -> None:
         value = _finite_float(diagnostics[field], name=f"{context}.{field}", nonnegative=True)
         if value > residual_limit:
             raise ValueError(f"{context}.{field} exceeds residual_limit")
+
+
+def _validate_state_factor_payload_numerics(
+    factors: np.ndarray,
+    loadings: np.ndarray,
+    singular_values: np.ndarray,
+    *,
+    record: _ChromosomeManifest,
+    donor_index: np.ndarray,
+) -> None:
+    """Recompute payload-observable numerical invariants without performing I/O."""
+    context = f"chromosome {record.chromosome}"
+    expected_shapes = (
+        ("factors", factors, (record.n_cells, record.rank)),
+        ("loadings", loadings, (record.n_genes, record.rank)),
+        ("singular values", singular_values, (record.rank,)),
+    )
+    for name, array, expected_shape in expected_shapes:
+        if not isinstance(array, np.ndarray):
+            raise TypeError(f"{context} {name} payload must be a NumPy array")
+        if array.shape != expected_shape:
+            raise ValueError(f"{context} {name} payload shape disagrees with the manifest")
+        if array.dtype != np.dtype(np.float64):
+            raise TypeError(f"{context} {name} payload must use the schema-v1 float64 dtype")
+        if not np.isfinite(array).all():
+            raise ValueError(f"{context} {name} payload must be finite")
+
+    recorded_singular_values = np.asarray(record.singular_values, dtype=np.float64)
+    if not np.array_equal(singular_values, recorded_singular_values):
+        raise ValueError(f"{context} singular values disagree with the manifest diagnostics")
+    if np.any(np.diff(singular_values) > 0.0):
+        raise ValueError(f"{context} singular values must be recorded in descending order")
+
+    columns = np.arange(record.rank)
+    anchors = np.argmax(np.abs(loadings), axis=0)
+    if np.any(loadings[anchors, columns] < 0.0):
+        raise ValueError(f"{context} loadings violate the canonical loading-sign convention")
+
+    gram_error = loadings.T @ loadings - np.eye(record.rank, dtype=np.float64)
+    orthogonality_error = float(np.linalg.norm(gram_error, ord=2))
+    if not math.isfinite(orthogonality_error):
+        raise ValueError(f"{context} loading orthogonality error must be finite")
+    recorded_orthogonality_error = _finite_float(
+        record.convergence_residuals["loading_orthogonality_error"],
+        name=f"{context} loading orthogonality error",
+        nonnegative=True,
+    )
+    diagnostic_tolerance = 100.0 * _FLOAT64_EPS * max(record.n_cells, record.n_genes)
+    if abs(orthogonality_error - recorded_orthogonality_error) > diagnostic_tolerance:
+        raise ValueError(f"{context} loading orthogonality disagrees with the manifest diagnostics")
+    residual_limit = _finite_float(
+        record.convergence_residuals["residual_limit"],
+        name=f"{context} residual limit",
+        positive=True,
+    )
+    if orthogonality_error > residual_limit:
+        raise ValueError(f"{context} loading orthogonality exceeds the residual limit")
+
+    donors = np.asarray(donor_index)
+    if donors.shape != (record.n_cells,) or not np.issubdtype(donors.dtype, np.integer):
+        raise ValueError(f"{context} donor index must be an integer vector in cell order")
+    if np.any(donors < 0) or np.any(donors >= len(record.donor_counts)):
+        raise ValueError(f"{context} donor index is outside the manifest donor dimension")
+    observed_counts = np.bincount(donors.astype(np.intp, copy=False), minlength=len(record.donor_counts))
+    if not np.array_equal(observed_counts, np.asarray(record.donor_counts)):
+        raise ValueError(f"{context} donor index counts disagree with the manifest")
+    if record.center_within_donor:
+        donor_sums = np.zeros((len(record.donor_counts), record.rank), dtype=np.float64)
+        np.add.at(donor_sums, donors, factors)
+        donor_means = donor_sums / np.asarray(record.donor_counts, dtype=np.float64)[:, None]
+        factor_scales = np.maximum(np.max(np.abs(factors), axis=0), _FLOAT64_TINY)
+        centering_limits = residual_limit * factor_scales
+        if np.any(np.abs(donor_means) > centering_limits[None, :]):
+            raise ValueError(f"{context} factors are not donor-centered within the numerical limit")
 
 
 def _validate_configuration(manifest: StateArtifactManifest) -> Mapping[str, Any]:
@@ -598,6 +687,10 @@ def _validate_configuration(manifest: StateArtifactManifest) -> Mapping[str, Any
             raise ValueError("configuration exclusion disagrees with the requested chromosome")
     if allow_mixed != manifest.allow_mixed_cell_types or cell_type != manifest.selected_cell_type:
         raise ValueError("configuration cell selection disagrees with the manifest selection")
+
+    input_gene_counts = {record.filtering_diagnostics["input_gene_count"] for record in manifest.chromosomes}
+    if len(input_gene_counts) != 1:
+        raise ValueError("chromosome filtering diagnostics disagree on the shared input gene count")
 
     for record in manifest.chromosomes:
         solver_configuration = record.solver_configuration

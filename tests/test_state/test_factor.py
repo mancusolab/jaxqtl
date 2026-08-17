@@ -34,6 +34,8 @@ class _IdentityDomainOperator:
     shape = (8, 6)
     config = SimpleNamespace(center_donors=True, balance_donors=True)
     diagnostics = SimpleNamespace(
+        n_input_genes=6,
+        n_active_genes=6,
         active_gene_indices=np.arange(6, dtype=np.int64),
         donor_counts=np.asarray([3, 3, 1, 1], dtype=np.int64),
         singleton_donor_count=2,
@@ -230,12 +232,59 @@ def test_factor_result_is_immutable_read_only_and_deterministic() -> None:
     assert not first.diagnostics.active_gene_indices.flags.writeable
     assert not first.diagnostics.donor_counts.flags.writeable
     assert first.diagnostics.rank == 2
-    assert first.diagnostics.propack_kmax == 20
+    assert first.diagnostics.propack_kmax == 7
     assert first.diagnostics.arpack_ncv is None
     with pytest.raises(ValueError, match="read-only"):
         first.factors[0, 0] = 0.0
     with pytest.raises(FrozenInstanceError):
         first.diagnostics.seed = 20
+
+
+@pytest.mark.parametrize(
+    ("shape", "requested_maxiter", "expected_kmax"),
+    [
+        ((8, 3), 20, 4),
+        ((3, 8), 20, 4),
+        ((8, 6), 4, 4),
+    ],
+)
+def test_propack_diagnostics_record_effective_kmax(
+    shape: tuple[int, int],
+    requested_maxiter: int,
+    expected_kmax: int,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import jaxqtl.state._factor as factor_module
+
+    def exact(operator, *, k, **kwargs):
+        del kwargs
+        dense = operator.matmat(np.eye(operator.shape[1], dtype=np.float64))
+        _, singular_values, vh = np.linalg.svd(dense, full_matrices=False)
+        return None, singular_values[:k], vh[:k]
+
+    monkeypatch.setattr(factor_module.sparse_linalg, "svds", exact)
+    n_cells, n_genes = shape
+    dense_counts = (np.arange(n_cells * n_genes, dtype=np.int64).reshape(shape) % 5) + 1
+    counts = sparse.csr_array(dense_counts)
+    donor_index = np.zeros(n_cells, dtype=np.int64)
+    chromosomes = np.full(n_genes, "X")
+
+    result = _state_api().construct_state_factor(
+        counts,
+        donor_index,
+        chromosomes,
+        rank=1,
+        solver="propack",
+        tol=1e-10,
+        maxiter=requested_maxiter,
+        seed=7,
+        pflog_alpha=0.2,
+        center_within_donor=False,
+        balance_donors=False,
+    )
+
+    assert result.diagnostics.maxiter == requested_maxiter
+    assert result.diagnostics.propack_kmax == expected_kmax
 
 
 @pytest.mark.parametrize("solver", ["propack", "arpack"])
@@ -345,6 +394,42 @@ def test_loco_matches_explicit_exclusion_and_has_no_held_out_leakage() -> None:
     np.testing.assert_allclose(loco.factors, no_leak.factors, atol=2e-11)
     np.testing.assert_allclose(loco.loadings, no_leak.loadings, atol=2e-11)
     np.testing.assert_allclose(loco.singular_values, no_leak.singular_values, atol=2e-11)
+
+
+def test_transform_filtering_counts_are_distinct_from_pflog_fit_counts() -> None:
+    counts = sparse.csr_array(
+        np.asarray(
+            [
+                [1, 0, 1],
+                [1, 1, 0],
+                [1, 3, 2],
+                [1, 6, 5],
+            ],
+            dtype=np.int64,
+        )
+    )
+    donor_index = np.asarray([0, 0, 1, 1], dtype=np.int64)
+    chromosomes = np.asarray(["1", "2", "X"])
+
+    result = _state_api().construct_state_factor(
+        counts,
+        donor_index,
+        chromosomes,
+        rank=1,
+        solver="propack",
+        tol=1e-9,
+        maxiter=20,
+        seed=3,
+        exclude_chromosome="1",
+        pflog_alpha=0.2,
+    )
+
+    assert hasattr(result.diagnostics, "input_gene_count")
+    assert hasattr(result.diagnostics, "transform_excluded_gene_count")
+    assert result.diagnostics.input_gene_count == 3
+    assert result.diagnostics.active_gene_indices.size == 2
+    assert result.diagnostics.transform_excluded_gene_count == 1
+    assert result.diagnostics.alpha_excluded_gene_count == 0
 
 
 def test_default_loco_iterator_is_streaming_ordered_and_accepts_absent_autosomes() -> None:

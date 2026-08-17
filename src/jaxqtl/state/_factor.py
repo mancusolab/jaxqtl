@@ -46,6 +46,8 @@ class StateFactorDiagnostics:
     alpha_excluded_numerator: float
     alpha_excluded_denominator: float
     excluded_chromosome: str | None
+    input_gene_count: int
+    transform_excluded_gene_count: int
     active_gene_indices: np.ndarray
     rank: int
     solver: Literal["propack", "arpack"]
@@ -368,6 +370,7 @@ def _construct_from_statistics(
     readonly_loadings = _readonly(loadings.copy())
     readonly_factors = _readonly(factors.copy())
     operator_diagnostics = base_operator.diagnostics
+    propack_kmax = min(base_operator.shape[0] + 1, base_operator.shape[1] + 1, maxiter) if solver == "propack" else None
     diagnostics = StateFactorDiagnostics(
         alpha=alpha_diagnostics.alpha,
         alpha_source=alpha_diagnostics.source,
@@ -378,13 +381,15 @@ def _construct_from_statistics(
         alpha_excluded_numerator=alpha_diagnostics.excluded_numerator,
         alpha_excluded_denominator=alpha_diagnostics.excluded_denominator,
         excluded_chromosome=alpha_diagnostics.excluded_chromosome,
+        input_gene_count=operator_diagnostics.n_input_genes,
+        transform_excluded_gene_count=(operator_diagnostics.n_input_genes - operator_diagnostics.n_active_genes),
         active_gene_indices=_readonly(operator_diagnostics.active_gene_indices.copy()),
         rank=rank,
         solver=solver,
         seed=seed,
         tol=tol,
         maxiter=maxiter,
-        propack_kmax=maxiter if solver == "propack" else None,
+        propack_kmax=propack_kmax,
         arpack_ncv=resolved_ncv,
         sigma_floor=sigma_floor,
         residual_limit=residual_limit,

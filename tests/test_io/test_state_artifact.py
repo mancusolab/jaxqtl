@@ -111,7 +111,11 @@ def _manifest(
                 "excluded_numerator": 0.0,
                 "excluded_denominator": 0.0,
             },
-            filtering_diagnostics={"active_gene_count": 2, "excluded_gene_count": 0},
+            filtering_diagnostics={
+                "input_gene_count": 2,
+                "active_gene_count": 2,
+                "transform_excluded_gene_count": 0,
+            },
             donor_counts=(len(cell_ids),),
             center_within_donor=True,
             balance_donors=True,
@@ -120,7 +124,7 @@ def _manifest(
                 "seed": 7,
                 "tol": 1e-8,
                 "maxiter": 20,
-                "propack_kmax": 20,
+                "propack_kmax": 3,
                 "arpack_ncv": None,
             },
             singular_values=(2.5,),
@@ -333,7 +337,7 @@ def test_rejects_duplicate_or_missing_inventory_entries() -> None:
     ("filename", "field", "value", "message"),
     [
         ("factors.npy", "shape", [3, 1], "factors shape"),
-        ("loadings.npy", "dtype", "<f4", "loadings dtype"),
+        ("loadings.npy", "dtype", "<f4", "loadings.*dtype"),
         ("singular_values.npy", "shape", [2], "singular-values shape"),
         ("genes.parquet", "rows", 3, "gene metadata row count"),
     ],
@@ -401,6 +405,46 @@ def test_decoder_rejects_invalid_exact_types_and_contradictory_replay_configurat
     mutate(encoded)
 
     with pytest.raises((TypeError, ValueError), match=message):
+        contract.decode_manifest(json.dumps(encoded))
+
+
+def test_decoder_accepts_dimension_clipped_propack_kmax() -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+
+    decoded = contract.decode_manifest(json.dumps(encoded))
+
+    assert decoded.chromosomes[0].solver_configuration["maxiter"] == 20
+    assert decoded.chromosomes[0].solver_configuration["propack_kmax"] == 3
+
+    encoded["chromosomes"]["01"]["solver"]["propack_kmax"] = 20
+    with pytest.raises(ValueError, match="dimension-clipped effective value"):
+        contract.decode_manifest(json.dumps(encoded))
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("count-identity", "must sum to input_gene_count"),
+        ("alpha-exclusion", "PFlog-fit exclusion cannot exceed transform exclusion"),
+        ("alpha-total", "PFlog-fit gene counts cannot exceed input_gene_count"),
+    ],
+)
+def test_decoder_rejects_incoherent_transform_and_pflog_filtering_counts(
+    mutation: str,
+    message: str,
+) -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+    chromosome = encoded["chromosomes"]["01"]
+    if mutation == "count-identity":
+        chromosome["filtering"]["transform_excluded_gene_count"] = 1
+    elif mutation == "alpha-exclusion":
+        chromosome["pflog"]["excluded_gene_count"] = 1
+    else:
+        chromosome["pflog"]["retained_gene_count"] = 3
+
+    with pytest.raises(ValueError, match=message):
         contract.decode_manifest(json.dumps(encoded))
 
 
@@ -593,7 +637,7 @@ def _factor_result(
     bad_shape: bool = False,
     failed_automatic_fit_override: float | None = None,
 ) -> StateFactorResult:
-    factors = np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64)
+    factors = np.asarray([[1.0], [-1.0], [0.0]], dtype=np.float64)
     if bad_shape:
         factors = factors[:2]
     loadings = np.asarray([[0.8], [0.6]], dtype=np.float64)
@@ -612,19 +656,21 @@ def _factor_result(
         alpha_excluded_numerator=0.0,
         alpha_excluded_denominator=0.0,
         excluded_chromosome=chromosome,
+        input_gene_count=2,
+        transform_excluded_gene_count=0,
         active_gene_indices=active_gene_indices,
         rank=1,
         solver="propack",
         seed=7,
         tol=1e-8,
         maxiter=20,
-        propack_kmax=20,
+        propack_kmax=3,
         arpack_ncv=None,
         sigma_floor=2.5e-8,
         residual_limit=1e-7,
         max_forward_residual=1e-10,
         max_adjoint_residual=2e-10,
-        loading_orthogonality_error=3e-10,
+        loading_orthogonality_error=float(np.linalg.norm(loadings.T @ loadings - np.eye(loadings.shape[1]), ord=2)),
         singular_values=singular_values,
         donor_counts=donor_counts,
         singleton_donor_count=1,
@@ -741,9 +787,145 @@ def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) 
     assert not chromosome.factors.flags.writeable
     assert not chromosome.loadings.flags.writeable
     assert not chromosome.singular_values.flags.writeable
-    np.testing.assert_array_equal(chromosome.factors, [[1.0], [0.0], [-1.0]])
+    np.testing.assert_array_equal(chromosome.factors, [[1.0], [-1.0], [0.0]])
     np.testing.assert_array_equal(chromosome.loadings, [[0.8], [0.6]])
     np.testing.assert_array_equal(chromosome.singular_values, [2.5])
+
+
+@pytest.mark.parametrize("field", ["factors", "loadings", "singular_values"])
+@pytest.mark.parametrize("dtype", [np.dtype(np.float32), np.dtype(np.complex128)])
+def test_writer_rejects_non_float64_state_payloads(
+    tmp_path: Path,
+    dtype: np.dtype,
+    field: str,
+) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    result = _factor_result("1")
+    array = getattr(result, field).astype(dtype)
+    array.flags.writeable = False
+
+    with pytest.raises(TypeError, match="float64"):
+        qtl_io.write_state_artifact(
+            destination,
+            iter([replace(result, **{field: array})]),
+            **arguments,
+        )
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize("filename", ["factors.npy", "loadings.npy", "singular_values.npy"])
+@pytest.mark.parametrize("dtype", [np.dtype(np.float32), np.dtype(np.complex128)])
+def test_loader_rejects_coordinated_non_float64_state_payloads(
+    tmp_path: Path,
+    dtype: np.dtype,
+    filename: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    relative_path = f"chromosomes/01/{filename}"
+    array_path = destination / relative_path
+    array = np.load(array_path, allow_pickle=False).astype(dtype)
+    with array_path.open("wb") as stream:
+        np.save(stream, array, allow_pickle=False)
+    manifest = _read_manifest_dict(destination)
+    dtype_field = filename.removesuffix(".npy")
+    manifest["chromosomes"]["01"]["dtypes"][dtype_field] = dtype.str
+    payload = next(payload for payload in manifest["payloads"] if payload["path"] == relative_path)
+    payload["dtype"] = dtype.str
+    payload["sha256"] = _sha256(array_path)
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises((TypeError, ValueError), match="float64"):
+        qtl_io.load_state_artifact(destination)
+
+
+def test_writer_allows_noncentered_factors_when_centering_is_disabled(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["configuration"] = {**arguments["configuration"], "center_within_donor": False}
+    result = _factor_result("1")
+    factors = np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64)
+    diagnostics = replace(result.diagnostics, center_within_donor=False)
+
+    qtl_io.write_state_artifact(
+        destination,
+        iter([replace(result, factors=factors, diagnostics=diagnostics)]),
+        **arguments,
+    )
+
+    np.testing.assert_array_equal(qtl_io.load_state_artifact(destination).chromosome("1").factors, factors)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("orthogonality", "orthogonality"),
+        ("canonical-sign", "canonical"),
+        ("donor-centering", "donor-centered"),
+    ],
+)
+def test_writer_recomputes_payload_observable_numerical_invariants(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    result = _factor_result("1")
+    if mutation == "orthogonality":
+        loadings = np.asarray([[10.0], [0.0]], dtype=np.float64)
+        diagnostics = replace(result.diagnostics, loading_orthogonality_error=3e-10)
+        result = replace(result, loadings=loadings, diagnostics=diagnostics)
+    elif mutation == "canonical-sign":
+        result = replace(result, loadings=-result.loadings, factors=-result.factors)
+    else:
+        factors = np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64)
+        result = replace(result, factors=factors)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.write_state_artifact(destination, iter([result]), **arguments)
+
+    assert not destination.exists()
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("orthogonality", "orthogonality"),
+        ("canonical-sign", "canonical"),
+        ("donor-centering", "donor-centered"),
+    ],
+)
+def test_loader_recomputes_forged_rehashed_numerical_invariants(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    paths_to_rehash: list[str] = []
+    if mutation == "orthogonality":
+        relative_path = "chromosomes/01/loadings.npy"
+        with (destination / relative_path).open("wb") as stream:
+            np.save(stream, np.asarray([[10.0], [0.0]], dtype=np.float64), allow_pickle=False)
+        manifest = _read_manifest_dict(destination)
+        manifest["chromosomes"]["01"]["convergence"]["loading_orthogonality_error"] = 3e-10
+        _write_manifest_dict(destination, manifest)
+        paths_to_rehash.append(relative_path)
+    elif mutation == "canonical-sign":
+        for filename in ("loadings.npy", "factors.npy"):
+            relative_path = f"chromosomes/01/{filename}"
+            array = np.load(destination / relative_path, allow_pickle=False)
+            with (destination / relative_path).open("wb") as stream:
+                np.save(stream, -array, allow_pickle=False)
+            paths_to_rehash.append(relative_path)
+    else:
+        relative_path = "chromosomes/01/factors.npy"
+        with (destination / relative_path).open("wb") as stream:
+            np.save(stream, np.asarray([[1.0], [0.0], [-1.0]], dtype=np.float64), allow_pickle=False)
+        paths_to_rehash.append(relative_path)
+    for relative_path in paths_to_rehash:
+        _update_payload_hash(destination, relative_path)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
 
 
 def test_override_with_failed_automatic_fit_diagnostics_writes_and_loads(tmp_path: Path) -> None:
@@ -756,6 +938,40 @@ def test_override_with_failed_automatic_fit_diagnostics_writes_and_loads(tmp_pat
 
     assert manifest.chromosomes[0].pflog_diagnostics["retained_gene_count"] == 0
     assert loaded.manifest.chromosomes[0].pflog_diagnostics == manifest.chromosomes[0].pflog_diagnostics
+
+
+def test_artifact_records_transform_exclusion_separately_from_pflog_fit_exclusion(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["gene_metadata"] = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "gene_id": ["held-out-constant", "gene-0", "gene-β"],
+            "chrom": ["1", "X", "MT"],
+        }
+    )
+    active_gene_indices = np.asarray([1, 2], dtype=np.int64)
+    active_gene_indices.flags.writeable = False
+    result = _factor_result("1")
+    diagnostics = replace(
+        result.diagnostics,
+        alpha_excluded_gene_count=0,
+        input_gene_count=3,
+        transform_excluded_gene_count=1,
+        active_gene_indices=active_gene_indices,
+    )
+
+    manifest = qtl_io.write_state_artifact(
+        destination,
+        iter([replace(result, diagnostics=diagnostics)]),
+        **arguments,
+    )
+
+    assert manifest.chromosomes[0].filtering_diagnostics == {
+        "input_gene_count": 3,
+        "active_gene_count": 2,
+        "transform_excluded_gene_count": 1,
+    }
+    assert manifest.chromosomes[0].pflog_diagnostics["excluded_gene_count"] == 0
 
 
 @pytest.mark.parametrize(
@@ -867,7 +1083,11 @@ def test_roundtrip_preserves_metadata_hashes_diagnostics_and_replay_provenance(t
     assert all(payload["sha256"] == _sha256(destination / payload["path"]) for payload in manifest["payloads"])
     chromosome = manifest["chromosomes"]["01"]
     assert chromosome["pflog"]["alpha"] == 1.25
-    assert chromosome["filtering"] == {"active_gene_count": 2, "excluded_gene_count": 0}
+    assert chromosome["filtering"] == {
+        "input_gene_count": 2,
+        "active_gene_count": 2,
+        "transform_excluded_gene_count": 0,
+    }
     assert chromosome["donor_counts"] == [2, 1]
     assert chromosome["solver"]["solver"] == "propack"
     assert chromosome["singular_values"] == [2.5]

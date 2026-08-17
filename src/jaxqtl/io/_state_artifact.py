@@ -32,6 +32,7 @@ from ._state_artifact_contract import (
     _ReplayProvenance,
     _StateArtifactChromosomeResult,
     _validate_cell_type_selection,
+    _validate_state_factor_payload_numerics,
     _validated_chromosome_set,
     ARTIFACT_TYPE,
     canonical_chromosome_key,
@@ -424,6 +425,10 @@ def _validated_factor_result(
     singular_values = np.asarray(result.singular_values)
     rank = diagnostics.rank
     active_genes = _active_gene_metadata(gene_metadata, np.asarray(diagnostics.active_gene_indices))
+    if diagnostics.input_gene_count != gene_metadata.height:
+        raise ValueError(f"chromosome {chromosome} input gene count disagrees with shared gene metadata")
+    if diagnostics.transform_excluded_gene_count != gene_metadata.height - active_genes.height:
+        raise ValueError(f"chromosome {chromosome} transform-excluded gene count disagrees with active genes")
     if factors.shape != (n_cells, rank) or tuple(diagnostics.factors_shape) != factors.shape:
         raise ValueError(f"chromosome {chromosome} factor shape disagrees with cells, rank, or diagnostics")
     if loadings.shape != (active_genes.height, rank) or tuple(diagnostics.loadings_shape) != loadings.shape:
@@ -431,8 +436,8 @@ def _validated_factor_result(
     if singular_values.shape != (rank,) or diagnostics.singular_values.shape != (rank,):
         raise ValueError(f"chromosome {chromosome} singular-value shape disagrees with rank or diagnostics")
     for name, array in (("factors", factors), ("loadings", loadings), ("singular values", singular_values)):
-        if array.dtype.hasobject or not np.issubdtype(array.dtype, np.inexact):
-            raise TypeError(f"chromosome {chromosome} {name} must use a non-object inexact dtype")
+        if array.dtype != np.dtype(np.float64):
+            raise TypeError(f"chromosome {chromosome} {name} must use the schema-v1 float64 dtype")
         if not np.isfinite(array).all():
             raise ValueError(f"chromosome {chromosome} {name} must be finite")
     if not np.array_equal(singular_values, diagnostics.singular_values):
@@ -470,8 +475,9 @@ def _chromosome_manifest(
             "excluded_denominator": diagnostics.alpha_excluded_denominator,
         },
         filtering_diagnostics={
+            "input_gene_count": diagnostics.input_gene_count,
             "active_gene_count": int(diagnostics.active_gene_indices.size),
-            "excluded_gene_count": diagnostics.alpha_excluded_gene_count,
+            "transform_excluded_gene_count": diagnostics.transform_excluded_gene_count,
         },
         donor_counts=tuple(int(count) for count in diagnostics.donor_counts),
         center_within_donor=diagnostics.center_within_donor,
@@ -613,6 +619,11 @@ def write_state_artifact(
         donor_counts=donor_counts,
     )
     input_sha256 = _validated_input_hashes(input_paths)
+    donor_lookup = {donor: index for index, donor in enumerate(canonical_donor_ids)}
+    cell_donor_index = np.asarray(
+        [donor_lookup[donor] for donor in canonical_cells["donor_id"].to_list()],
+        dtype=np.int64,
+    )
     raw_metrics = {} if approximation_metrics is None else approximation_metrics
     if not isinstance(raw_metrics, Mapping):
         raise TypeError("approximation_metrics must be a chromosome-keyed mapping")
@@ -650,6 +661,19 @@ def write_state_artifact(
                 donor_counts=canonical_donor_counts,
                 gene_metadata=canonical_genes,
             )
+            chromosome_manifest = _chromosome_manifest(
+                result,
+                chromosome=chromosome,
+                active_genes=active_genes,
+                approximation_metrics=metrics.get(chromosome, {}),
+            )
+            _validate_state_factor_payload_numerics(
+                factors,
+                loadings,
+                singular_values,
+                record=chromosome_manifest,
+                donor_index=cell_donor_index,
+            )
             payloads.extend(
                 _write_chromosome_payloads(
                     staging,
@@ -660,14 +684,7 @@ def write_state_artifact(
                     active_genes=active_genes,
                 )
             )
-            chromosome_manifests.append(
-                _chromosome_manifest(
-                    result,
-                    chromosome=chromosome,
-                    active_genes=active_genes,
-                    approximation_metrics=metrics.get(chromosome, {}),
-                )
-            )
+            chromosome_manifests.append(chromosome_manifest)
         try:
             next(iterator)
         except StopIteration:
@@ -727,6 +744,8 @@ def _verified_array(path: Path, payload: _PayloadRecord) -> np.memmap:
         raise ValueError(f"NumPy payload shape disagrees with manifest: {payload.path}")
     if array.dtype.str != payload.dtype:
         raise ValueError(f"NumPy payload dtype disagrees with manifest: {payload.path}")
+    if array.dtype != np.dtype(np.float64):
+        raise ValueError(f"NumPy payload must use the schema-v1 float64 dtype: {payload.path}")
     array.flags.writeable = False
     return array
 
@@ -828,6 +847,8 @@ def _load_state_artifact(
         raise ValueError("donor metadata counts do not align with cell metadata")
     if tuple(dict.fromkeys(cell_donors)) != donor_ids:
         raise ValueError("donor metadata must follow first-retained-cell order")
+    donor_lookup = {donor: index for index, donor in enumerate(donor_ids)}
+    cell_donor_index = np.asarray([donor_lookup[donor] for donor in cell_donors], dtype=np.int64)
     for record in manifest.chromosomes:
         if donor_counts != record.donor_counts:
             raise ValueError(f"chromosome {record.chromosome} donor counts disagree with shared donor metadata")
@@ -860,6 +881,13 @@ def _load_state_artifact(
             raise ValueError(f"chromosome {chromosome} memory-mapped arrays must be finite")
         if not np.array_equal(singular_values, np.asarray(record.singular_values)):
             raise ValueError(f"chromosome {chromosome} singular values disagree with the manifest diagnostics")
+        _validate_state_factor_payload_numerics(
+            factors,
+            loadings,
+            singular_values,
+            record=record,
+            donor_index=cell_donor_index,
+        )
         loaded_chromosomes.append(
             _StateArtifactChromosomeResult(
                 chromosome=chromosome,
