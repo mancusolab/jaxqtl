@@ -188,6 +188,14 @@ def test_duplicate_float_sum_must_remain_exact_in_source_dtype() -> None:
         _normalize(counts)
 
 
+def test_negative_float_duplicate_cannot_be_hidden_by_positive_cancellation() -> None:
+    counts = _duplicate_csr([-1.0, 2.0], dtype=np.float64)
+    assert not counts.has_canonical_format
+
+    with pytest.raises(ValueError, match="negative"):
+        _normalize(counts)
+
+
 @pytest.mark.parametrize(
     "counts",
     [

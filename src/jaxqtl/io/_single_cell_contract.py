@@ -71,6 +71,8 @@ def _validate_stored_counts(values: np.ndarray, *, context: str) -> None:
     if np.issubdtype(dtype, np.floating):
         if not np.isfinite(values).all():
             raise ValueError(f"{context} count values must be finite")
+        if np.any(values < 0):
+            raise ValueError(f"{context} count values cannot be negative")
         if not np.equal(values, np.floor(values)).all():
             raise ValueError(f"{context} count values must be integer-valued")
     elif np.issubdtype(dtype, np.signedinteger) and np.any(values < 0):
