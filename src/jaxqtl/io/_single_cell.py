@@ -1,6 +1,5 @@
 # pattern: Imperative Shell
 
-from dataclasses import replace
 from os import PathLike
 
 import polars as pl
@@ -99,4 +98,15 @@ def load_sparse_single_cell(
         cell_type_column=cell_type_column,
     )
     copy_events: tuple[SparseCopyEvent, ...] = ("npz_materialized", *normalized.copy_events)
-    return replace(normalized, copy_events=copy_events)
+    return SparseSingleCellData(
+        counts=normalized.counts,
+        cell_metadata=normalized.cell_metadata,
+        gene_metadata=normalized.gene_metadata,
+        cell_type_column=normalized.cell_type_column,
+        cell_ids=normalized.cell_ids,
+        gene_ids=normalized.gene_ids,
+        donor_ids=normalized.donor_ids,
+        cell_types=normalized.cell_types,
+        gene_chromosomes=normalized.gene_chromosomes,
+        copy_events=copy_events,
+    )

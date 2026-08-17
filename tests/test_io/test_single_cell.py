@@ -140,6 +140,35 @@ def test_result_contract_is_frozen() -> None:
         result.counts.indptr[0] = 1
 
 
+def test_result_metadata_accessors_return_defensive_clones() -> None:
+    result = _normalize(sparse.csr_array(np.eye(3, dtype=np.int8)))
+    expected_cells = result.cell_metadata.clone()
+    expected_genes = result.gene_metadata.clone()
+    expected_cell_ids = result.cell_ids.copy()
+    expected_gene_ids = result.gene_ids.copy()
+    expected_donor_ids = result.donor_ids.copy()
+    expected_cell_types = result.cell_types.copy()
+    expected_chromosomes = result.gene_chromosomes.copy()
+
+    retrieved_cells = result.cell_metadata
+    retrieved_cells.replace_column(0, pl.Series("matrix_index", [2, 1, 0]))
+    retrieved_cells.replace_column(1, pl.Series("cell_id", ["changed-0", "changed-1", "changed-2"]))
+    retrieved_cells.replace_column(2, pl.Series("donor_id", ["changed", "changed", "changed"]))
+    retrieved_cells.replace_column(3, pl.Series("cell_type", ["changed", "changed", "changed"]))
+    retrieved_genes = result.gene_metadata
+    retrieved_genes.replace_column(0, pl.Series("matrix_index", [2, 1, 0]))
+    retrieved_genes.replace_column(1, pl.Series("gene_id", ["changed-0", "changed-1", "changed-2"]))
+    retrieved_genes.replace_column(2, pl.Series("chrom", ["Y", "Y", "Y"]))
+
+    assert result.cell_metadata.equals(expected_cells)
+    assert result.gene_metadata.equals(expected_genes)
+    np.testing.assert_array_equal(result.cell_ids, expected_cell_ids)
+    np.testing.assert_array_equal(result.gene_ids, expected_gene_ids)
+    np.testing.assert_array_equal(result.donor_ids, expected_donor_ids)
+    np.testing.assert_array_equal(result.cell_types, expected_cell_types)
+    np.testing.assert_array_equal(result.gene_chromosomes, expected_chromosomes)
+
+
 def test_integral_float_storage_becomes_integer_and_records_canonicalization() -> None:
     counts = sparse.csr_array(np.diag([1.0, 2.0, 3.0]).astype(np.float64))
 

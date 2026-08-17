@@ -389,6 +389,13 @@ def test_pflog_operator_api_is_available_from_state_package() -> None:
     ]
 
 
+def test_pflog_operator_cannot_be_constructed_directly() -> None:
+    state = _state_api()
+
+    with pytest.raises(TypeError, match=r"cannot be constructed directly.*pflog_operator"):
+        state.PFLogOperator(None, None, None, None, None)
+
+
 def test_operator_vector_and_block_actions_match_dense_reference() -> None:
     state = _state_api()
     counts, chromosomes, donor_index = _operator_fixture()

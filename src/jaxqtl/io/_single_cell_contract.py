@@ -1,6 +1,6 @@
 # pattern: Functional Core
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Literal, TypeAlias
 
 import numpy as np
@@ -19,7 +19,7 @@ SparseCopyEvent: TypeAlias = Literal[
 ]
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class SparseSingleCellData:
     r"""Canonical sparse counts and matrix-ordered single-cell metadata.
 
@@ -49,8 +49,8 @@ class SparseSingleCellData:
     """
 
     counts: sparse.csr_array
-    cell_metadata: pl.DataFrame
-    gene_metadata: pl.DataFrame
+    _cell_metadata: pl.DataFrame = field(repr=False)
+    _gene_metadata: pl.DataFrame = field(repr=False)
     cell_type_column: str
     cell_ids: np.ndarray
     gene_ids: np.ndarray
@@ -58,6 +58,40 @@ class SparseSingleCellData:
     cell_types: np.ndarray
     gene_chromosomes: np.ndarray
     copy_events: tuple[SparseCopyEvent, ...]
+
+    def __init__(
+        self,
+        counts: sparse.csr_array,
+        cell_metadata: pl.DataFrame,
+        gene_metadata: pl.DataFrame,
+        cell_type_column: str,
+        cell_ids: np.ndarray,
+        gene_ids: np.ndarray,
+        donor_ids: np.ndarray,
+        cell_types: np.ndarray,
+        gene_chromosomes: np.ndarray,
+        copy_events: tuple[SparseCopyEvent, ...],
+    ) -> None:
+        object.__setattr__(self, "counts", counts)
+        object.__setattr__(self, "_cell_metadata", cell_metadata.clone())
+        object.__setattr__(self, "_gene_metadata", gene_metadata.clone())
+        object.__setattr__(self, "cell_type_column", cell_type_column)
+        object.__setattr__(self, "cell_ids", cell_ids)
+        object.__setattr__(self, "gene_ids", gene_ids)
+        object.__setattr__(self, "donor_ids", donor_ids)
+        object.__setattr__(self, "cell_types", cell_types)
+        object.__setattr__(self, "gene_chromosomes", gene_chromosomes)
+        object.__setattr__(self, "copy_events", copy_events)
+
+    @property
+    def cell_metadata(self) -> pl.DataFrame:
+        r"""Return a defensive clone of matrix-ordered cell metadata."""
+        return self._cell_metadata.clone()
+
+    @property
+    def gene_metadata(self) -> pl.DataFrame:
+        r"""Return a defensive clone of matrix-ordered gene metadata."""
+        return self._gene_metadata.clone()
 
 
 def _validate_stored_counts(values: np.ndarray, *, context: str) -> None:

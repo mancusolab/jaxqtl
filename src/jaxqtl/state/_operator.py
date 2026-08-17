@@ -170,13 +170,14 @@ def _checked_midpoint_anchor(
 
 
 @final
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, init=False)
 class PFLogOperator:
     r"""Implicit donor-balanced PFlog operator with exact transpose actions.
 
     The represented matrix is ``sqrt(D_w) C_D L J_q``. Only the transformed
     nonzero values of ``L`` are stored; feature and donor centers are applied
-    through reductions during each action.
+    through reductions during each action. Instances cannot be constructed
+    directly; use :func:`pflog_operator` so all domain invariants are validated.
     """
 
     config: PFLogOperatorConfig
@@ -184,6 +185,10 @@ class PFLogOperator:
     _transformed_counts: sparse.csr_array = field(repr=False)
     _donor_index: np.ndarray = field(repr=False)
     _sqrt_cell_weights: np.ndarray = field(repr=False)
+
+    def __init__(self, *args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise TypeError("PFLogOperator cannot be constructed directly; use pflog_operator(...)")
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -389,6 +394,23 @@ class PFLogOperator:
         return self._feature_center(features, method="rmatmat")
 
 
+def _operator_from_validated_state(
+    *,
+    config: PFLogOperatorConfig,
+    diagnostics: PFLogOperatorDiagnostics,
+    transformed_counts: sparse.csr_array,
+    donor_index: np.ndarray,
+    sqrt_cell_weights: np.ndarray,
+) -> PFLogOperator:
+    operator = object.__new__(PFLogOperator)
+    object.__setattr__(operator, "config", config)
+    object.__setattr__(operator, "diagnostics", diagnostics)
+    object.__setattr__(operator, "_transformed_counts", transformed_counts)
+    object.__setattr__(operator, "_donor_index", donor_index)
+    object.__setattr__(operator, "_sqrt_cell_weights", sqrt_cell_weights)
+    return operator
+
+
 def pflog_operator(
     counts: sparse.csr_array,
     gene_chromosomes: Sequence[str] | np.ndarray,
@@ -483,10 +505,10 @@ def pflog_operator(
         donor_counts=donor_counts,
         cell_weights=readonly_cell_weights,
     )
-    return PFLogOperator(
+    return _operator_from_validated_state(
         config=config,
         diagnostics=diagnostics,
-        _transformed_counts=transformed,
-        _donor_index=donors,
-        _sqrt_cell_weights=sqrt_cell_weights,
+        transformed_counts=transformed,
+        donor_index=donors,
+        sqrt_cell_weights=sqrt_cell_weights,
     )
