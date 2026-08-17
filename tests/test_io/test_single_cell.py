@@ -1,13 +1,17 @@
+# pattern: Functional Core
+
 import importlib
 
 from collections.abc import Sequence
 from dataclasses import FrozenInstanceError
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import polars as pl
 import pytest
 
+from hypothesis import example, given, settings, strategies as st
 from scipy import sparse
 
 import jaxqtl.io as qtl_io
@@ -646,3 +650,262 @@ def test_loader_rejects_empty_cell_type_column_before_scanning(tmp_path: Path) -
             genes_path,
             cell_type_column="",
         )
+
+
+def _selection_input(
+    *,
+    cell_types: tuple[str, ...] = ("B", "T", "B", "T", "B", "T"),
+    donor_ids: tuple[str, ...] = ("donor-2", "donor-1", "donor-2", "donor-3", "donor-1", "donor-3"),
+):
+    n_cells = len(cell_types)
+    counts = sparse.csr_array(
+        np.asarray(
+            [[row + 1, 0, (row + 1) * 10] for row in range(n_cells)],
+            dtype=np.int32,
+        )
+    )
+    cells = pl.DataFrame(
+        {
+            "matrix_index": list(reversed(range(n_cells))),
+            "cell_id": [f"cell-{row}" for row in reversed(range(n_cells))],
+            "donor_id": [donor_ids[row] for row in reversed(range(n_cells))],
+            "cell_type": [cell_types[row] for row in reversed(range(n_cells))],
+        }
+    )
+    genes = pl.DataFrame(
+        {
+            "matrix_index": [2, 0, 1],
+            "gene_id": ["gene-2", "gene-0", "gene-1"],
+            "chrom": ["3", "1", "2"],
+        }
+    )
+    return _normalizer()(counts, cells, genes, cell_type_column="cell_type")
+
+
+def test_single_cell_selection_contract_is_available_from_io_package() -> None:
+    assert callable(getattr(qtl_io, "select_single_cell_data", None)), (
+        "select_single_cell_data is not available from jaxqtl.io"
+    )
+    assert hasattr(qtl_io, "SelectedSingleCellData"), "SelectedSingleCellData is not available from jaxqtl.io"
+
+
+def test_single_type_default_selection_preserves_sparse_order_and_provenance() -> None:
+    data = _selection_input(
+        cell_types=("B", "B", "B"),
+        donor_ids=("donor-2", "donor-1", "donor-2"),
+    )
+
+    result = qtl_io.select_single_cell_data(data)
+
+    assert isinstance(result, qtl_io.SelectedSingleCellData)
+    assert isinstance(result.counts, sparse.csr_array)
+    np.testing.assert_array_equal(result.counts.toarray(), data.counts.toarray())
+    assert result.cell_metadata["matrix_index"].to_list() == [0, 1, 2]
+    assert result.original_matrix_indices.tolist() == [0, 1, 2]
+    assert result.cell_ids.tolist() == ["cell-0", "cell-1", "cell-2"]
+    assert result.cell_types.tolist() == ["B", "B", "B"]
+    assert result.selected_cell_type == "B"
+    assert result.allow_mixed_cell_types is False
+    assert result.donor_ids.tolist() == ["donor-2", "donor-1"]
+    assert result.donor_index.tolist() == [0, 1, 0]
+    assert result.donor_counts.tolist() == [2, 1]
+
+
+def test_explicit_selection_from_mixed_data_freezes_first_retained_donor_order() -> None:
+    data = _selection_input()
+
+    result = qtl_io.select_single_cell_data(data, cell_type="T")
+
+    assert isinstance(result.counts, sparse.csr_array)
+    np.testing.assert_array_equal(result.counts.toarray(), data.counts[[1, 3, 5], :].toarray())
+    assert result.cell_metadata["matrix_index"].to_list() == [1, 3, 5]
+    assert result.original_matrix_indices.tolist() == [1, 3, 5]
+    assert result.cell_ids.tolist() == ["cell-1", "cell-3", "cell-5"]
+    assert result.cell_types.tolist() == ["T", "T", "T"]
+    assert result.selected_cell_type == "T"
+    assert result.allow_mixed_cell_types is False
+    assert result.donor_ids.tolist() == ["donor-1", "donor-3"]
+    assert result.donor_index.tolist() == [0, 1, 1]
+    assert result.donor_counts.tolist() == [1, 2]
+
+
+def test_explicit_mixed_opt_in_retains_all_cells_and_dense_donor_index() -> None:
+    data = _selection_input()
+
+    result = qtl_io.select_single_cell_data(data, allow_mixed_cell_types=True)
+
+    np.testing.assert_array_equal(result.counts.toarray(), data.counts.toarray())
+    assert result.original_matrix_indices.tolist() == list(range(6))
+    assert result.cell_types.tolist() == ["B", "T", "B", "T", "B", "T"]
+    assert result.selected_cell_type is None
+    assert result.allow_mixed_cell_types is True
+    assert result.donor_ids.tolist() == ["donor-2", "donor-1", "donor-3"]
+    assert result.donor_index.tolist() == [0, 1, 0, 2, 1, 2]
+    assert result.donor_counts.tolist() == [2, 2, 2]
+
+
+def test_selected_contract_preserves_phase_one_immutability() -> None:
+    result = qtl_io.select_single_cell_data(_selection_input(), cell_type="B")
+    expected_cells = result.cell_metadata
+    expected_genes = result.gene_metadata
+
+    with pytest.raises(FrozenInstanceError):
+        setattr(result, "selected_cell_type", "T")
+    for array in (
+        result.original_matrix_indices,
+        result.cell_ids,
+        result.cell_types,
+        result.gene_ids,
+        result.gene_chromosomes,
+        result.donor_ids,
+        result.donor_index,
+        result.donor_counts,
+    ):
+        assert not array.flags.writeable
+    with pytest.raises(ValueError, match="read-only"):
+        result.counts.data[0] = 0
+
+    retrieved_cells = result.cell_metadata
+    retrieved_cells.replace_column(1, pl.Series("cell_id", ["changed"] * retrieved_cells.height))
+    retrieved_genes = result.gene_metadata
+    retrieved_genes.replace_column(1, pl.Series("gene_id", ["changed"] * retrieved_genes.height))
+    assert result.cell_metadata.equals(expected_cells)
+    assert result.gene_metadata.equals(expected_genes)
+
+
+@pytest.mark.parametrize(
+    ("kwargs", "message"),
+    [
+        ({}, "multiple cell types"),
+        ({"cell_type": "unknown"}, "unknown cell_type"),
+        ({"cell_type": ""}, "cell_type.*nonempty"),
+        ({"cell_type": "   "}, "cell_type.*nonempty"),
+        ({"cell_type": "B", "allow_mixed_cell_types": True}, "cannot.*cell_type.*allow_mixed"),
+    ],
+)
+def test_selection_rejects_invalid_cell_type_options(kwargs: dict[str, Any], message: str) -> None:
+    with pytest.raises(ValueError, match=message):
+        qtl_io.select_single_cell_data(_selection_input(), **kwargs)
+
+
+def test_selection_rejects_metadata_count_row_mismatch() -> None:
+    data = _selection_input()
+    mismatched = qtl_io.SparseSingleCellData(
+        counts=data.counts[:-1, :],
+        cell_metadata=data.cell_metadata,
+        gene_metadata=data.gene_metadata,
+        cell_type_column=data.cell_type_column,
+        cell_ids=data.cell_ids,
+        gene_ids=data.gene_ids,
+        donor_ids=data.donor_ids,
+        cell_types=data.cell_types,
+        gene_chromosomes=data.gene_chromosomes,
+        copy_events=data.copy_events,
+    )
+
+    with pytest.raises(ValueError, match="cell metadata.*count matrix row"):
+        qtl_io.select_single_cell_data(mismatched, cell_type="B")
+
+
+def test_selection_rejects_zero_selected_cells() -> None:
+    genes = pl.DataFrame({"matrix_index": [0], "gene_id": ["gene-0"], "chrom": ["1"]})
+    empty = qtl_io.SparseSingleCellData(
+        counts=sparse.csr_array((0, 1), dtype=np.int8),
+        cell_metadata=pl.DataFrame(
+            schema={
+                "matrix_index": pl.Int64,
+                "cell_id": pl.String,
+                "donor_id": pl.String,
+                "cell_type": pl.String,
+            }
+        ),
+        gene_metadata=genes,
+        cell_type_column="cell_type",
+        cell_ids=np.asarray([], dtype=np.str_),
+        gene_ids=np.asarray(["gene-0"]),
+        donor_ids=np.asarray([], dtype=np.str_),
+        cell_types=np.asarray([], dtype=np.str_),
+        gene_chromosomes=np.asarray(["1"]),
+        copy_events=(),
+    )
+
+    with pytest.raises(ValueError, match="selection.*zero cells"):
+        qtl_io.select_single_cell_data(empty, allow_mixed_cell_types=True)
+
+
+@st.composite
+def _selection_cases(draw):
+    n_cells = draw(st.integers(min_value=1, max_value=8))
+    donor_codes = tuple(draw(st.lists(st.integers(min_value=0, max_value=3), min_size=n_cells, max_size=n_cells)))
+    type_codes = tuple(draw(st.lists(st.integers(min_value=0, max_value=1), min_size=n_cells, max_size=n_cells)))
+    metadata_order = tuple(draw(st.permutations(tuple(range(n_cells)))))
+    return donor_codes, type_codes, metadata_order
+
+
+def _generated_selection_input(case):
+    donor_codes, type_codes, metadata_order = case
+    n_cells = len(donor_codes)
+    counts = sparse.csr_array(np.asarray([[row + 1, row % 2, 0] for row in range(n_cells)], dtype=np.int16))
+    donor_ids = tuple(f"donor-{code}" for code in donor_codes)
+    cell_types = tuple(("B", "T")[code] for code in type_codes)
+    cells = pl.DataFrame(
+        {
+            "matrix_index": metadata_order,
+            "cell_id": [f"cell-{row}" for row in metadata_order],
+            "donor_id": [donor_ids[row] for row in metadata_order],
+            "cell_type": [cell_types[row] for row in metadata_order],
+        }
+    )
+    genes = pl.DataFrame(
+        {
+            "matrix_index": [0, 1, 2],
+            "gene_id": ["gene-0", "gene-1", "gene-2"],
+            "chrom": ["1", "2", "3"],
+        }
+    )
+    return _normalizer()(counts, cells, genes, cell_type_column="cell_type")
+
+
+@settings(max_examples=25, derandomize=True, deadline=None)
+@example(case=((0,), (0,), (0,)))
+@example(case=((0, 0, 0), (0, 1, 0), (2, 0, 1)))
+@given(case=_selection_cases())
+def test_selection_normalization_is_idempotent_under_metadata_order(case) -> None:
+    data = _generated_selection_input(case)
+    donor_codes, type_codes, _ = case
+    canonical_data = _generated_selection_input((donor_codes, type_codes, tuple(range(len(donor_codes)))))
+
+    first = qtl_io.select_single_cell_data(data, allow_mixed_cell_types=True)
+    second = qtl_io.select_single_cell_data(canonical_data, allow_mixed_cell_types=True)
+
+    assert (first.counts != second.counts).nnz == 0
+    assert first.cell_metadata.equals(second.cell_metadata)
+    assert first.gene_metadata.equals(second.gene_metadata)
+    for first_array, second_array in (
+        (first.original_matrix_indices, second.original_matrix_indices),
+        (first.cell_ids, second.cell_ids),
+        (first.cell_types, second.cell_types),
+        (first.donor_ids, second.donor_ids),
+        (first.donor_index, second.donor_index),
+        (first.donor_counts, second.donor_counts),
+    ):
+        np.testing.assert_array_equal(first_array, second_array)
+
+
+@settings(max_examples=25, derandomize=True, deadline=None)
+@example(case=((0,), (0,), (0,)))
+@example(case=((2, 2, 2), (0, 1, 0), (1, 2, 0)))
+@given(case=_selection_cases())
+def test_generated_donor_indices_are_dense_and_match_first_retained_order(case) -> None:
+    data = _generated_selection_input(case)
+
+    result = qtl_io.select_single_cell_data(data, allow_mixed_cell_types=True)
+
+    assert np.array_equal(np.unique(result.donor_index), np.arange(result.donor_ids.size))
+    np.testing.assert_array_equal(
+        np.bincount(result.donor_index, minlength=result.donor_ids.size),
+        result.donor_counts,
+    )
+    first_positions = [int(np.flatnonzero(result.donor_index == index)[0]) for index in range(result.donor_ids.size)]
+    retained_donors = result.cell_metadata["donor_id"].to_list()
+    assert result.donor_ids.tolist() == [retained_donors[position] for position in first_positions]

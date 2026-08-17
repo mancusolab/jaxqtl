@@ -94,6 +94,107 @@ class SparseSingleCellData:
         return self._gene_metadata.clone()
 
 
+@dataclass(frozen=True, slots=True, init=False)
+class SelectedSingleCellData:
+    r"""Canonical cells selected for state-factor construction.
+
+    **Arguments:**
+
+    counts
+        Integer-valued CSR counts for retained cells. Row positions are newly
+        dense after selection.
+    cell_metadata
+        Retained cell metadata in source-matrix order. Its ``matrix_index``
+        column remains the immutable source-row provenance.
+    gene_metadata
+        Gene metadata in count-matrix column order.
+    cell_type_column
+        Name of the cell-type metadata column.
+    selected_cell_type
+        Explicit or inferred cell type, or ``None`` for an opted-in mixed set.
+    allow_mixed_cell_types
+        Whether the caller explicitly retained multiple cell types.
+    original_matrix_indices
+        Source count-matrix row indices for retained cells.
+    cell_ids
+        Cell identifiers in selected count-matrix row order.
+    cell_types
+        Cell-type values in selected count-matrix row order.
+    gene_ids
+        Gene identifiers in count-matrix column order.
+    gene_chromosomes
+        Canonical chromosome labels in count-matrix column order.
+    donor_ids
+        Unique donor identifiers ordered by first retained cell.
+    donor_index
+        Dense zero-based cell-to-donor indices in selected matrix row order.
+    donor_counts
+        Number of retained cells for each entry in ``donor_ids``.
+    copy_events
+        Source ingress normalization/materialization events.
+    """
+
+    counts: sparse.csr_array
+    _cell_metadata: pl.DataFrame = field(repr=False)
+    _gene_metadata: pl.DataFrame = field(repr=False)
+    cell_type_column: str
+    selected_cell_type: str | None
+    allow_mixed_cell_types: bool
+    original_matrix_indices: np.ndarray
+    cell_ids: np.ndarray
+    cell_types: np.ndarray
+    gene_ids: np.ndarray
+    gene_chromosomes: np.ndarray
+    donor_ids: np.ndarray
+    donor_index: np.ndarray
+    donor_counts: np.ndarray
+    copy_events: tuple[SparseCopyEvent, ...]
+
+    def __init__(
+        self,
+        counts: sparse.csr_array,
+        cell_metadata: pl.DataFrame,
+        gene_metadata: pl.DataFrame,
+        cell_type_column: str,
+        selected_cell_type: str | None,
+        allow_mixed_cell_types: bool,
+        original_matrix_indices: np.ndarray,
+        cell_ids: np.ndarray,
+        cell_types: np.ndarray,
+        gene_ids: np.ndarray,
+        gene_chromosomes: np.ndarray,
+        donor_ids: np.ndarray,
+        donor_index: np.ndarray,
+        donor_counts: np.ndarray,
+        copy_events: tuple[SparseCopyEvent, ...],
+    ) -> None:
+        object.__setattr__(self, "counts", counts)
+        object.__setattr__(self, "_cell_metadata", cell_metadata.clone())
+        object.__setattr__(self, "_gene_metadata", gene_metadata.clone())
+        object.__setattr__(self, "cell_type_column", cell_type_column)
+        object.__setattr__(self, "selected_cell_type", selected_cell_type)
+        object.__setattr__(self, "allow_mixed_cell_types", allow_mixed_cell_types)
+        object.__setattr__(self, "original_matrix_indices", original_matrix_indices)
+        object.__setattr__(self, "cell_ids", cell_ids)
+        object.__setattr__(self, "cell_types", cell_types)
+        object.__setattr__(self, "gene_ids", gene_ids)
+        object.__setattr__(self, "gene_chromosomes", gene_chromosomes)
+        object.__setattr__(self, "donor_ids", donor_ids)
+        object.__setattr__(self, "donor_index", donor_index)
+        object.__setattr__(self, "donor_counts", donor_counts)
+        object.__setattr__(self, "copy_events", copy_events)
+
+    @property
+    def cell_metadata(self) -> pl.DataFrame:
+        r"""Return a defensive clone retaining original row provenance."""
+        return self._cell_metadata.clone()
+
+    @property
+    def gene_metadata(self) -> pl.DataFrame:
+        r"""Return a defensive clone of matrix-ordered gene metadata."""
+        return self._gene_metadata.clone()
+
+
 def _validate_stored_counts(values: np.ndarray, *, context: str) -> None:
     dtype = values.dtype
     if np.issubdtype(dtype, np.bool_):
@@ -298,6 +399,166 @@ def _readonly_strings(values: tuple[str, ...]) -> np.ndarray:
     array = np.asarray(values, dtype=np.str_)
     array.flags.writeable = False
     return array
+
+
+def _readonly_array(values, *, dtype=None) -> np.ndarray:
+    array = np.asarray(values, dtype=dtype)
+    array.flags.writeable = False
+    return array
+
+
+def _freeze_csr_buffers(counts: sparse.csr_array) -> sparse.csr_array:
+    counts.data.flags.writeable = False
+    counts.indices.flags.writeable = False
+    counts.indptr.flags.writeable = False
+    return counts
+
+
+def _validate_selection_source(data: SparseSingleCellData) -> pl.DataFrame:
+    if not isinstance(data, SparseSingleCellData):
+        raise TypeError("data must be a normalized SparseSingleCellData instance")
+    if not isinstance(data.counts, sparse.csr_array):
+        raise TypeError("data counts must be a canonical SciPy CSR sparse array")
+
+    cells = data.cell_metadata
+    n_cells = data.counts.shape[0]
+    if cells.height != n_cells:
+        raise ValueError(f"cell metadata row count {cells.height} does not match count matrix row count {n_cells}")
+    required_columns = ("matrix_index", "cell_id", "donor_id", data.cell_type_column)
+    missing = [column for column in required_columns if column not in cells.columns]
+    if missing:
+        raise ValueError(f"cell metadata is missing required columns: {', '.join(missing)}")
+
+    vector_lengths = {
+        "cell_ids": data.cell_ids.size,
+        "donor_ids": data.donor_ids.size,
+        "cell_types": data.cell_types.size,
+    }
+    invalid_lengths = [name for name, length in vector_lengths.items() if length != n_cells]
+    if invalid_lengths:
+        raise ValueError(
+            "single-cell source vector lengths do not match count matrix rows: " + ", ".join(invalid_lengths)
+        )
+
+    matrix_indices = np.asarray(cells["matrix_index"].to_numpy(), dtype=np.int64)
+    if not np.array_equal(matrix_indices, np.arange(n_cells, dtype=np.int64)):
+        raise ValueError("cell metadata must remain in canonical source matrix order before selection")
+    expected_vectors = (
+        ("cell_ids", data.cell_ids, cells["cell_id"].to_list()),
+        ("donor_ids", data.donor_ids, cells["donor_id"].to_list()),
+        ("cell_types", data.cell_types, cells[data.cell_type_column].to_list()),
+    )
+    for name, array, metadata_values in expected_vectors:
+        if array.tolist() != metadata_values:
+            raise ValueError(f"{name} do not match matrix-ordered cell metadata")
+    return cells
+
+
+def select_single_cell_data(
+    data: SparseSingleCellData,
+    *,
+    cell_type: str | None = None,
+    allow_mixed_cell_types: bool = False,
+) -> SelectedSingleCellData:
+    r"""Select cells and freeze donor indexing for state-factor construction.
+
+    **Arguments:**
+
+    data
+        Canonical sparse counts and matrix-ordered metadata from single-cell
+        ingress normalization.
+    cell_type
+        Cell type to retain. It may be omitted only for a single-type source or
+        when ``allow_mixed_cell_types`` is true.
+    allow_mixed_cell_types
+        Explicitly retain all source cell types. This cannot be combined with
+        an explicit ``cell_type``.
+
+    **Returns:**
+
+    A canonical immutable selected-cell contract with sparse counts, source-row
+    provenance, and dense first-retained-order donor indexing.
+
+    **Raises:**
+
+    TypeError
+        If the input or option types violate the public contract.
+    ValueError
+        If selection is ambiguous, contradictory, unknown, empty, or the source
+        cell axis is inconsistent.
+    """
+    if not isinstance(allow_mixed_cell_types, bool):
+        raise TypeError("allow_mixed_cell_types must be a boolean")
+    if cell_type is not None and not isinstance(cell_type, str):
+        raise TypeError("cell_type must be a string or None")
+    if isinstance(cell_type, str) and not cell_type.strip():
+        raise ValueError("cell_type must be a nonempty string when provided")
+    if cell_type is not None and allow_mixed_cell_types:
+        raise ValueError("cannot provide cell_type together with allow_mixed_cell_types=True")
+
+    cells = _validate_selection_source(data)
+    observed_types = tuple(dict.fromkeys(data.cell_types.tolist()))
+    if cell_type is None:
+        if len(observed_types) == 1:
+            selected_cell_type = observed_types[0]
+            selected_mask = np.ones(data.counts.shape[0], dtype=np.bool_)
+        elif len(observed_types) > 1 and allow_mixed_cell_types:
+            selected_cell_type = None
+            selected_mask = np.ones(data.counts.shape[0], dtype=np.bool_)
+        elif len(observed_types) > 1:
+            raise ValueError(
+                "source contains multiple cell types; provide cell_type or set allow_mixed_cell_types=True"
+            )
+        else:
+            selected_cell_type = None
+            selected_mask = np.zeros(data.counts.shape[0], dtype=np.bool_)
+    else:
+        if cell_type not in observed_types:
+            raise ValueError(f"unknown cell_type {cell_type!r}; available values are {observed_types}")
+        selected_cell_type = cell_type
+        selected_mask = data.cell_types == cell_type
+
+    retained = np.flatnonzero(selected_mask).astype(np.int64, copy=False)
+    if retained.size == 0:
+        raise ValueError("cell selection retained zero cells")
+
+    selected_counts = _freeze_csr_buffers(sparse.csr_array(data.counts[retained, :]))
+    selected_cells = cells.filter(pl.Series("selected", selected_mask))
+    original_matrix_indices = _readonly_array(
+        selected_cells["matrix_index"].to_numpy(),
+        dtype=np.int64,
+    )
+    selected_cell_ids = _readonly_strings(tuple(data.cell_ids[retained].tolist()))
+    selected_cell_types = _readonly_strings(tuple(data.cell_types[retained].tolist()))
+    retained_cell_donors = data.donor_ids[retained].tolist()
+
+    donor_lookup: dict[str, int] = {}
+    ordered_donors: list[str] = []
+    donor_index = np.empty(retained.size, dtype=np.int64)
+    for cell_index, donor_id in enumerate(retained_cell_donors):
+        if donor_id not in donor_lookup:
+            donor_lookup[donor_id] = len(ordered_donors)
+            ordered_donors.append(donor_id)
+        donor_index[cell_index] = donor_lookup[donor_id]
+    donor_counts = np.bincount(donor_index, minlength=len(ordered_donors)).astype(np.int64, copy=False)
+
+    return SelectedSingleCellData(
+        counts=selected_counts,
+        cell_metadata=selected_cells,
+        gene_metadata=data.gene_metadata,
+        cell_type_column=data.cell_type_column,
+        selected_cell_type=selected_cell_type,
+        allow_mixed_cell_types=allow_mixed_cell_types,
+        original_matrix_indices=original_matrix_indices,
+        cell_ids=selected_cell_ids,
+        cell_types=selected_cell_types,
+        gene_ids=_readonly_strings(tuple(data.gene_ids.tolist())),
+        gene_chromosomes=_readonly_strings(tuple(data.gene_chromosomes.tolist())),
+        donor_ids=_readonly_strings(tuple(ordered_donors)),
+        donor_index=_readonly_array(donor_index, dtype=np.int64),
+        donor_counts=_readonly_array(donor_counts, dtype=np.int64),
+        copy_events=data.copy_events,
+    )
 
 
 def normalize_sparse_single_cell(
