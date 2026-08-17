@@ -7,6 +7,7 @@ import hashlib
 import importlib
 import importlib.util
 import json
+import os
 import shutil
 
 from dataclasses import replace
@@ -401,6 +402,38 @@ def test_decoder_rejects_invalid_exact_types_and_contradictory_replay_configurat
         contract.decode_manifest(json.dumps(encoded))
 
 
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("automatic-alpha", "automatic PFlog alpha"),
+        ("sigma-floor", "sigma_floor.*derived"),
+        ("residual-limit", "residual_limit.*derived"),
+        ("singular-floor", "singular value.*sigma_floor"),
+    ],
+)
+def test_decoder_rejects_derived_replay_diagnostics_outside_algorithm_contract(
+    mutation: str,
+    message: str,
+) -> None:
+    contract = _contract()
+    encoded = _manifest_dict()
+    chromosome = encoded["chromosomes"]["01"]
+    if mutation == "automatic-alpha":
+        chromosome["pflog"]["alpha"] = 9.0
+    elif mutation == "sigma-floor":
+        chromosome["convergence"]["sigma_floor"] = 999.0
+    elif mutation == "residual-limit":
+        chromosome["convergence"]["residual_limit"] = 999.0
+    else:
+        encoded["configuration"]["tol"] = 2.0
+        chromosome["solver"]["tol"] = 2.0
+        chromosome["convergence"]["sigma_floor"] = 5.0
+        chromosome["convergence"]["residual_limit"] = 20.0
+
+    with pytest.raises(ValueError, match=message):
+        contract.decode_manifest(json.dumps(encoded))
+
+
 def test_pure_alignment_and_configuration_validation() -> None:
     contract = _contract()
     manifest = _manifest()
@@ -687,6 +720,23 @@ def test_writer_accepts_normalized_single_type_selection_contract(tmp_path: Path
     assert qtl_io.load_state_artifact(destination).manifest == manifest
 
 
+def test_writer_rejects_single_observed_type_recorded_as_mixed(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["selected_cell_type"] = None
+    arguments["allow_mixed_cell_types"] = True
+    arguments["configuration"] = {
+        **arguments["configuration"],
+        "cell_type": None,
+        "allow_mixed_cell_types": True,
+    }
+
+    with pytest.raises(ValueError, match="mixed-cell opt-in requires at least two"):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
 def test_published_destination_containing_staging_marker_roundtrips(tmp_path: Path) -> None:
     destination, arguments = _writer_arguments(tmp_path)
     destination = tmp_path / "published.staging-results"
@@ -763,6 +813,37 @@ def test_writer_refuses_existing_destination_without_modification(tmp_path: Path
         qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
 
     assert sentinel.read_text(encoding="utf-8") == "preserve"
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
+def test_writer_atomically_refuses_destination_created_during_publication(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    artifact = importlib.import_module("jaxqtl.io._state_artifact")
+    destination, arguments = _writer_arguments(tmp_path)
+    original_publish = getattr(artifact, "_publish_directory_noreplace", os.rename)
+    published_inode: int | None = None
+
+    def create_destination_then_publish(staging: Path, final_path: Path) -> None:
+        nonlocal published_inode
+        final_path.mkdir()
+        published_inode = final_path.stat().st_ino
+        original_publish(staging, final_path)
+
+    monkeypatch.setattr(
+        artifact,
+        "_publish_directory_noreplace",
+        create_destination_then_publish,
+        raising=False,
+    )
+
+    with pytest.raises(FileExistsError, match="already exists"):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert destination.is_dir()
+    assert destination.stat().st_ino == published_inode
+    assert list(destination.iterdir()) == []
     assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
 
 
@@ -868,6 +949,40 @@ def test_loader_rejects_invalid_types_and_contradictory_replay_configuration(
 
 
 @pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("automatic-alpha", "automatic PFlog alpha"),
+        ("sigma-floor", "sigma_floor.*derived"),
+        ("residual-limit", "residual_limit.*derived"),
+        ("singular-floor", "singular value.*sigma_floor"),
+    ],
+)
+def test_loader_rejects_mutated_derived_replay_diagnostics(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    chromosome = manifest["chromosomes"]["01"]
+    if mutation == "automatic-alpha":
+        chromosome["pflog"]["alpha"] = 9.0
+    elif mutation == "sigma-floor":
+        chromosome["convergence"]["sigma_floor"] = 999.0
+    elif mutation == "residual-limit":
+        chromosome["convergence"]["residual_limit"] = 999.0
+    else:
+        manifest["configuration"]["tol"] = 2.0
+        chromosome["solver"]["tol"] = 2.0
+        chromosome["convergence"]["sigma_floor"] = 5.0
+        chromosome["convergence"]["residual_limit"] = 20.0
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
     ("cell_types", "message"),
     [
         (["T", "T", "T"], "selected cell type.*cell metadata"),
@@ -905,6 +1020,58 @@ def test_loader_accepts_coordinated_normalized_single_type_selection(tmp_path: P
 
     assert loaded.manifest.selected_cell_type == "T"
     assert loaded.manifest.allow_mixed_cell_types is False
+
+
+def test_loader_rejects_single_observed_type_recorded_as_mixed(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+    manifest = _read_manifest_dict(destination)
+    manifest["selection"]["selected_cell_type"] = None
+    manifest["selection"]["allow_mixed_cell_types"] = True
+    manifest["configuration"]["cell_type"] = None
+    manifest["configuration"]["allow_mixed_cell_types"] = True
+    _write_manifest_dict(destination, manifest)
+
+    with pytest.raises(ValueError, match="mixed-cell opt-in requires at least two"):
+        qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("mutation", "message"),
+    [
+        ("permuted-counts", "chromosome.*donor counts"),
+        ("unknown-cell-donor", "exactly cover"),
+        ("missing-donor-coverage", "exactly cover"),
+        ("first-observed-order", "first-retained-cell order"),
+    ],
+)
+def test_loader_reconciles_donor_payload_with_cells_and_chromosome_diagnostics(
+    tmp_path: Path,
+    mutation: str,
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    cells_path = destination / "cells.parquet"
+    donors_path = destination / "donors.parquet"
+    cells = pl.read_parquet(cells_path)
+    donors = pl.read_parquet(donors_path)
+    if mutation == "permuted-counts":
+        cells = cells.with_columns(pl.Series("donor_id", ["donor-0", "donor-β", "donor-β"]))
+        donors = donors.with_columns(pl.Series("cell_count", [1, 2]))
+    elif mutation == "unknown-cell-donor":
+        cells = cells.with_columns(pl.Series("donor_id", ["donor-0", "unknown", "donor-β"]))
+        donors = donors.with_columns(pl.Series("cell_count", [1, 1]))
+    elif mutation == "missing-donor-coverage":
+        cells = cells.with_columns(pl.Series("donor_id", ["donor-0", "donor-0", "donor-0"]))
+        donors = donors.with_columns(pl.Series("cell_count", [3, 1]))
+    else:
+        cells = cells.with_columns(pl.Series("donor_id", ["donor-β", "donor-0", "donor-0"]))
+    cells.write_parquet(cells_path)
+    donors.write_parquet(donors_path)
+    _update_payload_hash(destination, "cells.parquet")
+    _update_payload_hash(destination, "donors.parquet")
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
 
 
 @pytest.mark.parametrize(

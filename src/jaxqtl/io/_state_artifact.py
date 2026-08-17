@@ -2,10 +2,13 @@
 
 from __future__ import annotations
 
+import ctypes
+import errno
 import importlib.metadata
 import os
 import platform
 import shutil
+import sys
 import tempfile
 
 from collections.abc import Iterable, Mapping, Sequence
@@ -48,6 +51,9 @@ from ._state_artifact_contract import (
 
 _HASH_CHUNK_SIZE = 1024 * 1024
 _STAGING_DIRECTORY_PREFIX = ".jaxqtl-state-artifact-staging-"
+_DARWIN_RENAME_EXCL = 0x00000004
+_LINUX_AT_FDCWD = -100
+_LINUX_RENAME_NOREPLACE = 1
 
 
 def _preflight_state_artifact_destination(destination: str | os.PathLike[str]) -> Path:
@@ -84,6 +90,67 @@ def _fsync_directory(path: Path) -> None:
         pass
     finally:
         os.close(descriptor)
+
+
+def _publication_os_error(error_number: int, final_path: Path) -> OSError:
+    if error_number in {errno.EEXIST, errno.ENOTEMPTY}:
+        return FileExistsError(
+            errno.EEXIST,
+            f"state artifact destination already exists: {final_path}",
+            final_path,
+        )
+    return OSError(error_number, os.strerror(error_number), final_path)
+
+
+def _publish_directory_noreplace(staging: Path, final_path: Path) -> None:
+    """Atomically publish without replacement, or fail closed if unsupported."""
+    libc = ctypes.CDLL(None, use_errno=True)
+    source = os.fsencode(staging)
+    destination = os.fsencode(final_path)
+    if sys.platform == "darwin":
+        try:
+            rename = libc.renamex_np
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "atomic no-replace directory publication is unavailable on this Darwin runtime",
+                final_path,
+            ) from error
+        rename.argtypes = (ctypes.c_char_p, ctypes.c_char_p, ctypes.c_uint)
+        rename.restype = ctypes.c_int
+        result = rename(source, destination, _DARWIN_RENAME_EXCL)
+    elif sys.platform.startswith("linux"):
+        try:
+            rename = libc.renameat2
+        except AttributeError as error:
+            raise OSError(
+                errno.ENOTSUP,
+                "atomic no-replace directory publication requires renameat2 on Linux",
+                final_path,
+            ) from error
+        rename.argtypes = (
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_int,
+            ctypes.c_char_p,
+            ctypes.c_uint,
+        )
+        rename.restype = ctypes.c_int
+        result = rename(
+            _LINUX_AT_FDCWD,
+            source,
+            _LINUX_AT_FDCWD,
+            destination,
+            _LINUX_RENAME_NOREPLACE,
+        )
+    else:
+        raise OSError(
+            errno.ENOTSUP,
+            "atomic no-replace directory publication is unsupported on this platform",
+            final_path,
+        )
+    if result != 0:
+        raise _publication_os_error(ctypes.get_errno(), final_path)
 
 
 def _write_bytes(path: Path, payload: bytes) -> None:
@@ -512,7 +579,8 @@ def write_state_artifact(
         If the destination already exists.
     ValueError, TypeError, OSError
         If inputs, streamed results, writes, hashes, or staged validation fail. The staging
-        directory is removed and no final artifact is exposed.
+        directory is removed and no final artifact is exposed. Publication uses Darwin
+        ``RENAME_EXCL`` or Linux ``RENAME_NOREPLACE``; other runtimes fail closed.
     """
     final_path = _preflight_state_artifact_destination(destination)
     parent = final_path.parent
@@ -618,9 +686,7 @@ def write_state_artifact(
         _write_bytes(staging / "manifest.json", encode_manifest(manifest))
         _fsync_directory(staging)
         _load_state_artifact(staging, allow_staging=True)
-        if final_path.exists() or final_path.is_symlink():
-            raise FileExistsError(f"state artifact destination already exists: {final_path}")
-        os.rename(staging, final_path)
+        _publish_directory_noreplace(staging, final_path)
         published = True
         _fsync_directory(parent)
         return manifest
@@ -741,8 +807,19 @@ def _load_state_artifact(
     if any(isinstance(count, bool) or not isinstance(count, int) or count <= 0 for count in donor_counts):
         raise ValueError("donor metadata cell counts must be positive integers")
     cell_donors = tuple(cells["donor_id"].to_list())
+    if any(not isinstance(donor, str) or not donor for donor in cell_donors):
+        raise ValueError("cell metadata donor IDs must be nonempty strings")
+    if set(cell_donors) != set(donor_ids):
+        raise ValueError("cell and donor metadata must exactly cover the same donors")
+    if sum(donor_counts) != manifest.n_cells:
+        raise ValueError("donor metadata counts must sum to the artifact cell dimension")
     if donor_counts != tuple(cell_donors.count(donor) for donor in donor_ids):
         raise ValueError("donor metadata counts do not align with cell metadata")
+    if tuple(dict.fromkeys(cell_donors)) != donor_ids:
+        raise ValueError("donor metadata must follow first-retained-cell order")
+    for record in manifest.chromosomes:
+        if donor_counts != record.donor_counts:
+            raise ValueError(f"chromosome {record.chromosome} donor counts disagree with shared donor metadata")
 
     chromosome_manifests = {record.chromosome: record for record in manifest.chromosomes}
     loaded_chromosomes = []

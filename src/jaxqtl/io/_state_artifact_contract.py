@@ -31,6 +31,8 @@ THREAD_ENVIRONMENT_VARIABLES = (
 )
 
 _SHA256_PATTERN = re.compile(r"[0-9a-f]{64}")
+_FLOAT64_EPS = float(np.finfo(np.float64).eps)
+_DERIVED_DIAGNOSTIC_RTOL = 8.0 * _FLOAT64_EPS
 _ARTIFACT_FIELDS = (
     "artifact_type",
     "schema_version",
@@ -242,6 +244,8 @@ def _validate_cell_type_selection(
     if allow_mixed_cell_types:
         if selected_cell_type is not None:
             raise ValueError("mixed-cell opt-in cannot also record a selected cell type")
+        if len(set(values)) < 2:
+            raise ValueError("mixed-cell opt-in requires at least two distinct observed cell types")
         return cast(tuple[str, ...], values)
     if not isinstance(selected_cell_type, str) or not selected_cell_type:
         raise ValueError("a nonempty selected cell type is required without mixed-cell opt-in")
@@ -362,6 +366,11 @@ def _finite_float(value: object, *, name: str, positive: bool = False, nonnegati
     return value
 
 
+def _validate_derived_float(value: float, expected: float, *, name: str) -> None:
+    if not math.isclose(value, expected, rel_tol=_DERIVED_DIAGNOSTIC_RTOL, abs_tol=0.0):
+        raise ValueError(f"{name} disagrees with the derived float64 algorithm contract")
+
+
 def _validated_sha256(value: object, *, name: str) -> str:
     if not isinstance(value, str) or _SHA256_PATTERN.fullmatch(value) is None:
         raise ValueError(f"{name} must be a lowercase SHA-256 hexadecimal digest")
@@ -447,13 +456,23 @@ def _validate_provenance(provenance: _ReplayProvenance) -> None:
 def _validate_pflog_diagnostics(record: _ChromosomeManifest) -> None:
     context = f"chromosome {record.chromosome} pflog"
     diagnostics = _require_exact_fields(record.pflog_diagnostics, _PFLOG_FIELDS, context=context)
-    _finite_float(diagnostics["alpha"], name=f"{context}.alpha", positive=True)
-    if diagnostics["alpha_source"] not in {"auto", "override"}:
+    alpha = _finite_float(diagnostics["alpha"], name=f"{context}.alpha", positive=True)
+    alpha_source = diagnostics["alpha_source"]
+    if alpha_source not in {"auto", "override"}:
         raise ValueError(f"{context}.alpha_source must be 'auto' or 'override'")
     _positive_integer(diagnostics["retained_gene_count"], name=f"{context}.retained_gene_count")
     _nonnegative_integer(diagnostics["excluded_gene_count"], name=f"{context}.excluded_gene_count")
-    _finite_float(diagnostics["numerator"], name=f"{context}.numerator")
-    _finite_float(diagnostics["denominator"], name=f"{context}.denominator", positive=True)
+    numerator = _finite_float(diagnostics["numerator"], name=f"{context}.numerator")
+    denominator = _finite_float(diagnostics["denominator"], name=f"{context}.denominator", positive=True)
+    if alpha_source == "auto":
+        if numerator <= 0.0:
+            raise ValueError(f"{context}.numerator must be strictly positive for automatic PFlog")
+        expected_alpha = numerator / denominator
+        _validate_derived_float(
+            alpha,
+            expected_alpha,
+            name=f"{context}.automatic PFlog alpha",
+        )
     _finite_float(diagnostics["excluded_numerator"], name=f"{context}.excluded_numerator")
     _finite_float(
         diagnostics["excluded_denominator"],
@@ -503,12 +522,21 @@ def _validate_solver_configuration(record: _ChromosomeManifest) -> None:
 def _validate_convergence_diagnostics(record: _ChromosomeManifest) -> None:
     context = f"chromosome {record.chromosome} convergence"
     diagnostics = _require_exact_fields(record.convergence_residuals, _CONVERGENCE_FIELDS, context=context)
-    _finite_float(diagnostics["sigma_floor"], name=f"{context}.sigma_floor", positive=True)
+    sigma_floor = _finite_float(diagnostics["sigma_floor"], name=f"{context}.sigma_floor", positive=True)
     residual_limit = _finite_float(
         diagnostics["residual_limit"],
         name=f"{context}.residual_limit",
         positive=True,
     )
+    dmax = max(record.n_cells, record.n_genes)
+    tol = cast(float, record.solver_configuration["tol"])
+    sigma_max = record.singular_values[0]
+    expected_sigma_floor = max(tol, _FLOAT64_EPS * dmax) * sigma_max
+    expected_residual_limit = max(10.0 * tol, 100.0 * _FLOAT64_EPS * dmax)
+    _validate_derived_float(sigma_floor, expected_sigma_floor, name=f"{context}.sigma_floor")
+    _validate_derived_float(residual_limit, expected_residual_limit, name=f"{context}.residual_limit")
+    if any(value <= expected_sigma_floor for value in record.singular_values):
+        raise ValueError(f"{context} requested singular value is at or below sigma_floor")
     for field in ("max_forward_residual", "max_adjoint_residual", "loading_orthogonality_error"):
         value = _finite_float(diagnostics[field], name=f"{context}.{field}", nonnegative=True)
         if value > residual_limit:
