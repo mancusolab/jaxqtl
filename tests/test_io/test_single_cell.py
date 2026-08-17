@@ -711,6 +711,19 @@ def test_single_type_default_selection_preserves_sparse_order_and_provenance() -
     assert result.donor_counts.tolist() == [2, 1]
 
 
+def test_single_type_mixed_opt_in_normalizes_to_single_type_selection() -> None:
+    data = _selection_input(
+        cell_types=("B", "B", "B"),
+        donor_ids=("donor-2", "donor-1", "donor-2"),
+    )
+
+    result = qtl_io.select_single_cell_data(data, allow_mixed_cell_types=True)
+
+    assert result.selected_cell_type == "B"
+    assert result.allow_mixed_cell_types is False
+    assert result.cell_types.tolist() == ["B", "B", "B"]
+
+
 def test_explicit_selection_from_mixed_data_freezes_first_retained_donor_order() -> None:
     data = _selection_input()
 

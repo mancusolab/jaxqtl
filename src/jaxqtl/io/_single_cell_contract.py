@@ -498,12 +498,14 @@ def select_single_cell_data(
 
     cells = _validate_selection_source(data)
     observed_types = tuple(dict.fromkeys(data.cell_types.tolist()))
+    retained_mixed_cell_types = False
     if cell_type is None:
         if len(observed_types) == 1:
             selected_cell_type = observed_types[0]
             selected_mask = np.ones(data.counts.shape[0], dtype=np.bool_)
         elif len(observed_types) > 1 and allow_mixed_cell_types:
             selected_cell_type = None
+            retained_mixed_cell_types = True
             selected_mask = np.ones(data.counts.shape[0], dtype=np.bool_)
         elif len(observed_types) > 1:
             raise ValueError(
@@ -548,7 +550,7 @@ def select_single_cell_data(
         gene_metadata=data.gene_metadata,
         cell_type_column=data.cell_type_column,
         selected_cell_type=selected_cell_type,
-        allow_mixed_cell_types=allow_mixed_cell_types,
+        allow_mixed_cell_types=retained_mixed_cell_types,
         original_matrix_indices=original_matrix_indices,
         cell_ids=selected_cell_ids,
         cell_types=selected_cell_types,

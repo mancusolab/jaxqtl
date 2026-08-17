@@ -286,6 +286,19 @@ def test_mixed_cell_types_require_selection_or_opt_in(tmp_path: Path) -> None:
     assert mixed_status == 0
 
 
+def test_single_type_mixed_opt_in_writes_schema_compatible_artifact(tmp_path: Path) -> None:
+    paths = _single_cell_inputs(tmp_path)
+
+    status, _, stderr = _run([*_argv(tmp_path, paths), "--allow-mixed-cell-types"])
+
+    assert status == 0, stderr
+    loaded = load_state_artifact(tmp_path / "state-artifact")
+    assert loaded.manifest.selected_cell_type == "B"
+    assert loaded.manifest.allow_mixed_cell_types is False
+    assert loaded.manifest.configuration["cell_type"] == "B"
+    assert loaded.manifest.configuration["allow_mixed_cell_types"] is False
+
+
 def test_state_factor_rejects_conflicting_cell_selection_at_parse_time(tmp_path: Path) -> None:
     paths = _single_cell_inputs(tmp_path, mixed=True)
 
@@ -333,6 +346,40 @@ def test_state_factor_single_chromosome_end_to_end_roundtrip(tmp_path: Path) -> 
     assert result.singular_values.shape == (1,)
 
 
+@pytest.mark.parametrize("destination_kind", ["directory", "broken-symlink"])
+def test_existing_output_is_rejected_before_ingress_or_factorization(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+    destination_kind: str,
+) -> None:
+    paths = _single_cell_inputs(tmp_path)
+    destination = tmp_path / "state-artifact"
+    if destination_kind == "directory":
+        destination.mkdir()
+    else:
+        destination.symlink_to(tmp_path / "missing-target", target_is_directory=True)
+    calls: list[str] = []
+    original_load = cli.load_sparse_single_cell
+
+    def tracked_load(*args, **kwargs):
+        calls.append("load")
+        return original_load(*args, **kwargs)
+
+    def tracked_factor(*args, **kwargs):
+        del args, kwargs
+        calls.append("factor")
+        return object()
+
+    monkeypatch.setattr(cli, "load_sparse_single_cell", tracked_load)
+    monkeypatch.setattr(cli, "construct_state_factor", tracked_factor)
+
+    status, _, stderr = _run(_argv(tmp_path, paths))
+
+    assert status == 1
+    assert "destination already exists" in stderr
+    assert calls == []
+
+
 def test_state_factor_loco_dispatch_writes_all_autosomes(tmp_path: Path) -> None:
     paths = _single_cell_inputs(tmp_path)
     argv = _argv(tmp_path, paths, out_name="loco")
@@ -357,6 +404,28 @@ def test_runtime_failure_returns_one_without_success_completion(tmp_path: Path) 
     assert status == 1
     assert stdout == ""
     assert "state-factor failed:" in stderr
+    assert "Finished! Thank you!" not in stderr
+    assert not (tmp_path / "state-artifact").exists()
+
+
+def test_numerical_arithmetic_failure_returns_one_without_traceback_or_success(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    paths = _single_cell_inputs(tmp_path)
+
+    def fail_numerically(*args, **kwargs):
+        del args, kwargs
+        raise ArithmeticError("nonfinite PFlog operator result")
+
+    monkeypatch.setattr(cli, "construct_state_factor", fail_numerically)
+
+    status, stdout, stderr = _run(_argv(tmp_path, paths))
+
+    assert status == 1
+    assert stdout == ""
+    assert "state-factor failed: nonfinite PFlog operator result" in stderr
+    assert "Traceback" not in stderr
     assert "Finished! Thank you!" not in stderr
     assert not (tmp_path / "state-artifact").exists()
 

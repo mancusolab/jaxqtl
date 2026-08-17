@@ -6,6 +6,8 @@ import math
 import re
 import sys
 
+from pathlib import Path
+
 import numpy as np
 import polars as pl
 import pyarrow as pa
@@ -765,6 +767,9 @@ def _validate_state_factor_shapes(args, selected, requested_chromosomes: tuple[s
 
 def _state_factor(args, log) -> int:
     try:
+        output_path = Path(args.out)
+        if output_path.exists() or output_path.is_symlink():
+            raise FileExistsError(f"state artifact destination already exists: {output_path}")
         log.info("Loading and selecting sparse single-cell data.")
         source = load_sparse_single_cell(
             args.counts,
@@ -853,7 +858,7 @@ def _state_factor(args, log) -> int:
             )
         log.info(f"Wrote complete state-factor artifact to {args.out}.")
         return 0
-    except (OSError, TypeError, ValueError, RuntimeError) as error:
+    except (ArithmeticError, OSError, TypeError, ValueError, RuntimeError) as error:
         log.error(f"state-factor failed: {error}")
         return 1
 
