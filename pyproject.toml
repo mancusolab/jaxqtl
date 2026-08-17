@@ -61,6 +61,7 @@ Source = "https://github.com/mancusolab/jaxqtl"
 [project.optional-dependencies]
 dev = [
   "coverage[toml]",
+  "hypothesis>=6.165",
   "pytest",
   "pytest-cov",
   "statsmodels",
@@ -86,6 +87,7 @@ exclude = ["docs/"]
 [tool.hatch.envs.test]
 dependencies = [
     "coverage[toml]",
+    "hypothesis>=6.165",
     "pytest",
     "pytest-cov",
 ]
