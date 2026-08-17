@@ -654,6 +654,39 @@ def test_single_chromosome_roundtrip_uses_read_only_memory_maps(tmp_path: Path) 
     np.testing.assert_array_equal(chromosome.singular_values, [2.5])
 
 
+@pytest.mark.parametrize(
+    ("cell_types", "message"),
+    [
+        (["T", "T", "T"], "selected cell type.*cell metadata"),
+        (["B", "T", "B"], "mixed cell types.*opt-in"),
+        (["B", "", "B"], "cell type values must be nonempty strings"),
+    ],
+)
+def test_writer_rejects_cell_metadata_incompatible_with_selection_contract(
+    tmp_path: Path,
+    cell_types: list[str],
+    message: str,
+) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+    arguments["cell_metadata"] = arguments["cell_metadata"].with_columns(pl.Series("cell_type", cell_types))
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert not destination.exists()
+    assert list(tmp_path.glob(".jaxqtl-state-artifact-staging-*")) == []
+
+
+def test_writer_accepts_normalized_single_type_selection_contract(tmp_path: Path) -> None:
+    destination, arguments = _writer_arguments(tmp_path)
+
+    manifest = qtl_io.write_state_artifact(destination, iter([_factor_result("1")]), **arguments)
+
+    assert manifest.selected_cell_type == "B"
+    assert manifest.allow_mixed_cell_types is False
+    assert qtl_io.load_state_artifact(destination).manifest == manifest
+
+
 def test_published_destination_containing_staging_marker_roundtrips(tmp_path: Path) -> None:
     destination, arguments = _writer_arguments(tmp_path)
     destination = tmp_path / "published.staging-results"
@@ -832,6 +865,46 @@ def test_loader_rejects_invalid_types_and_contradictory_replay_configuration(
 
     with pytest.raises((TypeError, ValueError), match=message):
         qtl_io.load_state_artifact(destination)
+
+
+@pytest.mark.parametrize(
+    ("cell_types", "message"),
+    [
+        (["T", "T", "T"], "selected cell type.*cell metadata"),
+        (["B", "T", "B"], "mixed cell types.*opt-in"),
+        (["B", "", "B"], "cell type values must be nonempty strings"),
+    ],
+)
+def test_loader_rejects_cell_payload_incompatible_with_manifest_selection(
+    tmp_path: Path,
+    cell_types: list[str],
+    message: str,
+) -> None:
+    destination = _write_artifact(tmp_path)
+    cells_path = destination / "cells.parquet"
+    cells = pl.read_parquet(cells_path).with_columns(pl.Series("cell_type", cell_types))
+    cells.write_parquet(cells_path)
+    _update_payload_hash(destination, "cells.parquet")
+
+    with pytest.raises(ValueError, match=message):
+        qtl_io.load_state_artifact(destination)
+
+
+def test_loader_accepts_coordinated_normalized_single_type_selection(tmp_path: Path) -> None:
+    destination = _write_artifact(tmp_path)
+    cells_path = destination / "cells.parquet"
+    cells = pl.read_parquet(cells_path).with_columns(pl.lit("T").alias("cell_type"))
+    cells.write_parquet(cells_path)
+    manifest = _read_manifest_dict(destination)
+    manifest["selection"]["selected_cell_type"] = "T"
+    manifest["configuration"]["cell_type"] = "T"
+    _write_manifest_dict(destination, manifest)
+    _update_payload_hash(destination, "cells.parquet")
+
+    loaded = qtl_io.load_state_artifact(destination)
+
+    assert loaded.manifest.selected_cell_type == "T"
+    assert loaded.manifest.allow_mixed_cell_types is False
 
 
 @pytest.mark.parametrize(

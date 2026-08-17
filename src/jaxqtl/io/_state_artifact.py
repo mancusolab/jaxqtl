@@ -28,6 +28,7 @@ from ._state_artifact_contract import (
     _PayloadRecord,
     _ReplayProvenance,
     _StateArtifactChromosomeResult,
+    _validate_cell_type_selection,
     _validated_chromosome_set,
     ARTIFACT_TYPE,
     canonical_chromosome_key,
@@ -185,6 +186,8 @@ def _validated_metadata(
     gene_metadata: pl.DataFrame,
     *,
     cell_type_column: str,
+    selected_cell_type: str | None,
+    allow_mixed_cell_types: bool,
     donor_ids: Sequence[str],
     donor_counts: Sequence[int],
 ) -> tuple[pl.DataFrame, pl.DataFrame, tuple[str, ...], tuple[str, ...], tuple[str, ...], tuple[int, ...]]:
@@ -204,6 +207,11 @@ def _validated_metadata(
     _ordered_matrix_indices(gene_metadata, context="gene metadata")
     cell_ids = _identifier_column(cell_metadata, "cell_id", context="cell metadata")
     gene_ids = _identifier_column(gene_metadata, "gene_id", context="gene metadata")
+    _validate_cell_type_selection(
+        cell_metadata[cell_type_column].to_list(),
+        selected_cell_type=selected_cell_type,
+        allow_mixed_cell_types=allow_mixed_cell_types,
+    )
     cell_donors = tuple(cell_metadata["donor_id"].to_list())
     if any(not isinstance(value, str) or not value for value in cell_donors):
         raise ValueError("cell metadata donor_id values must be nonempty strings")
@@ -513,6 +521,8 @@ def write_state_artifact(
         cell_metadata,
         gene_metadata,
         cell_type_column=cell_type_column,
+        selected_cell_type=selected_cell_type,
+        allow_mixed_cell_types=allow_mixed_cell_types,
         donor_ids=donor_ids,
         donor_counts=donor_counts,
     )
@@ -684,6 +694,11 @@ def _load_state_artifact(
         root / "cells.parquet",
         required_columns=("matrix_index", "cell_id", "donor_id", manifest.cell_type_column),
         context="cell metadata",
+    )
+    _validate_cell_type_selection(
+        cells[manifest.cell_type_column].to_list(),
+        selected_cell_type=manifest.selected_cell_type,
+        allow_mixed_cell_types=manifest.allow_mixed_cell_types,
     )
     donors = _load_frame(
         root / "donors.parquet",

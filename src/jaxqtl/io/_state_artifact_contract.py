@@ -225,6 +225,34 @@ def canonical_chromosome_key(chromosome: str) -> str:
     return f"{value:02d}"
 
 
+def _validate_cell_type_selection(
+    cell_types: Sequence[object],
+    *,
+    selected_cell_type: str | None,
+    allow_mixed_cell_types: bool,
+) -> tuple[str, ...]:
+    """Validate cell-type payload values against a resolved selection contract."""
+    values = tuple(cell_types)
+    if not values:
+        raise ValueError("cell metadata cannot be empty")
+    if any(not isinstance(value, str) or not value for value in values):
+        raise ValueError("cell metadata cell type values must be nonempty strings")
+    if not isinstance(allow_mixed_cell_types, bool):
+        raise TypeError("allow_mixed_cell_types must be a boolean")
+    if allow_mixed_cell_types:
+        if selected_cell_type is not None:
+            raise ValueError("mixed-cell opt-in cannot also record a selected cell type")
+        return cast(tuple[str, ...], values)
+    if not isinstance(selected_cell_type, str) or not selected_cell_type:
+        raise ValueError("a nonempty selected cell type is required without mixed-cell opt-in")
+    observed = set(values)
+    if len(observed) > 1:
+        raise ValueError("mixed cell types in cell metadata require explicit opt-in")
+    if observed != {selected_cell_type}:
+        raise ValueError("selected cell type does not agree with cell metadata")
+    return cast(tuple[str, ...], values)
+
+
 def _validated_chromosome_set(chromosomes: Sequence[str], *, require_canonical: bool) -> tuple[str, ...]:
     if isinstance(chromosomes, (str, bytes)):
         raise TypeError("chromosomes must be an ordered sequence")
