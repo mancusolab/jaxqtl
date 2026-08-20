@@ -202,6 +202,12 @@ def _create_common_subp(subp, name, help):
         default=0.0,
         help="Exclude genes expressed in fewer than specified percentage of individuals (e.g., '0.1')",
     )
+    common_p.add_argument(
+        "--maf",
+        type=float,
+        default=None,
+        help="Exclude variants with minor allele frequency below this threshold.",
+    )
     gene_group = common_p.add_mutually_exclusive_group()
     gene_group.add_argument(
         "--gene-list",
@@ -602,6 +608,7 @@ def _common_setup(args, log):
         keep_samples=inds_to_keep,
         drop_samples=inds_to_exclude,
         read_options=GenotypeReadOptions(dosage="dosage" if getattr(args, "dosage", False) else "hardcall"),
+        min_maf=args.maf,
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 

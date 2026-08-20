@@ -58,9 +58,12 @@ def load_genotype_dataset(source: GenotypeSource, path: str) -> genoio.Dataset:
             raise ValueError(f"Unsupported genotype source: {source!r}")
 
 
-def default_variant_filter() -> genoio.FilterExpr:
-    """Default mapping filter: genoio handles monomorphic variants before return."""
-    return genoio.polymorphic()
+def default_variant_filter(*, min_maf: float | None = None) -> genoio.FilterExpr:
+    """Return the default mapping filter with an optional minimum MAF threshold."""
+    variant_filter = genoio.polymorphic()
+    if min_maf is not None:
+        variant_filter = variant_filter & genoio.maf(min=min_maf)
+    return variant_filter
 
 
 def region_filter(chrom: str, start: int, end: int, base_filter: genoio.FilterExpr) -> genoio.FilterExpr:
