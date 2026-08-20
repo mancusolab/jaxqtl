@@ -12,7 +12,7 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-from jaxqtl.io._geno_engine import filter_sample_ids, normalize_variant_info
+from jaxqtl.io._geno_engine import filter_sample_ids, GenotypeReadOptions, normalize_variant_info
 from jaxqtl.io._pheno import ExpressionData
 from jaxqtl.map.data import align_on_iid, CisData, ReadyDataState
 
@@ -197,6 +197,21 @@ def test_ready_data_state_aligns_to_genoio_source_order_and_uses_sample_pushdown
     assert variants.to_ir() == genoio.polymorphic().to_ir()
     assert isinstance(G, jax.Array)
     assert variant_info.get_column("snp").to_list() == ["rs1", "rs2"]
+
+
+def test_ready_data_state_passes_dosage_mode_to_genoio() -> None:
+    dataset = _SyntheticGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "cov": [1.0, 2.0, 3.0]})
+
+    ready = ReadyDataState.from_data(
+        cast(genoio.Dataset, dataset),
+        _expression(),
+        covar,
+        read_options=GenotypeReadOptions(dosage="dosage"),
+    )
+    next(ready.iter_geno(chunk_size=128))
+
+    assert dataset.block_calls[0][1]["dosage"] == "dosage"
 
 
 def test_ready_data_state_iter_cis_uses_genoio_regions_with_polymorphic_filter() -> None:

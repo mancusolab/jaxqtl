@@ -35,6 +35,7 @@ from .infer import (
 )
 from .io import (
     ExpressionData,
+    GenotypeReadOptions,
     load_genotype_dataset,
     load_sparse_single_cell,
     read_offset_tsvlike,
@@ -93,6 +94,12 @@ def _create_common_subp(subp, name, help):
     geno_group.add_argument("--pfile", help="Prefix to PLINK2 PGEN/PVAR/PSAM triplets.")
     geno_group.add_argument("--vcf", help="Path to an indexed VCF/BCF genotype file.")
     geno_group.add_argument("--bgen", help="Path to a BGEN genotype file.")
+    common_p.add_argument(
+        "--dosage",
+        action="store_true",
+        default=False,
+        help="Read genotype dosages instead of hard calls.",
+    )
 
     # pheno / covariate arguments
     common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
@@ -731,6 +738,7 @@ def _common_setup(args, log):
         offset,
         keep_samples=inds_to_keep,
         drop_samples=inds_to_exclude,
+        read_options=GenotypeReadOptions(dosage="dosage" if getattr(args, "dosage", False) else "hardcall"),
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
