@@ -117,6 +117,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         bgen=None,
         geno=None,
         vcf=None,
+        dosage=False,
         pheno="tutorial/input/CD4_NC.N100.bed.gz",
         covar="tutorial/input/donor_features.tsv",
         covar_name=None,
@@ -201,6 +202,30 @@ def test_cli_help_marks_legacy_genotype_inputs() -> None:
     assert "Prefix to PLINK2 PGEN/PVAR/PSAM triplets." in help_text
     assert "Path to an indexed VCF/BCF genotype file." in help_text
     assert "Path to a BGEN genotype file." in help_text
+
+
+def test_cli_help_exposes_dosage_genotype_mode() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["cis", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = " ".join(stdout.getvalue().split())
+    assert "--dosage" in help_text
+    assert "Read genotype dosages instead of hard calls." in help_text
+
+
+@pytest.mark.parametrize(
+    ("dosage", "expected_mode"),
+    [(False, "hardcall"), (True, "dosage")],
+)
+def test_common_setup_selects_genoio_genotype_mode(dosage: bool, expected_mode: str) -> None:
+    args = _common_setup_args("trans")
+    args.dosage = dosage
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert ready_data.read_options.dosage == expected_mode
 
 
 @pytest.mark.parametrize("cmd", ["cis", "nominal"])
