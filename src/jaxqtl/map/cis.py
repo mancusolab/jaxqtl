@@ -19,6 +19,7 @@ from .data import CisData, ReadyDataState
 
 # Keep Parquet row groups reasonably sized without rebuilding genome-wide result tables.
 _MAP_CIS_BATCH_ROWS = 10_000
+_NO_FINITE_PVALUES = "no_finite_pvalues"
 
 
 def map_cis(
@@ -47,6 +48,11 @@ def map_cis(
     **Returns:**
 
     An iterator of `pl.DataFrame` chunks. Each chunk may contain one or more genes.
+
+    **Failure Modes:**
+
+    In cis mode, a tested gene with no finite SNP-level p-values is retained as an invalid result row. Its lead and
+    association fields are null, `result_valid` is false, and `failure_reason` is `"no_finite_pvalues"`.
     """
     if log is None:
         log = get_log()
@@ -84,14 +90,24 @@ def map_cis(
                 gene_test,
                 p_key,
             )
-            result = pl.DataFrame([_process_cis_result(cis_data, test_result, perm_result, s_key)])
+            result_record = _process_cis_result(cis_data, test_result, perm_result, s_key)
+            if not result_record["result_valid"]:
+                log.warning(
+                    f"No finite p-values for {gene_name} over region {chrom}:{lstart}-{rend}; "
+                    "emitting an invalid result row."
+                )
+
+            result_schema = _empty_cis_columns(gene_test)
+            if not include_nb_alpha:
+                result_record.pop("nb_alpha")
+                result_schema.pop("nb_alpha")
+            result = pl.DataFrame([result_record], schema=result_schema)
         else:
             test_result = eqx.filter_jit(snp_test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
             result = _process_nominal_result(cis_data, test_result)
-
-        # Keep the output schema model-specific. Non-NB tests carry a constant placeholder alpha.
-        if not include_nb_alpha:
-            result = result.drop("nb_alpha")
+            # Keep the output schema model-specific. Non-NB tests carry a constant placeholder alpha.
+            if not include_nb_alpha:
+                result = result.drop("nb_alpha")
 
         pending.append(result)
         pending_rows += result.height
@@ -191,6 +207,8 @@ def _empty_cis_columns(gene_test) -> dict[str, Any]:
         "adj_method": pl.Utf8,
         "nb_alpha": pl.Float64,
         "model_converged": pl.Boolean,
+        "result_valid": pl.Boolean,
+        "failure_reason": pl.Utf8,
     }
 
     if getattr(gene_test, "name", None) == "acat":
@@ -239,19 +257,53 @@ def _process_cis_result(
     perm_result: tuple[Array, Any],
     key: PRNGKeyArray,
 ):
-    """Process the results for a gene under the cis-scan and format for output"""
+    """Process the results for a gene under the cis-scan and format for output."""
 
-    # get info at lead hit, and lead snp
-    minp = jnp.nanmin(test_result.p)
-    ties_ind = jnp.argwhere(test_result.p == minp).squeeze()  # why does this add extra axis?
-    if ties_ind.ndim > 0:
-        vdx = rdm.choice(key, ties_ind, replace=False)
-    else:
-        vdx = ties_ind
-
+    pvalues = np.asarray(test_result.p)
+    finite_idx = np.flatnonzero(np.isfinite(pvalues))
     adj_pvalue, aux = perm_result
+
+    if finite_idx.size == 0:
+        method = "BETA" if aux is not None else "ACAT"
+        result = {
+            "phenotype_id": cis_data.gene_name,
+            "chrom": cis_data.chrom,
+            "num_var": cis_data.num_snps,
+            "snp": None,
+            "a1": None,
+            "a0": None,
+            "pos": None,
+            "tss_distance": None,
+            "af": None,
+            "ma_count": None,
+            "shape1": None,
+            "shape2": None,
+            "nc_estimate": None,
+            "perm_converged": None,
+            "beta": None,
+            "se": None,
+            "pvalue": None,
+            "pvalue_adj": None,
+            "adj_method": method,
+            "nb_alpha": None,
+            "model_converged": None,
+            "result_valid": False,
+            "failure_reason": _NO_FINITE_PVALUES,
+        }
+        if aux is None:
+            for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
+                result.pop(beta_perm_col)
+        return result
+
+    finite_pvalues = pvalues[finite_idx]
+    minp = finite_pvalues.min()
+    ties_ind = finite_idx[finite_pvalues == minp]
+    if ties_ind.size > 1:
+        vdx_int = int(rdm.choice(key, jnp.asarray(ties_ind), replace=False))
+    else:
+        vdx_int = int(ties_ind[0])
+
     adj_pvalue = jnp.asarray(adj_pvalue)
-    vdx_int = int(vdx)
 
     # this is kind of hacky but if aux is not None we did a beta-approximation
     if aux is not None:
@@ -303,6 +355,8 @@ def _process_cis_result(
         "adj_method": method,
         "nb_alpha": nb_alpha,
         "model_converged": glm_converged,
+        "result_valid": True,
+        "failure_reason": None,
     }
     # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
     if aux is None:

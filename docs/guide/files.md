@@ -28,3 +28,6 @@ Mapping outputs are written as tabular files (e.g. TSV/Parquet) containing:
 - variant metadata
 - per-variant summary statistics (effect sizes, standard errors, p-values)
 - optional gene-level adjusted p-values for cis scans
+
+Cis output retains tested genes that produce no finite SNP-level p-values. Such rows have
+`result_valid = false`, `failure_reason = "no_finite_pvalues"`, and null lead-variant and association fields.

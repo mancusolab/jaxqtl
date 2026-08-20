@@ -66,6 +66,43 @@ class _LoadDatasetSpy:
         return self.result
 
 
+def _cis_data(gene_name: str = "gene1") -> CisData:
+    return CisData(
+        jnp.ones((3, 1)),
+        jnp.array([[0.0, 0.0], [1.0, 1.0], [2.0, 0.0]]),
+        jnp.array([0.0, 1.0, 2.0]),
+        jnp.array(0.0),
+        gene_name,
+        "1",
+        100,
+        101,
+        pl.DataFrame(
+            {
+                "chrom": ["1", "1"],
+                "snp": [f"{gene_name}_rs1", f"{gene_name}_rs2"],
+                "pos": [101, 102],
+                "a1": ["A", "C"],
+                "a0": ["G", "T"],
+            }
+        ),
+        1,
+        200,
+    )
+
+
+def _test_result(pvalues: list[float]) -> AssocTestResult:
+    size = len(pvalues)
+    return AssocTestResult(
+        beta=jnp.arange(size, dtype=float) + 0.1,
+        se=jnp.arange(size, dtype=float) + 0.2,
+        p=jnp.asarray(pvalues),
+        z=jnp.arange(size, dtype=float) + 0.3,
+        num_iters=jnp.array(1),
+        converged=jnp.array(True),
+        disp=jnp.array(0.4),
+    )
+
+
 def _args(**overrides: object) -> SimpleNamespace:
     defaults: dict[str, object] = {"bfile": None, "pfile": None, "vcf": None, "bgen": None, "geno": None}
     defaults.update(overrides)
@@ -344,7 +381,117 @@ def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
         "pvalue_adj",
         "adj_method",
         "model_converged",
+        "result_valid",
+        "failure_reason",
     ]
+
+
+def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pytest.MonkeyPatch) -> None:
+    def fail_choice(*args, **kwargs):
+        pytest.fail("lead-SNP tie breaking must not run without finite p-values")
+
+    monkeypatch.setattr(cis_map.rdm, "choice", fail_choice)
+
+    result = cis_map._process_cis_result(
+        _cis_data(),
+        _test_result([float("nan"), float("inf")]),
+        (jnp.array(float("nan")), None),
+        cis_map.rdm.key(0),
+    )
+
+    assert result == {
+        "phenotype_id": "gene1",
+        "chrom": "1",
+        "num_var": 2,
+        "snp": None,
+        "a1": None,
+        "a0": None,
+        "pos": None,
+        "tss_distance": None,
+        "af": None,
+        "ma_count": None,
+        "beta": None,
+        "se": None,
+        "pvalue": None,
+        "pvalue_adj": None,
+        "adj_method": "ACAT",
+        "nb_alpha": None,
+        "model_converged": None,
+        "result_valid": False,
+        "failure_reason": "no_finite_pvalues",
+    }
+
+
+def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
+    result = cis_map._process_cis_result(
+        _cis_data(),
+        _test_result([float("nan"), float("nan")]),
+        (jnp.array([float("nan"), float("nan")]), (object(), object(), object())),
+        cis_map.rdm.key(0),
+    )
+
+    assert result["adj_method"] == "BETA"
+    assert result["result_valid"] is False
+    assert result["failure_reason"] == "no_finite_pvalues"
+    for column in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
+        assert column in result
+        assert result[column] is None
+
+    frame = pl.DataFrame([result], schema=cis_map._empty_cis_columns(SimpleNamespace(name="beta")))
+    assert frame.schema["shape1"] == pl.Float64
+    assert frame.schema["perm_converged"] == pl.Boolean
+
+
+def test_process_cis_result_selects_minimum_finite_pvalue() -> None:
+    result = cis_map._process_cis_result(
+        _cis_data(),
+        _test_result([float("nan"), 0.02]),
+        (jnp.array(0.03), None),
+        cis_map.rdm.key(0),
+    )
+
+    assert result["snp"] == "gene1_rs2"
+    assert result["pvalue"] == pytest.approx(0.02)
+    assert result["result_valid"] is True
+    assert result["failure_reason"] is None
+
+
+@pytest.mark.parametrize("invalid_first", [True, False])
+def test_map_cis_preserves_invalid_rows_and_parquet_schema(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, invalid_first: bool
+) -> None:
+    genes = [_cis_data("invalid"), _cis_data("valid")]
+    if not invalid_first:
+        genes.reverse()
+
+    data = SimpleNamespace(iter_cis=lambda window: iter(genes))
+    snp_test = SimpleNamespace(model=SimpleNamespace(family=object()))
+    gene_test = SimpleNamespace(name="acat")
+    invalid = (_test_result([float("nan"), float("nan")]), (jnp.array(float("nan")), None))
+    valid = (_test_result([0.01, 0.02]), (jnp.array(0.03), None))
+    results = iter([invalid, valid] if invalid_first else [valid, invalid])
+    monkeypatch.setattr(cis_map, "map_cis_single", lambda *args, **kwargs: next(results))
+    log = _LoggerStub()
+
+    map_cis = getattr(cis_map, "map_cis")
+    chunks = list(map_cis(data, snp_test, gene_test, mode="cis", verbose=False, log=log, seed=0))
+    output_path = tmp_path / "cis.parquet"
+    assert cli._write_scan_results(iter(chunks), output_path)
+    output = pl.read_parquet(output_path)
+
+    invalid_row = output.filter(pl.col("phenotype_id") == "invalid")
+    valid_row = output.filter(pl.col("phenotype_id") == "valid")
+    assert output.schema["snp"] == pl.Utf8
+    assert output.schema["pos"] == pl.Int64
+    assert output.schema["pvalue"] == pl.Float64
+    assert invalid_row["snp"].item() is None
+    assert invalid_row["pos"].item() is None
+    assert invalid_row["pvalue"].item() is None
+    assert invalid_row["result_valid"].item() is False
+    assert invalid_row["failure_reason"].item() == "no_finite_pvalues"
+    assert valid_row["result_valid"].item() is True
+    assert valid_row["failure_reason"].item() is None
+    assert log.warnings == ["No finite p-values for invalid over region 1:1-200; emitting an invalid result row."]
 
 
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -374,6 +521,8 @@ def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_pa
                 "pvalue_adj": [0.05],
                 "adj_method": ["ACAT"],
                 "model_converged": [True],
+                "result_valid": [True],
+                "failure_reason": [None],
             }
         )
 

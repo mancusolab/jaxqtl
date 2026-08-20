@@ -213,8 +213,12 @@ See example outputs in `./tutorial/output`. The current CLI writes Parquet files
 The cis output contains:
 
 - `phenotype_id`, `chrom`, `num_var`, `snp`, `a1`, `a0`, `pos`, `tss_distance`, `af`, `ma_count`
-- `beta`, `se`, `pvalue`, `pvalue_adj`, `adj_method`, `nb_alpha`, `model_converged`
+- `beta`, `se`, `pvalue`, `pvalue_adj`, `adj_method`, `nb_alpha`, `model_converged`, `result_valid`, `failure_reason`
 - `shape1`, `shape2`, `nc_estimate`, `perm_converged` when using permutation-based calibration rather than `--acat`
+
+If a tested gene produces no finite SNP-level p-values, the cis output retains one row for that gene with
+`result_valid = false` and `failure_reason = "no_finite_pvalues"`. Lead-variant metadata, estimates, p-values,
+and convergence diagnostics are stored as null because no lead result exists.
 
 The nominal output contains per-variant statistics for each tested gene:
 
@@ -305,7 +309,8 @@ To submit jobs, use `sbatch run_jaxqtl_cis_all.sh`
 
 After all cis-eQTL mapping are completed, you can prepare results for analysis by:
 1) combine all chunk results from one cell type into one single file
-2) filter by converged GLM model `model_converged > 0` and, when using permutation-based calibration, converged adjustment fits `perm_converged > 0`
+2) filter to valid results with `result_valid == true`, then by converged GLM model `model_converged > 0` and,
+when using permutation-based calibration, converged adjustment fits `perm_converged > 0`
 3) calculate FDR-controlled pvalues on `pvalue_adj` using
 [qvalue](https://bioconductor.org/packages/release/bioc/html/qvalue.html) method in R
 4) identify eGenes (genes with at least one eQTL) by qvalue < FDR level, e.g., 0.05
