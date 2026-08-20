@@ -5,6 +5,7 @@ from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
 
+import genoio
 import polars as pl
 import pytest
 
@@ -118,6 +119,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         geno=None,
         vcf=None,
         dosage=False,
+        maf=None,
         pheno="tutorial/input/CD4_NC.N100.bed.gz",
         covar="tutorial/input/donor_features.tsv",
         covar_name=None,
@@ -202,6 +204,20 @@ def test_cli_help_marks_legacy_genotype_inputs() -> None:
     assert "Prefix to PLINK2 PGEN/PVAR/PSAM triplets." in help_text
     assert "Path to an indexed VCF/BCF genotype file." in help_text
     assert "Path to a BGEN genotype file." in help_text
+    assert "--maf" in help_text
+
+
+def test_common_setup_uses_genoio_minimum_maf_filter() -> None:
+    args = _common_setup_args("trans")
+    args.maf = 0.05
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert ready_data.variant_filter.to_ir() == {
+        "op": "and",
+        "left": genoio.polymorphic().to_ir(),
+        "right": genoio.maf(min=0.05).to_ir(),
+    }
 
 
 def test_cli_help_exposes_dosage_genotype_mode() -> None:

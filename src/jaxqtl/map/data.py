@@ -166,6 +166,7 @@ class ReadyDataState:
         keep_samples: list[str] | None = None,
         drop_samples: list[str] | None = None,
         read_options: GenotypeReadOptions | None = None,
+        min_maf: float | None = None,
     ) -> "ReadyDataState":
         """Align genotype, expression, covariates, and optional offset on IID and return a ReadyDataState."""
         genotype_samples = _sample_frame(filter_sample_ids(genotype.samples(), keep=keep_samples, drop=drop_samples))
@@ -202,7 +203,7 @@ class ReadyDataState:
             covar=covar_array,
             offset=offset_array,
             read_options=read_options or GenotypeReadOptions(),
-            variant_filter=default_variant_filter(),
+            variant_filter=default_variant_filter(min_maf=min_maf),
         )
 
 

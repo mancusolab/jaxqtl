@@ -12,7 +12,12 @@ import pytest
 import jax
 import jax.numpy as jnp
 
-from jaxqtl.io._geno_engine import filter_sample_ids, GenotypeReadOptions, normalize_variant_info
+from jaxqtl.io._geno_engine import (
+    default_variant_filter,
+    filter_sample_ids,
+    GenotypeReadOptions,
+    normalize_variant_info,
+)
 from jaxqtl.io._pheno import ExpressionData
 from jaxqtl.map.data import align_on_iid, CisData, ReadyDataState
 
@@ -127,6 +132,16 @@ def test_filter_sample_ids_preserves_genoio_source_order_for_keep_and_drop() -> 
 
     assert filter_sample_ids(samples, keep=["iid3", "iid1"]) == ("iid1", "iid3")
     assert filter_sample_ids(samples, drop=["iid2", "iid4"]) == ("iid1", "iid3")
+
+
+def test_default_variant_filter_applies_minimum_maf() -> None:
+    observed = default_variant_filter(min_maf=0.05)
+
+    assert observed.to_ir() == {
+        "op": "and",
+        "left": genoio.polymorphic().to_ir(),
+        "right": genoio.maf(min=0.05).to_ir(),
+    }
 
 
 def test_normalize_variant_info_preserves_genoio_counted_allele_convention() -> None:
