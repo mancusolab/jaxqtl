@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 import jax.numpy as jnp
 
 from jax.scipy.stats import norm
@@ -6,6 +8,7 @@ from jaxtyping import ArrayLike
 from ._base import (
     _residualize_genotypes,
     _score_from_residuals,
+    _validate_score_variance_estimator,
     AbstractHypothesisTest,
     TestResult,
 )
@@ -18,7 +21,17 @@ class ScoreTest(AbstractHypothesisTest):
     After residualizing $g$ against covariates, the per-variant score statistic is
     $U = g^{\top} W r_y$, with variance $V = g^{\top} W g$, and the reported z-statistic is
     $z = U / \sqrt{V}$ with two-sided p-value $p = 2\Phi(-|z|)$ where $\Phi(\cdot)$ is the Normal CDF.
+
+    This implementation requires [`jaxqtl.infer.FisherInfoError`][]. Sandwich covariance estimators apply to Wald
+    coefficient inference and do not define a robust version of this score statistic.
+
+    **Raises:**
+
+    - `ValueError`: If `std_err` is not [`jaxqtl.infer.FisherInfoError`][].
     """
+
+    def __check_init__(self) -> None:
+        _validate_score_variance_estimator(self.std_err, self.__class__.__name__)
 
     def test(
         self,
@@ -48,7 +61,7 @@ class ScoreTest(AbstractHypothesisTest):
         glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
         y_resid = glmstate_cov_only.resid
 
-        g_resid = _residualize_genotypes(X, G, glmstate_cov_only.resid_covar, glmstate_cov_only.glm_wt)
+        g_resid = _residualize_genotypes(X, G, glmstate_cov_only.glm_wt, self.model.solver)
         beta, se, zscore, _, _ = _score_from_residuals(y_resid, g_resid, glmstate_cov_only.glm_wt)
         pval = 2 * norm.sf(jnp.fabs(zscore))
 

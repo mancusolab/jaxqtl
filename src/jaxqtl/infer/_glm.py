@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from typing import NamedTuple
 
@@ -10,6 +12,7 @@ from jaxtyping import Array, ArrayLike
 from ..distribution import (
     ExponentialFamily,
     Gaussian,
+    IdentityLink,
     NegativeBinomial,
     Poisson,
     t_cdf,
@@ -24,7 +27,9 @@ class ModelResult(NamedTuple):
 
     This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.LinearModel.fit`][] and
     [`jaxqtl.infer.GeneralizedLinearModel.fit`][]. These outputs are consumed by downstream hypothesis tests
-    and mapping routines.
+    and mapping routines. ``eta`` is the complete linear predictor, including any supplied offset, and ``mu`` is
+    the corresponding fitted mean. ``resid`` is the working residual used by score tests; for the Gaussian
+    identity-link model it is ``y - mu``.
     """
 
     beta: Array
@@ -38,13 +43,15 @@ class ModelResult(NamedTuple):
     num_iters: Array
     converged: Array
     resid_covar: Array  # covariance used to compute `se`
-    resid: Array  # for score test, not the working resid!
+    resid: Array  # working residual used by score tests
     disp: Array  # dispersion parameter
 
 
 class _AbstractInit(eqx.Module):
-    """Annoying, but let's split out how to init the glm here. Most of the time this isn't needed, but NegBin
-    really benefits from first initializing a Poisson family to calculate/estimate dispersion ahead of time.
+    """Initialize a GLM predictor and dispersion estimate.
+
+    Initializers return a predictor that excludes the separately supplied offset. The IRLS solver owns adding that
+    fixed offset when it constructs the complete initial predictor.
     """
 
     family: eqx.AbstractVar[ExponentialFamily]
@@ -101,16 +108,17 @@ class _NBInit(_AbstractInit):
             family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size
         )
         glm_state_pois = jaxqtl_pois.fit(X, y, offset)
+        complete_eta = glm_state_pois.eta
 
         # fit covariate-only model (null)
-        disp_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
-        eta = glm_state_pois.eta
-        disp = self.family.estimate_dispersion(X, y, eta, disp=1.0 / disp_init, max_iter=max_iter)
+        disp_init = n / jnp.sum((y / self.family.glink.inverse(complete_eta) - 1) ** 2)
+        disp = self.family.estimate_dispersion(X, y, complete_eta, disp=1.0 / disp_init, max_iter=max_iter)
 
         # convert disp to 0.1 if bad initialization
         disp = jnp.nan_to_num(disp, nan=0.1)
 
-        return eta, disp
+        # IRLS adds the fixed offset when constructing its initial state.
+        return complete_eta - offset, disp
 
 
 class _SimpleInit(_AbstractInit):
@@ -164,16 +172,19 @@ class AbstractLinearModel(eqx.Module):
 class LinearModel(AbstractLinearModel):
     r"""Gaussian linear regression with a fast least-squares implementation.
 
-    This is a fast path for Gaussian models, avoiding the full IRLS loop.
+    This model requires an identity link and avoids the full IRLS loop.
+
+    **Raises:**
+
+    - `ValueError`: If `family` is not Gaussian with an identity link.
     """
 
     family: ExponentialFamily = Gaussian()
     solver: AbstractLinearSolve = CholeskySolve()
 
-    def __post_init__(self):
-        if not isinstance(self.family, Gaussian):
-            raise ValueError("LinearModel only supports Gaussian family")
-        return
+    def __check_init__(self) -> None:
+        if not isinstance(self.family, Gaussian) or not isinstance(self.family.glink, IdentityLink):
+            raise ValueError("LinearModel only supports Gaussian family with IdentityLink")
 
     def fit(
         self,
@@ -181,6 +192,8 @@ class LinearModel(AbstractLinearModel):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: AbstractVarianceEstimator = FisherInfoError(),
+        *,
+        df_resid: int | None = None,
     ) -> ModelResult:
         r"""Fit a Gaussian linear model and return a summary state.
 
@@ -190,20 +203,32 @@ class LinearModel(AbstractLinearModel):
         - `y`: Response vector with shape `(n,)`.
         - `offset`: Offset broadcastable to `y` (either scalar or `(n,)`).
         - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.AbstractVarianceEstimator`][].
+        - `df_resid`: Residual degrees of freedom used for both the residual-dispersion denominator and the Student's t
+          reference distribution. Defaults to `n - p`; callers that fit a residualized submodel may provide the
+          degrees of freedom from the corresponding full model.
 
         **Returns:**
 
         A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+
+        **Raises:**
+
+        - `ValueError`: If `df_resid` is not positive. The default also raises when the design has no residual degrees
+          of freedom.
         """
         X = jnp.asarray(X)
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
+        df = X.shape[0] - X.shape[1] if df_resid is None else df_resid
+        if df <= 0:
+            raise ValueError(f"LinearModel requires positive residual degrees of freedom; received {df}.")
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
-        df = jnp.maximum(X.shape[0] - X.shape[1], 1)
 
-        mu = X @ beta
-        eta = mu
-        resid = y - mu - offset  # note: this is the working resid
+        eta = X @ beta + offset
+        # The Gaussian model enforces the identity link, so its fitted mean is
+        # the complete linear predictor, including the fixed offset.
+        mu = eta
+        resid = y - mu
         disp = jnp.sum(resid**2) / df
 
         weight = 1.0 / disp
