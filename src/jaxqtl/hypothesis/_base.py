@@ -1,14 +1,17 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from typing import NamedTuple
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
-from jax.numpy.linalg import multi_dot
 from jaxtyping import Array, ArrayLike
 
 from ..infer import (
     AbstractLinearModel,
+    AbstractLinearSolve,
     AbstractVarianceEstimator,
     FisherInfoError,
 )
@@ -88,19 +91,21 @@ class AbstractHypothesisTest(eqx.Module):
 def _residualize_genotypes(
     X: Array,
     G: Array,
-    resid_covar: Array,
     glm_wt: Array,
+    solver: AbstractLinearSolve,
 ) -> Array:
     r"""Residualize `G` against columns of `X` under a weighted inner product.
 
-    This is used to compute genotype residuals after fitting the covariate-only model.
+    This computes $G_\perp = G - X\hat B$, where $\hat B$ is the weighted least-squares projection of each genotype
+    onto `X`. The projection uses the model's solver rather than its coefficient covariance estimator because a
+    sandwich covariance matrix does not define the projection geometry.
 
     **Arguments:**
 
     - `X`: Covariate matrix with shape `(n, p)`.
     - `G`: Genotype matrix with shape `(n, m)`.
-    - `resid_covar`: Covariance-like matrix used for residualization with shape `(p, p)`.
     - `glm_wt`: Per-sample weights with shape `(n,)` or a scalar weight.
+    - `solver`: Linear solver used to project each genotype onto `X`.
 
     **Returns:**
 
@@ -108,10 +113,23 @@ def _residualize_genotypes(
     """
     X = jnp.asarray(X)
     G = jnp.asarray(G)
-    resid_covar = jnp.asarray(resid_covar)
-    wgt = jnp.atleast_1d(glm_wt)
-    x_W = X * wgt[:, jnp.newaxis]
-    return G - multi_dot([X, resid_covar, x_W.T, G])
+    wgt = jnp.broadcast_to(jnp.asarray(glm_wt), (X.shape[0],))
+    # Reuse the configured solver so residualization follows the model's numerical policy.
+    coefficients = jax.vmap(lambda g: solver.wgt_lstsq(X, g, wgt), in_axes=1, out_axes=1)(G)
+    return G - X @ coefficients
+
+
+def _validate_score_variance_estimator(std_err: AbstractVarianceEstimator, test_name: str) -> None:
+    r"""Require model-based Fisher information for score and SPA tests.
+
+    Selecting a sandwich covariance estimator changes Wald coefficient uncertainty; it does not turn the existing
+    score statistic or saddlepoint approximation into a misspecification-robust test.
+    """
+    if not isinstance(std_err, FisherInfoError):
+        raise ValueError(
+            f"{test_name} only supports FisherInfoError; "
+            "alternative score-test variance estimators are not implemented."
+        )
 
 
 def _score_from_residuals(

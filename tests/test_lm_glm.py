@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 import numpy as np
 import pytest
 import statsmodels.api as sm
@@ -33,6 +35,33 @@ def test_linear_model_matches_statsmodels(solver):
 
     np.testing.assert_allclose(np.asarray(glm_state.beta), sm_state.params, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(np.asarray(glm_state.p), sm_state.pvalues, rtol=1e-5, atol=1e-5)
+
+
+def test_linear_model_residual_df_override_controls_inference():
+    rng = np.random.default_rng(12)
+    n = 40
+    g = rng.normal(size=(n, 1))
+    y = 0.7 * g[:, 0] + rng.normal(size=n)
+
+    model = LinearModel()
+    default = model.fit(g, y)
+    adjusted = model.fit(g, y, df_resid=n - 5)
+
+    expected_dispersion = np.sum(np.asarray(adjusted.resid) ** 2) / (n - 5)
+    np.testing.assert_allclose(np.asarray(adjusted.disp), expected_dispersion)
+    assert adjusted.se[0] > default.se[0]
+    assert adjusted.p[0] > default.p[0]
+
+
+@pytest.mark.parametrize("df_resid", (0, -1))
+def test_linear_model_rejects_nonpositive_residual_df(df_resid):
+    with pytest.raises(ValueError, match="residual degrees of freedom"):
+        LinearModel().fit(jnp.ones((3, 1)), jnp.arange(3.0), df_resid=df_resid)
+
+
+def test_linear_model_rejects_nonidentity_link():
+    with pytest.raises(ValueError, match="IdentityLink"):
+        LinearModel(family=Gaussian(glink=LogLink()))
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))

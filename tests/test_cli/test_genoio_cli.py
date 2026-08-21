@@ -162,6 +162,14 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
     )
 
 
+def test_common_setup_rejects_robust_score_test() -> None:
+    args = _common_setup_args("cis")
+    args.robust_se = True
+
+    with pytest.raises(ValueError, match="--robust-se is only compatible with --test wald"):
+        cli._common_setup(args, _LoggerStub())
+
+
 def test_bfile_constructs_genoio_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
     spy = _LoadDatasetSpy()
     monkeypatch.setattr(cli, "load_genotype_dataset", spy)

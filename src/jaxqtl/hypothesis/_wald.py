@@ -1,36 +1,23 @@
-import equinox as eqx
+# pattern: Functional Core
+
 import jax
 import jax.lax as lax
 import jax.numpy as jnp
 
 from jaxtyping import ArrayLike
 
-from ..distribution import Gaussian
+from ..infer import LinearModel
 from ._base import _residualize_genotypes, AbstractHypothesisTest, TestResult
 
 
 class WaldTest(AbstractHypothesisTest):
     r"""Wald test for association between a variant and an outcome.
 
-    For each variant, this fits a full model including the variant (optionally using a fast path for Gaussian models)
-    and reports a Wald statistic of the form $z = \hat\beta / \mathrm{se}(\hat\beta)$ with
-    two-sided p-value $p = 2\Phi(-|z|)$ where $\Phi(\cdot)$ is the Normal CDF.
+    For each variant, this fits a full model including the variant and reports
+    $\hat\beta / \mathrm{se}(\hat\beta)$. [`jaxqtl.infer.LinearModel`][] uses a residualized Gaussian fast path and a
+    Student's t reference distribution with the full model's residual degrees of freedom. Generalized linear models
+    use a Normal reference distribution.
     """
-
-    _is_linear: bool = eqx.field(static=True, init=False)
-
-    def __post_init__(self):
-        r"""Initialize cached flags for dispatch.
-
-        **Arguments:**
-
-        `None`
-
-        **Returns:**
-
-        `None`
-        """
-        self._is_linear = isinstance(self.model.family, Gaussian)
 
     def test(
         self,
@@ -51,26 +38,34 @@ class WaldTest(AbstractHypothesisTest):
         **Returns:**
 
         A [`jaxqtl.hypothesis.TestResult`][] containing per-variant Wald-test statistics.
+
+        **Raises:**
+
+        - `ValueError`: For a linear model with no residual degrees of freedom after adding the tested variant.
         """
         X = jnp.asarray(X)
         G = jnp.asarray(G)
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
-        if self._is_linear:
-            result = self.model.fit(X, y, offset, self.std_err)
+        if isinstance(self.model, LinearModel):
+            model = self.model
+            result = model.fit(X, y, offset, self.std_err)
             y_resid = result.resid
-            G_resid = _residualize_genotypes(X, G, result.resid_covar, result.glm_wt)
+            G_resid = _residualize_genotypes(X, G, result.glm_wt, model.solver)
+            df_resid = y.shape[0] - X.shape[1] - 1
 
-            # fit residualized model, one snp at-a-time; but we can do this all in one go using vmap
+            # Frisch-Waugh-Lovell preserves the genotype coefficient, but its inference must retain the full-model df.
             result = jax.vmap(
-                lambda g_res: self.model.fit(g_res[:, jnp.newaxis], y_resid, std_err=self.std_err), in_axes=1
+                lambda g_res: model.fit(g_res[:, jnp.newaxis], y_resid, std_err=self.std_err, df_resid=df_resid),
+                in_axes=1,
             )(G_resid)
 
+            # The residualized fits have one coefficient each; the association API returns one scalar per variant.
             state = TestResult(
-                beta=result.beta,
-                se=result.se,
-                p=result.p,
-                z=result.z,
+                beta=result.beta[:, 0],
+                se=result.se[:, 0],
+                p=result.p[:, 0],
+                z=result.z[:, 0],
                 num_iters=result.num_iters,
                 converged=result.converged,
                 disp=result.disp,

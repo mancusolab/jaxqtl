@@ -164,7 +164,7 @@ def _create_common_subp(subp, name, help):
         "--robust-se",
         action="store_true",
         default=False,
-        help="Compute Robust/Huber standard errors for GLM rather than Fisher Information",
+        help="Compute Huber-White sandwich standard errors for Wald tests. Only valid with '--test wald'",
     )
     common_p.add_argument(
         "--spa",
@@ -480,6 +480,9 @@ def _validate_chromosome_labels(expr_data, geno_data) -> None:
 
 
 def _common_setup(args, log):
+    if args.robust_se and args.test != "wald":
+        raise ValueError("--robust-se is only compatible with --test wald")
+
     # Set up the distributional family and corresponding cumulative generating function (CGF) here.
     # We only use CGF if --spa is set, but may as well set up thin objects here so we don't need to re-enumerate
     # later.
@@ -495,8 +498,7 @@ def _common_setup(args, log):
     else:
         raise ValueError(f"Unknown model: {args.model}")
 
-    # Whether to use Huber-style sandwich estimator or FisherInfo (ie Asymptotic) SEs
-    # This really only matters when doing Wald test
+    # Select the covariance estimator used for Wald coefficient inference.
     if args.robust_se:
         se_estimator = HuberError()
     else:

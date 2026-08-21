@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from typing import Generic, Literal, NamedTuple, Protocol, TypeVar
 
@@ -14,7 +16,13 @@ from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ..infer import ModelResult
-from ._base import _residualize_genotypes, _score_from_residuals, AbstractHypothesisTest, TestResult
+from ._base import (
+    _residualize_genotypes,
+    _score_from_residuals,
+    _validate_score_variance_estimator,
+    AbstractHypothesisTest,
+    TestResult,
+)
 
 
 class HasPredMean(Protocol):
@@ -434,11 +442,21 @@ class SpaTest(AbstractHypothesisTest):
 
     !!! info
 
-        For discrete distribution a continuity correction term is included, such that
+        For discrete distributions, a continuity correction term is included, such that
         $v = (1 - \exp(-\hat t))\sqrt{K''(\hat t)}$.
+
+    This implementation requires [`jaxqtl.infer.FisherInfoError`][]. Sandwich covariance estimators do not define a
+    robust version of the underlying score statistic or its saddlepoint approximation.
+
+    **Raises:**
+
+    - `ValueError`: If `std_err` is not [`jaxqtl.infer.FisherInfoError`][].
     """
 
     cgf: CumulantGeneratingFunction = NegativeBinomialCGF()
+
+    def __check_init__(self) -> None:
+        _validate_score_variance_estimator(self.std_err, self.__class__.__name__)
 
     def test(
         self,
@@ -471,7 +489,7 @@ class SpaTest(AbstractHypothesisTest):
         wgt = jnp.atleast_1d(glmstate_cov_only.glm_wt)
         gprime = glmstate_cov_only.link_prime
 
-        g_resid = _residualize_genotypes(X, G, glmstate_cov_only.resid_covar, wgt)
+        g_resid = _residualize_genotypes(X, G, wgt, self.model.solver)
         beta, se, zscore, g_score, _ = _score_from_residuals(y_resid, g_resid, wgt)
 
         spa_g_resid = g_resid * (wgt * gprime)[:, jnp.newaxis]

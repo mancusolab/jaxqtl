@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from typing import NamedTuple
 
@@ -10,6 +12,7 @@ from jaxtyping import Array, ArrayLike
 from ..distribution import (
     ExponentialFamily,
     Gaussian,
+    IdentityLink,
     NegativeBinomial,
     Poisson,
     t_cdf,
@@ -164,16 +167,19 @@ class AbstractLinearModel(eqx.Module):
 class LinearModel(AbstractLinearModel):
     r"""Gaussian linear regression with a fast least-squares implementation.
 
-    This is a fast path for Gaussian models, avoiding the full IRLS loop.
+    This model requires an identity link and avoids the full IRLS loop.
+
+    **Raises:**
+
+    - `ValueError`: If `family` is not Gaussian with an identity link.
     """
 
     family: ExponentialFamily = Gaussian()
     solver: AbstractLinearSolve = CholeskySolve()
 
-    def __post_init__(self):
-        if not isinstance(self.family, Gaussian):
-            raise ValueError("LinearModel only supports Gaussian family")
-        return
+    def __check_init__(self) -> None:
+        if not isinstance(self.family, Gaussian) or not isinstance(self.family.glink, IdentityLink):
+            raise ValueError("LinearModel only supports Gaussian family with IdentityLink")
 
     def fit(
         self,
@@ -181,6 +187,8 @@ class LinearModel(AbstractLinearModel):
         y: ArrayLike,
         offset: ArrayLike = 0.0,
         std_err: AbstractVarianceEstimator = FisherInfoError(),
+        *,
+        df_resid: int | None = None,
     ) -> ModelResult:
         r"""Fit a Gaussian linear model and return a summary state.
 
@@ -190,16 +198,26 @@ class LinearModel(AbstractLinearModel):
         - `y`: Response vector with shape `(n,)`.
         - `offset`: Offset broadcastable to `y` (either scalar or `(n,)`).
         - `std_err`: Coefficient covariance estimator implementing [`jaxqtl.infer.AbstractVarianceEstimator`][].
+        - `df_resid`: Residual degrees of freedom used for both the residual-dispersion denominator and the Student's t
+          reference distribution. Defaults to `n - p`; callers that fit a residualized submodel may provide the
+          degrees of freedom from the corresponding full model.
 
         **Returns:**
 
         A [`jaxqtl.infer.ModelResult`][] containing fitted coefficients, standard errors, and auxiliary quantities.
+
+        **Raises:**
+
+        - `ValueError`: If `df_resid` is not positive. The default also raises when the design has no residual degrees
+          of freedom.
         """
         X = jnp.asarray(X)
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
+        df = X.shape[0] - X.shape[1] if df_resid is None else df_resid
+        if df <= 0:
+            raise ValueError(f"LinearModel requires positive residual degrees of freedom; received {df}.")
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
-        df = jnp.maximum(X.shape[0] - X.shape[1], 1)
 
         mu = X @ beta
         eta = mu
