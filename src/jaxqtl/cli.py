@@ -450,6 +450,35 @@ def _load_genotype_data(args, log):
     raise ValueError("No valid genotype file specified.")
 
 
+def _unique_chromosome_labels(chromosomes: pl.Series) -> set[str]:
+    """Return unique chromosome labels after converting them to strings."""
+    return set(chromosomes.unique().cast(pl.Utf8).to_list())
+
+
+def _validate_chromosome_labels(expr_data, geno_data) -> None:
+    """Reject phenotype chromosome labels that are absent from genotype metadata."""
+    phenotype_chromosomes = _unique_chromosome_labels(expr_data.pheno_meta.get_column("chrom"))
+    genotype_chromosomes = _unique_chromosome_labels(geno_data.variants().get_column("chrom"))
+    phenotype_only = sorted(phenotype_chromosomes - genotype_chromosomes)
+    if not phenotype_only:
+        return
+
+    phenotype_labels = sorted(phenotype_chromosomes)
+    genotype_labels = sorted(genotype_chromosomes)
+    if phenotype_chromosomes.isdisjoint(genotype_chromosomes):
+        raise ValueError(
+            "No chromosome labels overlap between phenotype and genotype data. "
+            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}. "
+            "A chromosome naming mismatch (for example, 'Chr1' versus '1') may cause all genes to be skipped."
+        )
+    else:
+        raise ValueError(
+            "Phenotype chromosome labels absent from genotype data: "
+            f"{phenotype_only}. Genes on these chromosomes will be skipped. "
+            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}."
+        )
+
+
 def _common_setup(args, log):
     # Set up the distributional family and corresponding cumulative generating function (CGF) here.
     # We only use CGF if --spa is set, but may as well set up thin objects here so we don't need to re-enumerate
@@ -563,6 +592,8 @@ def _common_setup(args, log):
     expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
     if args.min_indiv_expr_pct:
         expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
+
+    _validate_chromosome_labels(expr_data, geno_data)
 
     covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
