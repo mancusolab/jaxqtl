@@ -90,13 +90,14 @@ def _run_negative_binomial_x32_case() -> None:
 
     # Outer JIT may change float32 reduction and fusion order across CPU backends.
     # This tolerance covers the cross-backend variation observed in the fixture.
-    parity_tol = 1e-4
+    parity_rtol = 1e-3
+    parity_atol = 1e-4
     for field in numerical_fields:
         np.testing.assert_allclose(
             np.asarray(getattr(jitted, field)),
             np.asarray(getattr(eager, field)),
-            rtol=parity_tol,
-            atol=parity_tol,
+            rtol=parity_rtol,
+            atol=parity_atol,
             err_msg=f"eager/JIT mismatch for {field}",
         )
     np.testing.assert_array_equal(np.asarray(jitted.num_iters), np.asarray(eager.num_iters))

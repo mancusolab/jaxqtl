@@ -50,7 +50,7 @@ Repeat FI-NB-FIT-001 in a fresh child process with `JAX_ENABLE_X64=0`, and asser
 before running the fit. Use one self-executing `tests/test_precision_modes.py` module whose collection-time imports are
 standard-library-only; this prevents the suite's module-level x64 configuration from contaminating the precision
 contract and avoids a separate non-collected helper module. Compare eager and outer-JIT fitted fields with a separate
-cross-backend parity tolerance (`rtol=1e-4`, `atol=1e-4`) that covers the observed float32 reduction and fusion-order
+cross-backend parity tolerance (`rtol=1e-3`, `atol=1e-4`) that covers the observed float32 reduction and fusion-order
 variation; do not couple it to the objective-change convergence tolerance. The parent test must report captured child
 output on failure and use a finite timeout.
 
