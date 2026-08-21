@@ -5,6 +5,7 @@ import pytest
 import statsmodels.api as sm
 import statsmodels.stats.sandwich_covariance as sw
 
+import equinox as eqx
 import jax.numpy as jnp
 
 from jax import config
@@ -154,7 +155,11 @@ def test_negative_binomial_initializer_returns_predictor_without_offset(offset_k
     tol = 1e-4
     step_size = 1.0
 
-    initializer_eta, initializer_dispersion = _NBInit(family, solver).init(
+    initializer = _NBInit(family, solver)
+    initializer_eta, initializer_dispersion = initializer.init(
+        X, y, offset, max_iter=max_iter, tol=tol, step_size=step_size
+    )
+    jitted_eta, jitted_dispersion = eqx.filter_jit(initializer.init)(
         X, y, offset, max_iter=max_iter, tol=tol, step_size=step_size
     )
     poisson_state = GeneralizedLinearModel(
@@ -170,6 +175,75 @@ def test_negative_binomial_initializer_returns_predictor_without_offset(offset_k
 
     np.testing.assert_allclose(initializer_dispersion, expected_dispersion)
     np.testing.assert_allclose(initializer_eta + offset, poisson_eta)
+    np.testing.assert_allclose(jitted_eta, initializer_eta, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(jitted_dispersion, initializer_dispersion, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(jitted_eta + offset, poisson_eta)
+
+
+def test_negative_binomial_fit_with_offset_matches_jit():
+    rng = np.random.default_rng(18)
+    n = 160
+    X = sm.add_constant(rng.normal(size=(n, 2)), prepend=True)
+    beta = np.array([0.35, 0.2, -0.15])
+    offset = np.linspace(-0.35, 0.3, n) + 0.1 * np.sin(np.linspace(0.0, 3.0 * np.pi, n))
+    eta = X @ beta + offset
+    mu = np.exp(eta)
+    alpha = 0.35
+    size = 1.0 / alpha
+    y = rng.negative_binomial(size, size / (size + mu))
+    X = jnp.asarray(X)
+    y = jnp.asarray(y)
+    offset = jnp.asarray(offset)
+
+    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4)
+    eager = model.fit(X, y, offset)
+    jitted = eqx.filter_jit(model.fit)(X, y, offset)
+
+    numerical_fields = (
+        "beta",
+        "se",
+        "z",
+        "p",
+        "eta",
+        "mu",
+        "glm_wt",
+        "link_prime",
+        "resid_covar",
+        "resid",
+        "disp",
+    )
+    for state in (eager, jitted):
+        assert bool(np.asarray(state.converged))
+        assert np.isfinite(np.asarray(state.disp))
+        assert np.isfinite(np.asarray(state.num_iters))
+        assert np.asarray(state.disp) > 0.0
+        for field in ("beta", "se", "z", "p"):
+            assert getattr(state, field).shape == (X.shape[1],)
+        for field in ("eta", "mu", "glm_wt", "link_prime", "resid"):
+            assert getattr(state, field).shape == (n,)
+        assert state.resid_covar.shape == (X.shape[1], X.shape[1])
+        assert np.asarray(state.disp).shape == ()
+        assert np.asarray(state.num_iters).shape == ()
+        assert np.asarray(state.converged).shape == ()
+        for field in numerical_fields:
+            assert np.all(np.isfinite(np.asarray(getattr(state, field))))
+
+        np.testing.assert_allclose(np.asarray(state.eta), np.asarray(X @ state.beta + offset))
+        np.testing.assert_allclose(np.asarray(state.mu), np.exp(np.asarray(state.eta)))
+        np.testing.assert_allclose(
+            np.asarray(state.resid),
+            (np.asarray(y) - np.asarray(state.mu)) / np.asarray(state.mu),
+        )
+
+    for field in numerical_fields:
+        np.testing.assert_allclose(
+            np.asarray(getattr(jitted, field)),
+            np.asarray(getattr(eager, field)),
+            rtol=1e-5,
+            atol=1e-5,
+        )
+    np.testing.assert_array_equal(np.asarray(jitted.num_iters), np.asarray(eager.num_iters))
+    np.testing.assert_array_equal(np.asarray(jitted.converged), np.asarray(eager.converged))
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
