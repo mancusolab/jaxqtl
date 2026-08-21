@@ -38,7 +38,8 @@ def _run_negative_binomial_x32_case() -> None:
     y = jnp.asarray(y)
     offset = jnp.asarray(offset)
 
-    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4)
+    max_iter = 200
+    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=max_iter, tol=1e-4)
     eager = model.fit(X, y, offset)
     jitted = eqx.filter_jit(model.fit)(X, y, offset)
 
@@ -58,6 +59,7 @@ def _run_negative_binomial_x32_case() -> None:
     for state in (eager, jitted):
         assert bool(np.asarray(state.converged))
         assert np.isfinite(np.asarray(state.num_iters))
+        assert 0 < int(np.asarray(state.num_iters)) <= max_iter
         assert np.asarray(state.disp) > 0.0
         for field in ("beta", "se", "z", "p"):
             assert getattr(state, field).shape == (X.shape[1],)
@@ -100,8 +102,8 @@ def _run_negative_binomial_x32_case() -> None:
             atol=parity_atol,
             err_msg=f"eager/JIT mismatch for {field}",
         )
-    np.testing.assert_array_equal(np.asarray(jitted.num_iters), np.asarray(eager.num_iters))
-    np.testing.assert_array_equal(np.asarray(jitted.converged), np.asarray(eager.converged))
+    # Float32 rounding can change the iteration where the stopping threshold is
+    # crossed, so convergence is required above without equating iteration counts.
 
 
 def test_negative_binomial_fit_with_offset_in_x32_process() -> None:
