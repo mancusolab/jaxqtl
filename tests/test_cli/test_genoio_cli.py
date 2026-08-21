@@ -57,6 +57,14 @@ class _EmptyGenoioDataset:
         )
 
 
+class _ChromosomeMetadataDataset:
+    def __init__(self, chromosomes: list[str]) -> None:
+        self._variants = pl.DataFrame({"chrom": chromosomes})
+
+    def variants(self) -> pl.DataFrame:
+        return self._variants
+
+
 class _LoadDatasetSpy:
     def __init__(self) -> None:
         self.calls: list[tuple[str, str]] = []
@@ -192,6 +200,33 @@ def test_deprecated_geno_raises_without_constructing_genoio(monkeypatch: pytest.
         cli._load_genotype_data(_args(geno="legacy-prefix"), _LoggerStub())
 
     assert spy.calls == []
+
+
+def test_unique_chromosome_labels_deduplicates_labels() -> None:
+    chromosomes = pl.Series("chrom", ["1", "1", "2"])
+
+    assert cli._unique_chromosome_labels(chromosomes) == {"1", "2"}
+
+
+def test_chromosome_mismatch_error_identifies_zero_overlap() -> None:
+    expression = SimpleNamespace(pheno_meta=pl.DataFrame({"chrom": ["Chr1"]}))
+    genotype = _ChromosomeMetadataDataset(["1"])
+
+    with pytest.raises(ValueError, match="No chromosome labels overlap") as exc_info:
+        cli._validate_chromosome_labels(expression, genotype)
+
+    assert "Chr1" in str(exc_info.value)
+    assert "1" in str(exc_info.value)
+
+
+def test_chromosome_mismatch_error_identifies_partial_overlap() -> None:
+    expression = SimpleNamespace(pheno_meta=pl.DataFrame({"chrom": ["1", "Chr2"]}))
+    genotype = _ChromosomeMetadataDataset(["1", "2"])
+
+    with pytest.raises(ValueError, match="Phenotype chromosome labels absent from genotype data") as exc_info:
+        cli._validate_chromosome_labels(expression, genotype)
+
+    assert "Chr2" in str(exc_info.value)
 
 
 def test_cli_help_marks_legacy_genotype_inputs() -> None:
