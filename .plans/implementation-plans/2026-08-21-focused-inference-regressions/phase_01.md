@@ -111,8 +111,10 @@ test module free of JAX imports so collection cannot initialize or reconfigure t
   `eta == X @ beta + offset`; `mu == exp(eta)`; log-link NB residuals equal `(y - mu) / mu`; all numerical fields agree
   under eager/JIT within `rtol=1e-5`, `atol=1e-5`; iteration and convergence metadata agree exactly.
 - AC2.3: Assert the child process is genuinely in x32 mode and repeats the convergence, identity, and eager/JIT parity
-  checks. Run the self-executing test file with `sys.executable`, a resolved path, an explicit repository working
-  directory, captured output, and a finite timeout.
+  checks, comparing fitted fields with a separate cross-backend parity tolerance (`rtol=1e-4`, `atol=1e-4`) to
+  accommodate observed float32 reduction and fusion-order variation. This comparison tolerance is independent of the
+  objective-change convergence tolerance. Run the self-executing test file with `sys.executable`, a resolved path, an
+  explicit repository working directory, captured output, and a finite timeout.
 - Do not assert exact iteration count, generating-parameter recovery, or statsmodels equivalence.
 
 **Verification:**
