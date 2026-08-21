@@ -12,7 +12,7 @@ from jax import config
 
 from jaxqtl.distribution._expfam import Binomial, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import IdentityLink, LogitLink, LogLink, PowerLink
-from jaxqtl.infer._glm import _NBInit, GeneralizedLinearModel, LinearModel
+from jaxqtl.infer._glm import _NBInit, _SimpleInit, GeneralizedLinearModel, LinearModel
 from jaxqtl.infer._solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer._stderr import HuberError
 
@@ -131,6 +131,19 @@ def test_glm_poisson_identity_link_runs(solver):
     assert jnp.all(jnp.isfinite(glm_state.beta))
     assert jnp.all(jnp.isfinite(glm_state.se))
     assert jnp.all(jnp.isfinite(glm_state.p))
+
+
+@pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
+def test_simple_initializer_returns_predictor_without_offset(offset_kind):
+    y = jnp.asarray([0.0, 1.0, 4.0, 9.0])
+    offset = jnp.asarray(17.0 if offset_kind == "scalar" else np.linspace(16.0, 19.0, y.size))
+    family = Poisson()
+    initializer = _SimpleInit(family, CholeskySolve())
+
+    initializer_eta, initializer_dispersion = initializer.init(jnp.ones((y.size, 1)), y, offset)
+
+    np.testing.assert_allclose(initializer_eta + offset, family.init_eta(y))
+    np.testing.assert_allclose(initializer_dispersion, 1.0)
 
 
 @pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
