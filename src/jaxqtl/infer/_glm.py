@@ -27,7 +27,9 @@ class ModelResult(NamedTuple):
 
     This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.LinearModel.fit`][] and
     [`jaxqtl.infer.GeneralizedLinearModel.fit`][]. These outputs are consumed by downstream hypothesis tests
-    and mapping routines.
+    and mapping routines. ``eta`` is the complete linear predictor, including any supplied offset, and ``mu`` is
+    the corresponding fitted mean. ``resid`` is the working residual used by score tests; for the Gaussian
+    identity-link model it is ``y - mu``.
     """
 
     beta: Array
@@ -41,7 +43,7 @@ class ModelResult(NamedTuple):
     num_iters: Array
     converged: Array
     resid_covar: Array  # covariance used to compute `se`
-    resid: Array  # for score test, not the working resid!
+    resid: Array  # working residual used by score tests
     disp: Array  # dispersion parameter
 
 
@@ -219,9 +221,11 @@ class LinearModel(AbstractLinearModel):
             raise ValueError(f"LinearModel requires positive residual degrees of freedom; received {df}.")
         beta, n_iter, converged, _ = lstsq(X, y - offset, self.solver)
 
-        mu = X @ beta
-        eta = mu
-        resid = y - mu - offset  # note: this is the working resid
+        eta = X @ beta + offset
+        # The Gaussian model enforces the identity link, so its fitted mean is
+        # the complete linear predictor, including the fixed offset.
+        mu = eta
+        resid = y - mu
         disp = jnp.sum(resid**2) / df
 
         weight = 1.0 / disp

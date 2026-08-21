@@ -37,6 +37,32 @@ def test_linear_model_matches_statsmodels(solver):
     np.testing.assert_allclose(np.asarray(glm_state.p), sm_state.pvalues, rtol=1e-5, atol=1e-5)
 
 
+@pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
+def test_linear_model_offset_state_and_huber_covariance_match_statsmodels(offset_kind):
+    rng = np.random.default_rng(15)
+    n, p = 120, 3
+    X = sm.add_constant(rng.normal(size=(n, p)), prepend=True)
+    beta = rng.normal(size=p + 1)
+    offset = 0.4 if offset_kind == "scalar" else rng.normal(scale=0.2, size=n)
+    offset_vector = np.broadcast_to(offset, (n,))
+    error_scale = 0.5 + 0.3 * np.abs(X[:, 1])
+    y = X @ beta + offset_vector + rng.normal(scale=error_scale)
+
+    sm_state = sm.OLS(y - offset_vector, X).fit()
+    expected_covariance = sw.cov_white_simple(sm_state, use_correction=False)
+    model_state = LinearModel().fit(X, y, offset=offset, std_err=HuberError())
+
+    expected_eta = X @ sm_state.params + offset_vector
+    expected_residual = y - expected_eta
+    expected_dispersion = np.sum(expected_residual**2) / (n - X.shape[1])
+    np.testing.assert_allclose(np.asarray(model_state.beta), sm_state.params, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(model_state.eta), expected_eta, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(model_state.mu), expected_eta, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(model_state.resid), expected_residual, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(model_state.disp), expected_dispersion, rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(model_state.resid_covar), expected_covariance, rtol=1e-5, atol=1e-5)
+
+
 def test_linear_model_residual_df_override_controls_inference():
     rng = np.random.default_rng(12)
     n = 40
