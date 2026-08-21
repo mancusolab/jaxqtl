@@ -48,8 +48,10 @@ class ModelResult(NamedTuple):
 
 
 class _AbstractInit(eqx.Module):
-    """Annoying, but let's split out how to init the glm here. Most of the time this isn't needed, but NegBin
-    really benefits from first initializing a Poisson family to calculate/estimate dispersion ahead of time.
+    """Initialize a GLM predictor and dispersion estimate.
+
+    Initializers return a predictor that excludes the separately supplied offset. The IRLS solver owns adding that
+    fixed offset when it constructs the complete initial predictor.
     """
 
     family: eqx.AbstractVar[ExponentialFamily]
@@ -106,16 +108,17 @@ class _NBInit(_AbstractInit):
             family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size
         )
         glm_state_pois = jaxqtl_pois.fit(X, y, offset)
+        complete_eta = glm_state_pois.eta
 
         # fit covariate-only model (null)
-        disp_init = n / jnp.sum((y / self.family.glink.inverse(glm_state_pois.eta) - 1) ** 2)
-        eta = glm_state_pois.eta
-        disp = self.family.estimate_dispersion(X, y, eta, disp=1.0 / disp_init, max_iter=max_iter)
+        disp_init = n / jnp.sum((y / self.family.glink.inverse(complete_eta) - 1) ** 2)
+        disp = self.family.estimate_dispersion(X, y, complete_eta, disp=1.0 / disp_init, max_iter=max_iter)
 
         # convert disp to 0.1 if bad initialization
         disp = jnp.nan_to_num(disp, nan=0.1)
 
-        return eta, disp
+        # IRLS adds the fixed offset when constructing its initial state.
+        return complete_eta - offset, disp
 
 
 class _SimpleInit(_AbstractInit):

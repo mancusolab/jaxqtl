@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from typing import NamedTuple
 
 import equinox as eqx
@@ -45,7 +47,8 @@ def irls(
     - `X`: Covariate matrix with shape `(n, p)`.
     - `y`: Outcome vector with shape `(n,)`.
     - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-    - `eta`: Initial linear predictor $\eta$ with shape `(n,)`.
+    - `eta`: Initial linear predictor $\eta$ with shape `(n,)`, excluding the separately supplied `offset`. IRLS adds
+      the offset when constructing the complete initial predictor.
     - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
     - `solver`: Linear solver implementing [`jaxqtl.infer.AbstractLinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.

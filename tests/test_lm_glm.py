@@ -9,9 +9,9 @@ import jax.numpy as jnp
 
 from jax import config
 
-from jaxqtl.distribution._expfam import Binomial, Gaussian, Poisson
+from jaxqtl.distribution._expfam import Binomial, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import IdentityLink, LogitLink, LogLink, PowerLink
-from jaxqtl.infer._glm import GeneralizedLinearModel, LinearModel
+from jaxqtl.infer._glm import _NBInit, GeneralizedLinearModel, LinearModel
 from jaxqtl.infer._solve import CGSolve, CholeskySolve, QRSolve
 from jaxqtl.infer._stderr import HuberError
 
@@ -130,6 +130,46 @@ def test_glm_poisson_identity_link_runs(solver):
     assert jnp.all(jnp.isfinite(glm_state.beta))
     assert jnp.all(jnp.isfinite(glm_state.se))
     assert jnp.all(jnp.isfinite(glm_state.p))
+
+
+@pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
+def test_negative_binomial_initializer_returns_predictor_without_offset(offset_kind):
+    rng = np.random.default_rng(16)
+    n = 120
+    X = sm.add_constant(rng.normal(size=(n, 2)), prepend=True)
+    beta = np.array([0.4, 0.2, -0.15])
+    offset = 0.3 if offset_kind == "scalar" else np.linspace(-0.2, 0.4, n)
+    complete_eta = X @ beta + offset
+    mu = np.exp(complete_eta)
+    alpha = 0.4
+    size = 1.0 / alpha
+    y = rng.negative_binomial(size, size / (size + mu))
+    X = jnp.asarray(X)
+    y = jnp.asarray(y)
+    offset = jnp.asarray(offset)
+
+    family = NegativeBinomial()
+    solver = CholeskySolve()
+    max_iter = 100
+    tol = 1e-4
+    step_size = 1.0
+
+    initializer_eta, initializer_dispersion = _NBInit(family, solver).init(
+        X, y, offset, max_iter=max_iter, tol=tol, step_size=step_size
+    )
+    poisson_state = GeneralizedLinearModel(
+        family=Poisson(), solver=solver, max_iter=max_iter, tol=tol, step_size=step_size
+    ).fit(X, y, offset)
+
+    poisson_eta = poisson_state.eta
+    moment_inverse_dispersion = n / jnp.sum((y / family.glink.inverse(poisson_eta) - 1) ** 2)
+    expected_dispersion = family.estimate_dispersion(
+        X, y, poisson_eta, disp=1.0 / moment_inverse_dispersion, max_iter=max_iter
+    )
+    expected_dispersion = jnp.nan_to_num(expected_dispersion, nan=0.1)
+
+    np.testing.assert_allclose(initializer_dispersion, expected_dispersion)
+    np.testing.assert_allclose(initializer_eta + offset, poisson_eta)
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
