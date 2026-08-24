@@ -26,10 +26,24 @@ class ModelResult(NamedTuple):
     r"""Container for fitted model outputs.
 
     This stores coefficient estimates and derived quantities returned by [`jaxqtl.infer.LinearModel.fit`][] and
-    [`jaxqtl.infer.GeneralizedLinearModel.fit`][]. These outputs are consumed by downstream hypothesis tests
-    and mapping routines. ``eta`` is the complete linear predictor, including any supplied offset, and ``mu`` is
-    the corresponding fitted mean. ``resid`` is the working residual used by score tests; for the Gaussian
-    identity-link model it is ``y - mu``.
+    [`jaxqtl.infer.GeneralizedLinearModel.fit`][]. For a design matrix with shape `(n, p)`, coefficient-level fields
+    have shape `(p,)`, observation-level fields have shape `(n,)`, and `resid_covar` has shape `(p, p)`.
+
+    **Attributes:**
+
+    - `beta`: Fitted coefficient estimates.
+    - `se`: Coefficient standard errors.
+    - `z`: Wald statistics, computed as `beta / se`.
+    - `p`: Two-sided coefficient p-values.
+    - `eta`: Complete linear predictor, including the supplied offset.
+    - `mu`: Fitted response mean obtained from the inverse link.
+    - `glm_wt`: IRLS working weights. The Gaussian fast path may return a scalar weight.
+    - `link_prime`: Link derivative evaluated at `mu`. The Gaussian fast path may return a scalar value.
+    - `num_iters`: Number of solver iterations.
+    - `converged`: Boolean convergence indicator.
+    - `resid_covar`: Coefficient covariance matrix used to compute `se`.
+    - `resid`: Working residual used by score tests. For the Gaussian identity-link model, this is `y - mu`.
+    - `disp`: Fitted family dispersion or scale parameter.
     """
 
     beta: Array
@@ -141,7 +155,13 @@ class _SimpleInit(_AbstractInit):
 
 
 class AbstractLinearModel(eqx.Module):
-    r"""Abstract base class for linear and generalized linear models."""
+    r"""Abstract base class for linear and generalized linear models.
+
+    **Attributes:**
+
+    - `family`: Response distribution and link function.
+    - `solver`: Linear solver used for least-squares subproblems.
+    """
 
     family: eqx.AbstractVar[ExponentialFamily]
     solver: eqx.AbstractVar[AbstractLinearSolve]
@@ -174,6 +194,12 @@ class LinearModel(AbstractLinearModel):
     r"""Gaussian linear regression with a fast least-squares implementation.
 
     This model requires an identity link and avoids the full IRLS loop.
+
+    **Attributes:**
+
+    - `family`: Gaussian response family with an identity link.
+    - `solver`: Linear solver used for the least-squares fit. Defaults to
+      [`jaxqtl.infer.CholeskySolve`][].
 
     **Raises:**
 
@@ -262,6 +288,17 @@ class GeneralizedLinearModel(AbstractLinearModel):
 
     This class wraps a family (distribution + link) and a linear solver, and fits coefficients using
     iteratively reweighted least squares (IRLS).
+
+    **Attributes:**
+
+    - `family`: Response distribution and link function. Defaults to
+      [`jaxqtl.distribution.Gaussian`][].
+    - `solver`: Linear solver for each IRLS subproblem. Defaults to
+      [`jaxqtl.infer.CholeskySolve`][].
+    - `max_iter`: Maximum number of IRLS iterations. Defaults to 1000.
+    - `tol`: Convergence tolerance on the change in objective. Defaults to `1e-3`.
+    - `step_size`: Multiplier applied to each IRLS working-response update. Defaults
+      to 1.
     """
 
     family: ExponentialFamily = Gaussian()

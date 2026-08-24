@@ -6,6 +6,22 @@ from jaxtyping import Array, ArrayLike
 
 
 def t_cdf(value: ArrayLike, df: ArrayLike, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0) -> Array:
+    r"""Evaluate the cumulative distribution function of Student's t distribution.
+
+    The arguments follow JAX broadcasting rules. This implementation is written in
+    terms of `jax.scipy.special.betainc` so it can be transformed by JAX.
+
+    **Arguments:**
+
+    - `value`: Points at which to evaluate the CDF.
+    - `df`: Positive degrees of freedom.
+    - `loc`: Distribution location. Defaults to 0.
+    - `scale`: Positive distribution scale. Defaults to 1.
+
+    **Returns:**
+
+    CDF values with the broadcasted shape of `value`, `df`, `loc`, and `scale`.
+    """
     # Ref: https://en.wikipedia.org/wiki/Student's_t-distribution#Related_distributions
     # X^2 ~ F(1, df) -> df / (df + X^2) ~ Beta(df/2, 0.5)
     value = jnp.asarray(value)
@@ -27,6 +43,23 @@ def ncx2_sf(
     nc: float,
     terms: int = 100,
 ):
+    r"""Approximate the survival function of a noncentral chi-squared distribution.
+
+    The approximation truncates the Poisson-mixture representation after `terms`
+    components. Larger noncentrality parameters may require more terms to capture
+    the upper tail accurately.
+
+    **Arguments:**
+
+    - `x`: Points at which to evaluate the survival function.
+    - `df`: Positive degrees of freedom.
+    - `nc`: Non-negative noncentrality parameter.
+    - `terms`: Number of Poisson-mixture components. Defaults to 100.
+
+    **Returns:**
+
+    Approximate survival probabilities with the same shape as `x`.
+    """
     x = jnp.asarray(x)
     half_x = x / 2.0
     half_df = df / 2.0

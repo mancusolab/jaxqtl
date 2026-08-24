@@ -15,6 +15,7 @@ from ._base import AbstractHypothesisTest, TestResult
 
 
 Aux = TypeVar("Aux")
+#: Method-specific adjusted p-value output, scalar or variantwise, plus auxiliary diagnostics.
 PermutationResult: TypeAlias = tuple[Scalar, Aux]
 
 
@@ -99,8 +100,20 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
     This method generates permutation statistics $T_1, \dots, T_B$ (here based on a max score/z statistic across
     variants), converts them to permutation p-values $p_b$, then fits a Beta approximation
-    $p_b \sim \mathrm{Beta}(k, n)$. The observed gene-level p-value is computed by mapping the observed statistic
-    through the same calibration and applying the fitted Beta CDF.
+    $p_b \sim \mathrm{Beta}(k, n)$. Observed variant statistics are mapped through
+    the same calibration and fitted Beta CDF. Cis mapping reports the adjusted value
+    corresponding to the selected lead variant.
+
+    Reusing the same PRNG key with the same inputs produces the same permutations.
+    Floating-point results can still vary across JAX backends.
+
+    **Attributes:**
+
+    - `max_perm_direct`: Number of direct permutations. Defaults to 1000.
+    - `max_iter_beta`: Maximum iterations for fitting the Beta approximation.
+      Defaults to 1000.
+    - `use_tdist`: Estimate a Student's t degrees-of-freedom adjustment when true;
+      otherwise estimate noncentrality for a chi-squared reference distribution.
     """
 
     max_perm_direct: int = 1000
@@ -161,7 +174,7 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
         test: AbstractHypothesisTest,
         key: PRNGKeyArray,
     ) -> tuple[Array, tuple[BetaParams, float, bool]]:
-        r"""Compute a gene-level p-value using direct permutations and a Beta approximation.
+        r"""Compute variantwise adjusted p-values using a Beta approximation.
 
         **Arguments:**
 
@@ -175,7 +188,10 @@ class BetaPermutation(AbstractAggregateTest[tuple[BetaParams, float, bool]]):
 
         **Returns:**
 
-        A tuple `(pvalue, aux)` where `aux` includes fitted Beta parameters and diagnostics.
+        A tuple `(pvalue, aux)`. `pvalue` contains one adjusted value per variant.
+        `aux` is `(beta_params, calibration_estimate, optimizer_converged)`, where
+        `calibration_estimate` is the fitted t degrees of freedom or chi-squared
+        noncentrality parameter according to `use_tdist`.
         """
         X = jnp.asarray(X)
         G = jnp.asarray(G)
@@ -254,6 +270,12 @@ class ACAT(AbstractAggregateTest[None]):
     Given per-variant p-values $p_1, \dots, p_m$ and weights $w_i = 1/m$, the Cauchy combination statistic is
     $T = \sum_i w_i \tan\left(\left(\frac{1}{2} - p_i\right)\pi\right)$, with p-value
     $p = 1 - F_{\mathrm{Cauchy}(0,1)}(T)$.
+
+    **Failure Modes:**
+
+    A mixture containing both exact zero and exact one p-values cannot be ordered
+    consistently in the Cauchy transform. The method reports this condition through
+    `equinox.error_if`; behavior follows Equinox's transformed-runtime error policy.
     """
 
     def aggregate(
@@ -281,6 +303,11 @@ class ACAT(AbstractAggregateTest[None]):
         **Returns:**
 
         A tuple `(pvalue, None)` containing the ACAT gene-level p-value.
+
+        **Failure Modes:**
+
+        If `result.p` contains both exact zero and exact one values, the method
+        reports an error through `equinox.error_if`.
         """
         obs_p = result.p
         any_ones = jnp.any(obs_p == 1.0)

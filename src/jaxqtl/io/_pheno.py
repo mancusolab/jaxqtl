@@ -20,29 +20,74 @@ from ._utils import validate_user_columns
 
 @dataclass
 class ExpressionData:
-    """Phenotype matrix plus gene-level metadata and library sizes."""
+    r"""Expression values, feature metadata, and library sizes aligned by sample.
+
+    **Attributes:**
+
+    - `pheno`: Sample-by-feature Polars frame. The first column is `iid`; all
+      remaining columns contain expression values named by phenotype ID.
+    - `pheno_meta`: Feature-level Polars frame with chromosome, start, end, and
+      `phenotype_id` columns, in that order and matching the expression columns.
+    - `libsize`: Polars frame with `iid` and `libsize` columns. Library sizes are
+      computed before optional phenotype filtering.
+    """
 
     pheno: pl.DataFrame
     pheno_meta: pl.DataFrame
     libsize: pl.DataFrame
 
     def __iter__(self):
-        """Yield expression values and genomic metadata for each phenotype."""
+        r"""Yield expression values and genomic metadata for each phenotype.
+
+        **Returns:**
+
+        An iterator of `(expression, phenotype_id, chrom, start, end)` tuples.
+        `expression` is a floating-point JAX array with shape `(n,)`.
+        """
         for chrom, start, end, gene in self.pheno_meta.iter_rows():
             expr = self.pheno.get_column(gene).to_jax().astype(float)  # ug i dont like this casting
             yield expr, gene, chrom, start, end
 
     def to_jax(self):
-        """Return expression values as a JAX array (samples x phenotypes)."""
+        r"""Convert expression values to a floating-point JAX array.
+
+        **Returns:**
+
+        An array with shape `(n, g)`, where rows are samples and columns are
+        phenotypes. The `iid` column is excluded.
+        """
         return self.pheno.select(pl.all().exclude("iid")).to_jax().astype(float)  # ug i dont like this casting
 
     @property
     def offset_from_libsize(self) -> pl.DataFrame:
-        """Compute log library size offsets."""
+        r"""Compute log-library-size offsets.
+
+        **Returns:**
+
+        A Polars frame with `iid` and `offset` columns in the same sample order as
+        `libsize`. The offset is `log(libsize)`.
+        """
         return self.libsize.with_columns(pl.col("libsize").log().alias("offset")).select(["iid", "offset"])
 
     def filter_genes_by_percentage(self, express_percent: float) -> "ExpressionData":
-        """Keep genes expressed in more than `express_percent` of samples."""
+        r"""Keep phenotypes expressed in more than a fraction of samples.
+
+        Expression is defined as a value greater than zero. Library sizes are
+        preserved from the unfiltered expression matrix.
+
+        **Arguments:**
+
+        - `express_percent`: Exclusive lower bound on the expressed-sample fraction,
+          between 0 and 1.
+
+        **Returns:**
+
+        A new `ExpressionData` containing only phenotypes above the threshold.
+
+        **Raises:**
+
+        - `ValueError`: If `express_percent` is outside `[0, 1]`.
+        """
         if not (0 <= express_percent <= 1):
             raise ValueError("`express_percent` must be between 0 and and 1")
         col_means = (
@@ -58,7 +103,24 @@ class ExpressionData:
         return ExpressionData(pheno=pheno, pheno_meta=meta, libsize=self.libsize)
 
     def filter_individuals_by_percentage(self, express_percent: float) -> "ExpressionData":
-        """Keep samples expressing more than `express_percent` of genes."""
+        r"""Keep samples expressing more than a fraction of phenotypes.
+
+        Expression is defined as a value greater than zero. The returned expression
+        and library-size frames contain the same retained samples and order.
+
+        **Arguments:**
+
+        - `express_percent`: Exclusive lower bound on the expressed-phenotype
+          fraction, between 0 and 1.
+
+        **Returns:**
+
+        A new `ExpressionData` containing only samples above the threshold.
+
+        **Raises:**
+
+        - `ValueError`: If `express_percent` is outside `[0, 1]`.
+        """
         if not (0 <= express_percent <= 1):
             raise ValueError("`express_percent` must be between 0 and and 1")
 
@@ -76,7 +138,34 @@ class ExpressionData:
         rng_key: PRNGKeyArray,
         transform: Literal["log1p", "tmm"] | None = None,
     ) -> pl.DataFrame:
-        """Compute PCA scores from expression data with optional transformation."""
+        r"""Compute probabilistic-PCA scores from the expression matrix.
+
+        Phenotypes are optionally transformed, then standardized across samples
+        before fitting. The randomized initialization is determined by `rng_key`.
+
+        **Arguments:**
+
+        - `num_pcs`: Number of expression principal components to return. It must
+          not exceed the smaller of the sample and phenotype counts.
+        - `rng_key`: JAX PRNG key controlling the probabilistic-PCA initialization.
+        - `transform`: Optional expression transform. `"log1p"` is implemented;
+          `"tmm"` is currently unavailable.
+
+        **Returns:**
+
+        For a supported component count, a Polars frame with `iid` followed by
+        `ExprPC0` through `ExprPC{num_pcs - 1}`.
+
+        **Raises:**
+
+        - `ValueError`: If `num_pcs` is less than 1.
+        - `NotImplementedError`: If `transform="tmm"`.
+
+        **Failure Modes:**
+
+        Component counts larger than the smaller matrix dimension are not validated
+        before fitting and can fail in the underlying JAX linear solve.
+        """
         if num_pcs < 1:
             raise ValueError("`num_pcs` must be greater than 0")
 
@@ -110,7 +199,31 @@ class ExpressionData:
         keep_pheno: list[str] | None = None,
         drop_pheno: list[str] | None = None,
     ):
-        """Load expression, metadata, and library size information from a BED-like file."""
+        r"""Load expression data from a BED-like or Parquet table.
+
+        The first four columns must be chromosome, start, end, and phenotype ID,
+        using one of the accepted case-insensitive aliases. Remaining columns are
+        sample IDs. Library sizes are computed from all loaded phenotypes before
+        applying `keep_pheno` or `drop_pheno`.
+
+        **Arguments:**
+
+        - `path_or_filename`: `.bed`, `.bed.gz`, `.parquet`, or `.parquet.gz` input.
+        - `keep_individuals`: Optional sample IDs to retain.
+        - `drop_individuals`: Optional sample IDs to remove.
+        - `keep_pheno`: Optional phenotype IDs to retain.
+        - `drop_pheno`: Optional phenotype IDs to remove.
+
+        **Returns:**
+
+        An `ExpressionData` with samples in rows and phenotypes in columns.
+
+        **Raises:**
+
+        - `ValueError`: If keep and drop filters are both supplied for the same
+          axis, requested names are missing, required metadata columns are invalid,
+          or the file suffix is unsupported.
+        """
         if keep_individuals and drop_individuals:
             raise ValueError("Cannot specify both `keep_individuals` and `drop_individuals`")
         if keep_pheno and drop_pheno:

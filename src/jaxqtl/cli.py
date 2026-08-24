@@ -649,6 +649,27 @@ def _common_setup(args, log):
 
 
 def main(args):
+    r"""Parse command-line arguments and run the selected jaxQTL workflow.
+
+    This function configures the process-wide JAX platform and 64-bit setting after
+    parsing arguments, then dispatches to the selected subcommand handler.
+
+    **Arguments:**
+
+    - `args`: Command-line arguments excluding the executable name.
+
+    **Returns:**
+
+    Exit status 0 after the selected workflow completes.
+
+    **Raises:**
+
+    - `SystemExit`: If argument parsing fails or help is requested.
+    - `ValueError`: If a handler rejects a user-supplied option or input contract.
+
+    Other exceptions raised while reading data, fitting models, or writing results
+    propagate to the caller.
+    """
     argp = ap.ArgumentParser(
         formatter_class=ap.ArgumentDefaultsHelpFormatter,
     )
@@ -754,6 +775,12 @@ def main(args):
 
 
 def run_cli():
+    r"""Run jaxQTL with arguments from `sys.argv`.
+
+    **Returns:**
+
+    The integer exit status returned by [`jaxqtl.cli.main`][].
+    """
     return main(sys.argv[1:])
 
 

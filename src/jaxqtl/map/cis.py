@@ -38,7 +38,8 @@ def map_cis(
 
     - `data`: Genotype/expression/covariate bundle aligned on IID.
     - `snp_test`: Hypothesis test to apply per variant (score or Wald).
-    - `gene_test`: Gene-level multiple testing adjustment for the cis mode.
+    - `gene_test`: Gene-level p-value aggregation for cis mode. It is ignored in
+      nominal mode.
     - `mode`: `"cis"` (per-gene lead SNP with multiple testing adjustment) or `"nominal"` (all variant stats).
     - `window`: Cis window size in base pairs on each side of a gene TSS/stop.
     - `verbose`: Whether to emit progress logging.
@@ -51,8 +52,16 @@ def map_cis(
 
     **Failure Modes:**
 
+    Genes with no variants in the requested window or no phenotype variance are
+    skipped. If every gene is skipped, the iterator yields one empty frame with the
+    mode-specific schema.
+
     In cis mode, a tested gene with no finite SNP-level p-values is retained as an invalid result row. Its lead and
     association fields are null, `result_valid` is false, and `failure_reason` is `"no_finite_pvalues"`.
+
+    **Raises:**
+
+    - `ValueError`: If `mode` is not `"cis"` or `"nominal"`.
     """
     if log is None:
         log = get_log()
@@ -228,22 +237,22 @@ def map_cis_single(
     gene_test: AbstractAggregateTest,
     key: PRNGKeyArray,
 ) -> tuple[TestResult, PermutationResult]:
-    r"""Fit GLM, test variants, and compute gene-level permutation adjustment.
+    r"""Test variants and compute a gene-level adjusted p-value.
 
     **Arguments:**
 
-    - `X`: Covariate matrix of shape ``(n, p)``.
-    - `G`: Genotype matrix of shape ``(n, m)``.
-    - `y`: Response vector of length ``n``.
-    - `offset`: Offset vector broadcastable to ``y``.
-    - `test`: Hypothesis test callable producing per-variant statistics.
-    - `perm`: Aggregate permutation test for multiple-testing correction.
+    - `X`: Covariate matrix with shape `(n, p)`.
+    - `G`: Genotype matrix with shape `(n, m)`.
+    - `y`: Response vector with shape `(n,)`.
+    - `offset`: Offset vector broadcastable to `y`.
+    - `snp_test`: Hypothesis test producing per-variant statistics.
+    - `gene_test`: Gene-level p-value aggregation method.
     - `key`: PRNG key for permutation randomness.
 
     **Returns:**
 
-    Per-variant stats plus permutation-adjusted p-values as a tuple of
-        ([`jaxqtl.hypothesis.TestResult`][], [`jaxqtl.hypothesis.PermutationResult`][]).
+    A tuple `(test_result, aggregate_result)` containing per-variant statistics and
+    the gene-level p-value with method-specific auxiliary diagnostics.
     """
     test_result = snp_test(X, G, y, offset)
     perm_result = gene_test(X, G, y, offset, test_result, snp_test, key)

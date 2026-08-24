@@ -38,9 +38,31 @@ def read_plink_style_tsvlike(
     keep_columns: list[str] | list[int] | None = None,
     drop_columns: list[str] | list[int] | None = None,
 ) -> pl.DataFrame:
-    """
-    Helper function to read in a phenotype or covariate file. Allows for an optional list of column names or column
-    indices to be passed in, to parse only a subset of the data.
+    r"""Read a tab-delimited sample table with a PLINK-style IID column.
+
+    The header must contain exactly one case-insensitive `iid` or `#iid` column.
+    An optional `fid` or `#fid` column is dropped, and the IID column is normalized
+    to `iid`. The strings `NA`, `NULL`, `NaN`, `nan`, and empty fields are read as
+    missing values.
+
+    **Arguments:**
+
+    - `path_or_filename`: Plain-text or gzip-compressed tab-delimited file.
+    - `keep_columns`: Optional column names or zero-based indices to retain. The IID
+      column is added automatically when omitted.
+    - `drop_columns`: Optional column names or zero-based indices to remove. The IID
+      column is retained even when requested for removal.
+
+    **Returns:**
+
+    A Polars frame with normalized `iid` and at least one data column.
+
+    **Raises:**
+
+    - `ValueError`: If keep and drop selections are both supplied, the header is
+      empty, exactly one IID-like column is not present, a requested column is
+      missing, or no data columns remain.
+    - `TypeError`: If a column selection mixes names and indices.
     """
     iid_re = re.compile(r"^#?iid$", re.IGNORECASE)
     fid_re = re.compile(r"^#?fid$", re.IGNORECASE)
@@ -111,7 +133,26 @@ def read_offset_tsvlike(
     path_or_filename: str | PathLike,
     column: str | int | None = None,
 ) -> pl.DataFrame:
-    """Read an offset file with an IID column and a single numeric offset column."""
+    r"""Read a sample-aligned offset from a tab-delimited file.
+
+    **Arguments:**
+
+    - `path_or_filename`: Plain-text or gzip-compressed table accepted by
+      `read_plink_style_tsvlike`.
+    - `column`: Name or zero-based index of the offset column. When omitted, the
+      input must already contain exactly one non-IID column.
+
+    **Returns:**
+
+    A two-column Polars frame with columns `iid` and `offset`.
+
+    **Raises:**
+
+    - `ValueError`: If `column` has an unsupported type or the selected table does
+      not contain exactly one non-IID column.
+    - `TypeError`: If column selection is invalid for
+      `read_plink_style_tsvlike`.
+    """
     if column is not None:
         if not isinstance(column, str | int):
             raise ValueError(f"Column must be of type `str` or `int`, if not `None`. Found {type(column)}.")
@@ -134,7 +175,19 @@ def read_offset_tsvlike(
 def read_single_column_file(
     path_or_filename: str | PathLike,
 ) -> list:
-    """Read a newline-delimited single-column text (optionally gzipped) into a list."""
+    r"""Read stripped lines from a plain-text or gzip-compressed file.
+
+    A first line beginning with `#` is treated as a header and skipped. Later lines,
+    including empty or comment-like lines, are returned after stripping whitespace.
+
+    **Arguments:**
+
+    - `path_or_filename`: Input text file, optionally ending in `.gz`.
+
+    **Returns:**
+
+    A list of strings in file order.
+    """
     output = []
     name = str(path_or_filename)
     open_f = gzip.open if name.endswith(".gz") else open

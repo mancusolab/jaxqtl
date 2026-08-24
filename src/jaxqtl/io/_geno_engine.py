@@ -15,7 +15,19 @@ GenotypeSource = Literal["bfile", "pfile", "vcf", "bgen"]
 
 @dataclass(frozen=True, slots=True)
 class GenotypeReadOptions:
-    """Mapping read options passed directly to genoio."""
+    r"""Options used when reading genotype blocks through `genoio`.
+
+    jaxQTL requests variant metadata with every read and converts the selected sample
+    tuple to the list expected by `genoio`.
+
+    **Attributes:**
+
+    - `kind`: Read genotypes (`"geno"`) or haplotypes (`"haplo"`).
+    - `dosage`: Return hard calls or dosages.
+    - `sparse`: Dense output when false, otherwise CSC or CSR sparse output.
+    - `missing`: Impute missing calls, preserve them as NaN, or raise an error.
+    - `dtype`: NumPy-compatible output dtype. Defaults to `numpy.float32`.
+    """
 
     kind: Literal["geno", "haplo"] = "geno"
     dosage: Literal["hardcall", "dosage"] = "hardcall"
@@ -29,6 +41,18 @@ class GenotypeReadOptions:
         samples: tuple[str, ...],
         variants: genoio.FilterExpr | None = None,
     ) -> dict[str, object]:
+        r"""Build keyword arguments for a `genoio` read operation.
+
+        **Arguments:**
+
+        - `samples`: Sample IDs to read, in the requested output order.
+        - `variants`: Optional `genoio` variant filter.
+
+        **Returns:**
+
+        A new dictionary containing the configured read options, `samples`,
+        `return_variants=True`, and `variants` when supplied.
+        """
         options: dict[str, object] = {
             "kind": self.kind,
             "dosage": self.dosage,
@@ -44,7 +68,25 @@ class GenotypeReadOptions:
 
 
 def load_genotype_dataset(source: GenotypeSource, path: str) -> genoio.Dataset:
-    """Open a genotype source through genoio without wrapping the returned Dataset."""
+    r"""Open a supported genotype source and return its `genoio` dataset.
+
+    `path` is the source-specific path or prefix: a PLINK 1 prefix for `"bfile"`,
+    a PLINK 2 prefix for `"pfile"`, or a VCF or BGEN path for the corresponding
+    source.
+
+    **Arguments:**
+
+    - `source`: Genotype format: `"bfile"`, `"pfile"`, `"vcf"`, or `"bgen"`.
+    - `path`: Dataset path or file prefix accepted by the selected `genoio` reader.
+
+    **Returns:**
+
+    The opened `genoio.Dataset`.
+
+    **Raises:**
+
+    - `ValueError`: If `source` is unsupported.
+    """
     match source:
         case "bfile":
             return genoio.bfile(path)

@@ -105,7 +105,21 @@ class CisData(eqx.Module):
 
 @dataclass
 class ReadyDataState:
-    """Aligned genotype, expression, covariates, and offsets ready for mapping."""
+    r"""Inputs aligned to a shared sample order and ready for mapping.
+
+    Construct this state with `ReadyDataState.from_data` so genotype samples,
+    expression, covariates, and offsets are intersected and ordered consistently.
+
+    **Attributes:**
+
+    - `genotype`: Open `genoio` dataset.
+    - `sample_ids`: Retained sample IDs in mapping order.
+    - `expression`: Aligned expression values and feature metadata.
+    - `covar`: Covariate matrix with shape `(n, p)`.
+    - `offset`: Offset array with shape `(n,)`, or scalar zero when absent.
+    - `read_options`: Options applied to genotype block reads.
+    - `variant_filter`: Global `genoio` filter applied before mapping.
+    """
 
     genotype: genoio.Dataset
     sample_ids: tuple[str, ...]
@@ -121,7 +135,20 @@ class ReadyDataState:
         return self.expression.pheno_meta.height
 
     def iter_cis(self, window: int) -> Iterator[CisData]:
-        """Iterate over genes and yield per-gene cis windows with matched genotype."""
+        r"""Yield aligned data for each phenotype's cis window.
+
+        Regions are read lazily from the genotype dataset. Each region spans
+        `window` bases before the feature start through `window` bases after its end,
+        with the lower coordinate clipped to 1.
+
+        **Arguments:**
+
+        - `window`: Number of bases to add on each side of each feature.
+
+        **Returns:**
+
+        An iterator of `CisData` objects in phenotype order.
+        """
         gene_window_queue: deque[Any] = deque()
 
         # genoio consumes region filters lazily; keep matching gene metadata in FIFO order
@@ -148,7 +175,22 @@ class ReadyDataState:
         return
 
     def iter_geno(self, chunk_size: int) -> Iterator[tuple[Array, pl.DataFrame]]:
-        """Yield genotype blocks and metadata in chunks."""
+        r"""Yield filtered genotype blocks and normalized variant metadata.
+
+        **Arguments:**
+
+        - `chunk_size`: Maximum number of variants per block.
+
+        **Returns:**
+
+        An iterator of `(genotype, variant_info)` pairs. `genotype` has shape
+        `(n, m_chunk)`, and `variant_info` contains `chrom`, `snp`, `pos`, `a0`, and
+        `a1` in matching variant order.
+
+        **Raises:**
+
+        - `ValueError`: If `chunk_size` is less than 1.
+        """
         if chunk_size < 1:
             raise ValueError("chunk_size must be >= 1")
 
@@ -168,7 +210,36 @@ class ReadyDataState:
         read_options: GenotypeReadOptions | None = None,
         min_maf: float | None = None,
     ) -> "ReadyDataState":
-        """Align genotype, expression, covariates, and optional offset on IID and return a ReadyDataState."""
+        r"""Align genotype, expression, covariates, and offsets on IID.
+
+        The retained sample order follows the genotype dataset after applying the
+        optional sample filter. Only samples present in every input are retained.
+        Covariates are converted to a JAX array, and `min_maf` becomes part of the
+        lazy global variant filter.
+
+        **Arguments:**
+
+        - `genotype`: Open `genoio` dataset.
+        - `expression`: Expression data with sample IDs in its `pheno` and `libsize`
+          frames.
+        - `covar`: Polars frame containing `iid` and numeric covariate columns.
+        - `offset`: Optional Polars frame containing `iid` and one offset column.
+        - `keep_samples`: Optional sample IDs to retain from the genotype source.
+        - `drop_samples`: Optional sample IDs to remove from the genotype source.
+        - `read_options`: Genotype read options. Defaults to `GenotypeReadOptions()`.
+        - `min_maf`: Optional minimum minor allele frequency.
+
+        **Returns:**
+
+        A `ReadyDataState` whose inputs share the same samples and order.
+
+        **Raises:**
+
+        - `ValueError`: If keep and drop filters are both supplied, an input contains
+          duplicate IIDs, or genotype sample metadata lack `iid`.
+        - `AssertionError`: If `offset` does not have exactly two columns after
+          alignment.
+        """
         genotype_samples = _sample_frame(filter_sample_ids(genotype.samples(), keep=keep_samples, drop=drop_samples))
         dfs = [genotype_samples, expression.pheno, expression.libsize, covar]
         if offset is not None:
