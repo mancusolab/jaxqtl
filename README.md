@@ -8,6 +8,8 @@ jaxQTL is a JAX-based command-line tool and Python library for cell-type-specifi
 single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models and also supports Gaussian
 molecular phenotypes.
 
+>   Zhang, Z., Kim, A., Suboc, N., Mancuso, N., and Gazal, S. (2025). Efficient count-based models improve power and robustness for large-scale single-cell eQTL mapping. medRxiv (https://www.medrxiv.org/content/10.1101/2025.01.18.25320755v2)
+
 [Read the documentation](https://mancusolab.github.io/jaxqtl/)
 
 ## Installation
