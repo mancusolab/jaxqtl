@@ -135,8 +135,9 @@ class _SimpleInit(_AbstractInit):
         step_size: float = 1e-2,
     ):
         y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
         init_val = self.family.init_eta(y)
-        return init_val, jnp.array(1.0)
+        return init_val - offset, jnp.array(1.0)
 
 
 class AbstractLinearModel(eqx.Module):
