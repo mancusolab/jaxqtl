@@ -9,6 +9,9 @@ $$
 
 Here, `l_i` is the library size and the value supplied to the model is `log(l_i)`.
 
+Every retained sample must have a positive library size. Omit donor–cell-type combinations with no retained cells or
+zero total abundance before mapping.
+
 !!! warning "Pass log exposure, not raw exposure"
 
     The offset is added to the linear predictor. Passing raw library sizes changes the model and can produce invalid

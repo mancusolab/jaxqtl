@@ -1,7 +1,7 @@
 [project]
 strict = true
 site_name = "jaxQTL"
-site_description = "The documentation for the jaxQTL software library."
+site_description = "Cell-type-specific eQTL mapping from single-cell pseudobulk expression."
 site_url = "https://mancusolab.github.io/jaxqtl"
 
 repo_url = "https://github.com/mancusolab/jaxqtl"
@@ -21,6 +21,7 @@ nav = [
     { "User guide" = [
         { "Getting started" = [
             "guide/installation.md",
+            "guide/single-cell-cis.md",
             "guide/quickstart.md",
         ] },
         { "Concepts" = [

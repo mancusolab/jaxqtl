@@ -17,7 +17,14 @@ adapter. jaxQTL computes allele frequency and minor-allele count from the loaded
 Phenotypes are read from `.bed`, `.bed.gz`, `.parquet`, or `.parquet.gz`. The first four columns are chromosome,
 start, end, and phenotype ID. Remaining columns are sample IDs with phenotype values.
 
-The [phenotype guide](../guide/phenotypes.md) lists accepted metadata aliases.
+For gene expression, use the strand-aware TSS as a one-base, zero-based BED interval: `start = TSS - 1` and
+`end = TSS`, where `TSS` is the one-based genomic position. Chromosome labels must match the genotype source exactly.
+
+For cell-type-specific analysis, provide one phenotype file per cell type. The file contains donor-level pseudobulk
+values; it does not contain a cell-type column.
+
+The [phenotype guide](../guide/phenotypes.md) lists accepted metadata aliases, and the
+[single-cell workflow](../guide/single-cell-cis.md) explains how to prepare the matrix.
 
 ## Covariates
 

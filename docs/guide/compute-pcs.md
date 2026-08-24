@@ -14,6 +14,8 @@ jaxqtl compute-pcs \
 The output contains the original covariates followed by `ExprPC0`, `ExprPC1`, and subsequent requested components.
 Pass this table to `--covar` in a mapping command.
 
+For cell-type-specific analyses, compute expression PCs separately from each cell type's pseudobulk matrix.
+
 !!! note "The seed controls randomized initialization"
 
     Expression PCA uses a probabilistic algorithm. Reusing `--seed` with the same inputs makes initialization

@@ -9,6 +9,9 @@ multiple-testing procedure.
 Combine only files produced with the same model, variant-level test, and gene-level calibration method. Their schemas
 then have the same model- and calibration-specific columns.
 
+Cell type is not an output column. For a cell-type-specific study, add it from the phenotype filename or job metadata
+before concatenating files from different cell types.
+
 ```python
 from pathlib import Path
 
@@ -64,6 +67,9 @@ variant's nominal `pvalue` for this step.
 
 jaxQTL does not impose a particular FDR implementation. Record the method, tested phenotype set, and threshold with
 the final results so the discovery set can be reproduced.
+
+For analyses with multiple cell types, define the testing family before inspecting results. State whether FDR is
+controlled separately within each cell type or jointly across all tested cell types.
 
 See [Output schemas](../reference/outputs.md) for the available columns and
 [Failures and convergence](../reference/diagnostics.md) for skipped and invalid-result behavior.

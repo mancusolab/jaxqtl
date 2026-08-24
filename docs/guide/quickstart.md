@@ -1,6 +1,8 @@
 # Quickstart
 
-This example runs a small cis-eQTL scan over ten genes from the bundled chr22 tutorial data.
+This example runs a small cis-eQTL scan over ten genes from the bundled chr22 tutorial data. The `CD4_NC` phenotype
+file is already a donor-by-gene pseudobulk matrix for one cell type. To prepare this input from cell-level data, start
+with the [single-cell cis-eQTL workflow](single-cell-cis.md).
 
 ## Get the example data
 
@@ -39,6 +41,7 @@ fields.
 
 ## Next steps
 
+- Use the [single-cell cis-eQTL workflow](single-cell-cis.md) to prepare and run your own cell-type-specific data.
 - Use [Cis mapping](cis.md) to choose between permutation calibration and ACAT.
 - Use [Nominal mapping](nominal.md) to retain every association in each cis window.
 - Use [Post-process cis results](postprocessing.md) to filter failures and apply a study-level FDR procedure.

@@ -5,13 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "jaxqtl"
 dynamic = ["version"]
-description = "JAX-based molecular QTL mapping with generalized linear models"
+description = "JAX-based cell-type-specific eQTL mapping with count models"
 readme = "README.md"
 requires-python = ">=3.11,<4"
 license = "MIT"
 keywords = [
     "jax",
+    "eqtl",
     "qtl mapping",
+    "single-cell",
+    "scrna-seq",
+    "statistical genetics",
     "statistics",
     "machine-learning",
 ]

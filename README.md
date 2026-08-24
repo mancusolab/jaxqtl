@@ -4,9 +4,9 @@
 
 # jaxQTL
 
-jaxQTL is a JAX-based command-line tool and Python library for molecular QTL mapping. It supports Gaussian,
-Poisson, and Negative Binomial models; score and Wald tests; saddlepoint tail calibration; gene-level permutation
-or ACAT procedures; and chunked trans scans.
+jaxQTL is a JAX-based command-line tool and Python library for cell-type-specific eQTL mapping from donor-level
+single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models and also supports Gaussian
+molecular phenotypes.
 
 [Read the documentation](https://mancusolab.github.io/jaxqtl/)
 
@@ -39,7 +39,8 @@ jaxqtl cis \
 
 The command writes `tutorial/output/quickstart.cis.score.perm.parquet.gz`.
 
-The documentation covers the [tutorial](https://mancusolab.github.io/jaxqtl/guide/quickstart/),
+The documentation covers the [single-cell cis-eQTL workflow](https://mancusolab.github.io/jaxqtl/guide/single-cell-cis/),
+the [tutorial](https://mancusolab.github.io/jaxqtl/guide/quickstart/),
 [input formats](https://mancusolab.github.io/jaxqtl/reference/inputs/),
 [mapping workflows](https://mancusolab.github.io/jaxqtl/guide/cis/), and
 [output interpretation](https://mancusolab.github.io/jaxqtl/guide/postprocessing/).

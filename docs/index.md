@@ -1,11 +1,11 @@
 # jaxQTL
 
-jaxQTL is a JAX-based command-line tool and Python library for molecular QTL mapping with Gaussian, Poisson, and
-Negative Binomial models. It supports score and Wald tests, saddlepoint tail calibration, gene-level permutation or
-ACAT procedures, and chunked trans scans.
+jaxQTL is a JAX-based command-line tool and Python library for cell-type-specific eQTL mapping from donor-level
+single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models, while also supporting
+Gaussian molecular phenotypes.
 
-[Get started](guide/installation.md){ .md-button .md-button--primary }
-[View the workflows](guide/quickstart.md){ .md-button }
+[Run single-cell cis-eQTL](guide/single-cell-cis.md){ .md-button .md-button--primary }
+[Install jaxQTL](guide/installation.md){ .md-button }
 [Browse the Python API](api/models/glm.md){ .md-button }
 
 ## Install
@@ -17,7 +17,7 @@ jaxqtl --help
 
 ## Run the tutorial
 
-From a repository checkout:
+The bundled example is a donor-by-gene pseudobulk matrix for one cell type. From a repository checkout:
 
 ```bash
 jaxqtl cis \
@@ -32,7 +32,8 @@ jaxqtl cis \
   --out tutorial/output/quickstart
 ```
 
-The [quickstart](guide/quickstart.md) explains the inputs, offset choice, and output. Use the task guides for
+The [single-cell workflow](guide/single-cell-cis.md) explains how to prepare cell-type-specific inputs. The
+[quickstart](guide/quickstart.md) explains the bundled data, offset choice, and output. Use the task guides for
 [cis](guide/cis.md), [nominal](guide/nominal.md), [trans](guide/trans.md), and
 [expression-PC](guide/compute-pcs.md) workflows.
 

@@ -17,7 +17,11 @@
 5. one column per sample IID
 
 Coordinates are passed through to define mapping windows. Use the same chromosome naming and coordinate convention as
-the genotype source.
+the genotype source. For gene expression, encode the strand-aware TSS as a one-base, zero-based BED interval:
+`start = TSS - 1` and `end = TSS`, where `TSS` is the one-based genomic position.
+
+For cell-type-specific analysis, pass one donor-by-gene pseudobulk matrix per cell type. jaxQTL does not split a
+phenotype matrix by cell type. See the [single-cell workflow](../../guide/single-cell-cis.md).
 
 ## Offsets
 

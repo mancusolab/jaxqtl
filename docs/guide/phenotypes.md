@@ -5,8 +5,12 @@ columns contain one sample per column:
 
 ```text
 #Chr  start  end  Geneid  sample_1  sample_2  ...
-22    1000   1200 ENSG... 14        9         ...
+1     29553  29554 ENSG... 14        9         ...
 ```
+
+For gene expression, calculate the strand-aware transcription start site (TSS) and encode it as a one-base,
+zero-based BED interval: `start = TSS - 1` and `end = TSS`, where `TSS` is the one-based genomic position.
+Chromosome labels must match the genotype source.
 
 Accepted aliases are case-insensitive:
 
@@ -22,6 +26,9 @@ Inputs may end in `.bed`, `.bed.gz`, `.parquet`, or `.parquet.gz`.
 For a single-cell count-model analysis, aggregate cells by sum within each donor and annotated cell type. The result
 is one sample-level count for each donor, cell type, and gene. Summation preserves the exposure represented by the
 library-size offset; averaging cells does not.
+
+Write a separate phenotype file for each cell type. jaxQTL does not read a cell-type column or split a matrix by cell
+type. See the [single-cell cis-eQTL workflow](single-cell-cis.md) for the complete preparation and mapping process.
 
 Fractional abundance estimates produced by a quantifier are valid inputs. jaxQTL does not require every observed
 phenotype value to be an integer.
@@ -40,5 +47,10 @@ individuals that are nonzero for too few genes. Values are proportions between 0
 
     `--set-offset-from-libsize` can only use genes present in the phenotype file. If the file was filtered before
     jaxQTL reads it, use a precomputed offset from the unfiltered count matrix.
+
+!!! warning "Every retained donor needs positive total abundance"
+
+    Omit donor–cell-type combinations with no retained cells or zero total abundance. Their log-library-size offset
+    is not finite.
 
 See [Offsets](offsets.md) for the count-model exposure contract.
