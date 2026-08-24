@@ -1,9 +1,4 @@
-# Utilities
+# Utilities moved
 
-This section collects small utilities used throughout `jaxqtl`, such as:
-
-- loading and validating user-provided covariate/offset files
-- aligning multiple input tables on shared sample identifiers
-- convenience helpers for common preprocessing steps
-
-See `API → Data Management` for the concrete functions and classes.
+Preprocessing tasks are documented under [Data preparation](genotypes.md), and public helper functions are listed in
+the [tabular input API](../api/data/other.md).

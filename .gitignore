@@ -49,7 +49,6 @@ build/*
 dist/*
 sdist/*
 site/*
-docs/api/*
 docs/_rst/*
 docs/_build/*
 cover/*

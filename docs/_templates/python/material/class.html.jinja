@@ -10,7 +10,7 @@
       (
       {%- for base in class.resolved_bases -%}
         {%- if base.path.startswith("jaxqtl.") -%}
-          {%- set base_label = "jaxqtl." ~ base.name -%}
+          {%- set base_label = class.path.rsplit(".", 1)[0] ~ "." ~ base.name -%}
           <a href="#{{ base_label }}">{{ base_label }}</a>
         {%- else -%}
           {{ aliases.normalize(base.path) }}

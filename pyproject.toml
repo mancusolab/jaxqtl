@@ -5,7 +5,7 @@ build-backend = "hatchling.build"
 [project]
 name = "jaxqtl"
 dynamic = ["version"]
-description = "Add a short description here!"
+description = "JAX-based molecular QTL mapping with generalized linear models"
 readme = "README.md"
 requires-python = ">=3.11,<4"
 license = "MIT"
@@ -53,7 +53,7 @@ dependencies = [
 jaxqtl = "jaxqtl.cli:run_cli"
 
 [project.urls]
-Documentation = "https://github.com/mancusolab/jaxqtl#readme"
+Documentation = "https://mancusolab.github.io/jaxqtl"
 Issues = "https://github.com/mancusolab/jaxqtl/issues"
 Source = "https://github.com/mancusolab/jaxqtl"
 
