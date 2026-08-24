@@ -1,7 +1,7 @@
 [project]
 strict = true
 site_name = "jaxQTL"
-site_description = "The documentation for the jaxQTL software library."
+site_description = "Cell-type-specific eQTL mapping from single-cell pseudobulk expression."
 site_url = "https://mancusolab.github.io/jaxqtl"
 
 repo_url = "https://github.com/mancusolab/jaxqtl"
@@ -18,44 +18,69 @@ extra_javascript = [
 
 nav = [
     "index.md",
-    { "User Guide" = [
-        "guide/model.md",
-        "guide/cis.md",
-        "guide/trans.md",
-        "guide/util.md",
-        "guide/files.md",
+    { "User guide" = [
+        { "Getting started" = [
+            "guide/installation.md",
+            "guide/single-cell-cis.md",
+            "guide/quickstart.md",
+        ] },
+        { "Concepts" = [
+            "guide/model.md",
+            "guide/tests.md",
+            "guide/offsets.md",
+        ] },
+        { "Data preparation" = [
+            "guide/genotypes.md",
+            "guide/phenotypes.md",
+            "guide/covariates.md",
+        ] },
+        { "Workflows" = [
+            "guide/compute-pcs.md",
+            "guide/cis.md",
+            "guide/nominal.md",
+            "guide/trans.md",
+            "guide/postprocessing.md",
+            "guide/hpc.md",
+        ] },
     ] },
-    { "API" = [
-        { "Statistical Models" = [
+    { "CLI and file reference" = [
+        "reference/cli.md",
+        "reference/inputs.md",
+        "reference/outputs.md",
+        "reference/diagnostics.md",
+    ] },
+    { "Python API reference" = [
+        { "Models and distributions" = [
             "api/models/glm.md",
             "api/models/families.md",
             "api/models/links.md",
         ] },
-        { "Inference" = [
+        { "Inference and solvers" = [
             "api/inference/infer.md",
             "api/inference/solvers.md",
             "api/inference/stderr.md",
         ] },
-        { "Hypothesis Testing" = [
+        { "Hypothesis testing" = [
             "api/hypothesis/variant.md",
             "api/hypothesis/gene.md",
         ] },
-        { "Data Management" = [
+        { "Input/output" = [
             "api/data/geno.md",
             "api/data/pheno.md",
             "api/data/other.md",
         ] },
-        { "molQTL Mapping" = [
+        { "Mapping" = [
             "api/mapping/cis.md",
             "api/mapping/trans.md",
         ] },
     ] },
-    { "Misc" = [
+    { "Project" = [
+        "contributing.md",
+        "cite.md",
         "authors.md",
         "versions.md",
-        "license.md",
         "conduct.md",
-        "cite.md",
+        "license.md",
     ] },
 ]
 
@@ -98,6 +123,8 @@ generic = true
 base_path = "docs"
 
 [project.markdown_extensions.admonition]
+
+[project.markdown_extensions.attr_list]
 
 [project.markdown_extensions.toc]
 permalink = "¤"

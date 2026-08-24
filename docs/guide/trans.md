@@ -1,12 +1,25 @@
-# Trans Mapping
+# Trans mapping
 
-Trans mapping tests variants genome-wide against many phenotypes.
+Trans mapping tests genotype blocks against every retained phenotype. jaxQTL streams blocks from the genotype source
+so the entire variant matrix does not need to reside in memory.
 
-## Chunked execution
+```bash
+jaxqtl trans \
+  --bfile tutorial/input/chr22_N100 \
+  --pheno tutorial/input/CD4_NC.N100.bed.gz \
+  --covar tutorial/input/donor_features.tsv \
+  --model nb \
+  --test score \
+  --set-offset-from-libsize \
+  --out tutorial/output/trans
+```
 
-Trans scans are streamed in genotype chunks to limit memory usage. A typical workflow is:
+The current CLI reads 2,500 variants per block. It writes variant metadata separately from the phenotype-by-variant
+summary statistics so metadata are not repeated for every phenotype.
 
-1. Choose a chunk size (e.g. 5000 variants).
-2. Iterate over chunks and write results incrementally.
+!!! note "Constant phenotypes are excluded"
 
-See `API → molQTL Mapping → Trans Mapping` for the API entrypoints.
+    Phenotypes with zero or NaN variance are removed before the scan. If none remain, jaxQTL writes no result blocks
+    and records a warning.
+
+See [Trans output](../reference/outputs.md#trans-output) for filenames and schemas.

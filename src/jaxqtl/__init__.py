@@ -1,3 +1,5 @@
+"""JAX-based generalized linear models and molecular QTL mapping."""
+
 from importlib.metadata import PackageNotFoundError, version  # pragma: no cover
 
 

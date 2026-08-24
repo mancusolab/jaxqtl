@@ -26,16 +26,28 @@ def map_trans(
 ) -> Iterator[tuple[pl.DataFrame, pl.DataFrame]]:
     r"""Perform trans-eQTL mapping in genotype chunks and stream results.
 
+    Phenotypes with zero or NaN variance are excluded before mapping.
+
     **Arguments:**
+
     - `data`: Genotype/expression/covariate bundle aligned on IID.
     - `test`: Hypothesis test to apply per variant (score or Wald).
     - `chunk_size`: Number of variants per block to stream from genotype storage.
     - `verbose`: Whether to emit progress logging.
     - `log`: Optional logger to use; defaults to module logger.
-    - `seed`: PRNG seed reserved for future stochastic operations.
+    - `seed`: Reserved for future stochastic operations. It does not affect current
+      trans results.
 
     **Returns:**
-    - `Iterator[tuple[pl.DataFrame, pl.DataFrame]]`: `(variant_df, sumstat_df)` pairs per genotype block.
+
+    An iterator of `(variant_df, sumstat_df)` pairs. `variant_df` contains one row
+    per variant in the block. `sumstat_df` contains the phenotype-by-variant
+    association results, ordered by phenotype and then variant.
+
+    **Failure Modes:**
+
+    If no phenotype has nonzero, non-NaN variance, the iterator yields no results and
+    logs a warning.
     """
     if log is None:
         log = get_log()
@@ -126,10 +138,15 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
 
 
 def get_trans_schemas() -> tuple[dict[str, type], dict[str, type]]:
-    """Return expected Polars schema dictionaries for trans mapping outputs.
+    r"""Return column schemas for trans mapping outputs.
 
     **Returns:**
-    - `tuple[dict[str, type], dict[str, type]]`: Variant schema and summary-stat schema.
+
+    A tuple `(variant_schema, sumstat_schema)`. The variant schema contains `chrom`,
+    `snp`, `pos`, `a1`, `a0`, `af`, and `ma_count`. The summary-stat schema contains
+    `phenotype`, `snp`, `beta`, `se`, `pvalue`, `nb_alpha`, and
+    `model_converged`. Non-Negative-Binomial scans omit `nb_alpha` from emitted
+    summary-stat frames.
     """
     var_schema = {
         "chrom": str,

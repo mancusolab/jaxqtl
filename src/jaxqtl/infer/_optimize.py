@@ -18,7 +18,12 @@ from ._solve import AbstractLinearSolve
 class SolveResult(NamedTuple):
     r"""Container for IRLS solver outputs.
 
-    Stores fitted coefficients, dispersion, and basic convergence metadata from [`jaxqtl.infer.irls`][].
+    **Attributes:**
+
+    - `beta`: Fitted coefficient vector with shape `(p,)`.
+    - `num_iters`: Number of solver iterations.
+    - `converged`: Boolean convergence indicator.
+    - `disp`: Fitted family dispersion. [`jaxqtl.infer.lstsq`][] returns 1.
     """
 
     beta: Array
@@ -130,8 +135,11 @@ def lstsq(
 class BetaParams(NamedTuple):
     r"""Container for fitted Beta approximation parameters.
 
-    Stores the fitted Beta shape parameters from [`jaxqtl.infer.infer_beta_params`][] along with a convergence
-    indicator.
+    **Attributes:**
+
+    - `k`: First fitted Beta shape parameter.
+    - `n`: Second fitted Beta shape parameter.
+    - `converged`: Boolean indicator that the parameter iteration met its tolerance.
     """
 
     k: Array

@@ -1,88 +1,43 @@
-[![Documentation-webpage](https://img.shields.io/badge/Docs-Available-brightgreen)](https://mancusolab.github.io/jaxqtl)
-[![Github](https://img.shields.io/github/stars/mancusolab/jaxqtl?style=social)](https://github.com/mancusolab/jaxqtl)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
-[![Project generated with Hatch](https://img.shields.io/badge/%F0%9F%A5%9A-Hatch-4051b5.svg)](
-https://github.com/pypa/hatch
-)
-
 # jaxQTL
-`jaxqtl` is a JAX-based toolkit for molecular QTL (molQTL) mapping. It implements fast generalized linear models (GLMs),
-variant-level tests (Score/Wald with optional SPA correction), and gene-level multiple-testing procedures for cis scans.
 
-  [**Installation**](#installation)
-  | [**Quickstart**](#quickstart)
-  | [**Notes**](#notes)
-  | [**Support**](#support)
+jaxQTL is a JAX-based command-line tool and Python library for cell-type-specific eQTL mapping from donor-level
+single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models, while also supporting
+Gaussian molecular phenotypes.
 
-------------------
+[Run single-cell cis-eQTL](guide/single-cell-cis.md){ .md-button .md-button--primary }
+[Install jaxQTL](guide/installation.md){ .md-button }
+[Browse the Python API](api/models/glm.md){ .md-button }
 
-## Installation
-
-For development installs:
-
-``` bash
-git clone https://github.com/mancusolab/jaxqtl.git
-cd jaxqtl
-uv venv
-source .venv/bin/activate
-uv pip install -e .
-```
-
-## Quickstart
-
-The CLI entrypoint is `jaxqtl`.
+## Install
 
 ```bash
-jaxqtl -h
+pip install jaxqtl
+jaxqtl --help
 ```
 
-### Cis mapping
+## Run the tutorial
 
-Run cis mapping using one of these genotype inputs, plus phenotype and covariate tables:
-
-- `--bfile` (PLINK1 BED/BIM/FAM prefix)
-- `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
-- `--vcf` (indexed VCF/BCF)
-- `--bgen` (BGEN)
-
-`--geno` is deprecated and now raises an error.
+The bundled example is a donor-by-gene pseudobulk matrix for one cell type. From a repository checkout:
 
 ```bash
 jaxqtl cis \
-  --bfile data/genotypes \
-  --pheno data/expression.bed.gz \
-  --covar data/covariates.tsv \
+  --bfile tutorial/input/chr22_N100 \
+  --pheno tutorial/input/CD4_NC.N100.bed.gz \
+  --covar tutorial/input/donor_features.tsv \
+  --gene-list tutorial/input/genelist_10 \
   --model nb \
   --test score \
-  --window 500000 \
-  --out results/jaxqtl
+  --set-offset-from-libsize \
+  --nperm 1000 \
+  --out tutorial/output/quickstart
 ```
 
-### Trans mapping
+The [single-cell workflow](guide/single-cell-cis.md) explains how to prepare cell-type-specific inputs. The
+[quickstart](guide/quickstart.md) explains the bundled data, offset choice, and output. Use the task guides for
+[cis](guide/cis.md), [nominal](guide/nominal.md), [trans](guide/trans.md), and
+[expression-PC](guide/compute-pcs.md) workflows.
 
-Stream trans results in genotype chunks:
+## Support and citation
 
-```bash
-jaxqtl trans \
-  --bfile data/genotypes \
-  --pheno data/expression.bed.gz \
-  --covar data/covariates.tsv \
-  --chunk-size 5000 \
-  --out results/jaxqtl
-```
-
-See the API pages in the left navigation for details about GLMs, families/links, hypothesis tests, and mapping.
-
-## Notes
-
-- `jaxqtl` uses JAX JIT compilation for speed. For large scans, prefer running on CPU/GPU machines with adequate RAM.
-- Offsets can be provided via an explicit file (`--offset`), a covariate (`--offset-name-from-covar`), or computed from
-  library sizes (`--set-offset-from-libsize`) when available.
-
-## Support
-
-Please report bugs or feature requests in the GitHub issue tracker:
-<https://github.com/mancusolab/jaxqtl/issues>
-
-`jaxqtl` is distributed under the terms of the
-[MIT](https://spdx.org/licenses/MIT.html) license.
+Report bugs and feature requests through the [GitHub issue tracker](https://github.com/mancusolab/jaxqtl/issues).
+See [Citation](cite.md) when using jaxQTL in published work.

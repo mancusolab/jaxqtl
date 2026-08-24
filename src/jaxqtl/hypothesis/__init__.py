@@ -1,3 +1,5 @@
+"""Variant-level association tests and gene-level p-value aggregation."""
+
 from ._aggregate import (
     AbstractAggregateTest,
     ACAT,

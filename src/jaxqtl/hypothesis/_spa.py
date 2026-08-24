@@ -144,7 +144,7 @@ class PoissonCGF(CumulantGeneratingFunction[BasicCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.BasicCGFState`][].
+        A `BasicCGFState` containing the fitted Poisson means.
         """
         return BasicCGFState(glm_state.mu)
 
@@ -205,7 +205,7 @@ class NegativeBinomialCGF(CumulantGeneratingFunction[NegBinCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.NegBinCGFState`][].
+        A `NegBinCGFState` containing the fitted means and dispersion.
         """
         return NegBinCGFState(glm_state.mu, 1.0 / glm_state.disp)
 
@@ -286,7 +286,7 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.spa.GaussianCGFState`][].
+        A `GaussianCGFState` containing the fitted means and variance.
         """
         return GaussianCGFState(glm_state.mu, jnp.reciprocal(glm_state.glm_wt))
 
@@ -447,6 +447,11 @@ class SpaTest(AbstractHypothesisTest):
 
     This implementation requires [`jaxqtl.infer.FisherInfoError`][]. Sandwich covariance estimators do not define a
     robust version of the underlying score statistic or its saddlepoint approximation.
+
+    **Attributes:**
+
+    - `cgf`: Cumulant generating function for the fitted response family. The caller
+      must choose a CGF whose distribution matches `model.family`.
 
     **Raises:**
 

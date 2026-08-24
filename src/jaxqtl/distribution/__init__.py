@@ -1,3 +1,5 @@
+"""Probability families, GLM links, and distribution utilities."""
+
 from ._expfam import (
     Binomial,
     ExponentialFamily,

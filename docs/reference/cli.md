@@ -1,0 +1,33 @@
+# Command-line interface
+
+The `jaxqtl` executable provides four subcommands:
+
+| Command | Result |
+| --- | --- |
+| `jaxqtl compute-pcs` | Expression principal components appended to covariates |
+| `jaxqtl cis` | One lead association and adjusted p-value per tested phenotype |
+| `jaxqtl nominal` | Every association within each cis window |
+| `jaxqtl trans` | Chunked phenotype-by-variant associations |
+
+Run `jaxqtl COMMAND --help` for the complete parser-generated option list and defaults.
+
+## Common mapping options
+
+All mapping commands require one genotype source plus `--pheno` and `--covar`.
+
+| Group | Options |
+| --- | --- |
+| Genotypes | `--bfile`, `--pfile`, `--vcf`, `--bgen`, `--dosage` |
+| Covariates | `--covar-name`, `--rm-covar`, `--normalize-covar`, `--one-hot`, `--no-intercept` |
+| Offsets | `--offset`, `--offset-name-from-covar`, `--set-offset-from-libsize` |
+| Model | `--model`, `--test`, `--robust-se`, `--spa` |
+| Filters | `--keep`, `--exclude`, `--min-indiv-expr-pct`, `--min-gene-expr-pct`, `--maf` |
+| Phenotypes | `--gene-list`, `--genes`, `--window` |
+| Calibration | `--acat`, `--nperm` |
+| Solver | `--max-iter`, `--tol`, `--step-size`, `--solver` |
+| Runtime | `--seed`, `--platform`, `--verbose`, `--out` |
+
+Some accepted flags apply only to particular combinations. `--robust-se` requires a Wald test; `--spa` applies to
+score tests; `--acat` and `--nperm` affect only `cis`; and `--window` affects only `cis` and `nominal`.
+
+See the [workflow guides](../guide/quickstart.md) for complete commands with compatible options.

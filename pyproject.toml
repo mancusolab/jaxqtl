@@ -5,13 +5,17 @@ build-backend = "hatchling.build"
 [project]
 name = "jaxqtl"
 dynamic = ["version"]
-description = "Add a short description here!"
+description = "JAX-based cell-type-specific eQTL mapping with count models"
 readme = "README.md"
 requires-python = ">=3.11,<4"
 license = "MIT"
 keywords = [
     "jax",
+    "eqtl",
     "qtl mapping",
+    "single-cell",
+    "scrna-seq",
+    "statistical genetics",
     "statistics",
     "machine-learning",
 ]
@@ -53,7 +57,7 @@ dependencies = [
 jaxqtl = "jaxqtl.cli:run_cli"
 
 [project.urls]
-Documentation = "https://github.com/mancusolab/jaxqtl#readme"
+Documentation = "https://mancusolab.github.io/jaxqtl"
 Issues = "https://github.com/mancusolab/jaxqtl/issues"
 Source = "https://github.com/mancusolab/jaxqtl"
 

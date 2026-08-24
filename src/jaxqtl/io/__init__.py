@@ -1,3 +1,5 @@
+"""Genotype, phenotype, covariate, and offset input helpers."""
+
 # pattern: Imperative Shell
 
 from ._geno_engine import GenotypeReadOptions, load_genotype_dataset

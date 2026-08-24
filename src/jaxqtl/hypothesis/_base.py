@@ -18,7 +18,22 @@ from ..infer import (
 
 
 class TestResult(NamedTuple):
-    r"""Container for per-variant association test results."""
+    r"""Container for per-variant association test results.
+
+    For a genotype matrix with `m` variants, association fields have shape `(m,)`.
+    Convergence and dispersion may be scalars when a score test reuses one null-model
+    fit, or arrays with shape `(m,)` when models are fitted per variant.
+
+    **Attributes:**
+
+    - `beta`: Estimated variant effects.
+    - `se`: Standard errors of the variant effects.
+    - `p`: Two-sided association p-values.
+    - `z`: Score or Wald statistics.
+    - `num_iters`: Model-fitting iteration counts.
+    - `converged`: Model convergence indicators.
+    - `disp`: Fitted family dispersion or scale values.
+    """
 
     beta: Array
     se: Array
@@ -34,6 +49,12 @@ class AbstractHypothesisTest(eqx.Module):
 
     Instances of this class are expected to take covariates, a genotype matrix, and an outcome vector,
     and return test statistics and p-values for each variant.
+
+    **Attributes:**
+
+    - `model`: Linear or generalized linear model used to fit the outcome.
+    - `std_err`: Coefficient covariance estimator used by tests that fit variant
+      effects. Defaults to [`jaxqtl.infer.FisherInfoError`][].
     """
 
     model: AbstractLinearModel
@@ -46,7 +67,7 @@ class AbstractHypothesisTest(eqx.Module):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
-        r"""Alias for [`jaxqtl.hypothesis.AbstractHypothesisTest.test`]."""
+        r"""Alias for [`jaxqtl.hypothesis.AbstractHypothesisTest.test`][]."""
         return self.test(X, G, y, offset)
 
     @abstractmethod

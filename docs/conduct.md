@@ -1,4 +1,4 @@
-# MancusoLab Open Source Community Guidelines
+# MancusoLab open source community guidelines
 
 At MancusoLab, we recognize and celebrate the creativity and collaboration of open
 source contributors and the diversity of skills, experiences, cultures, and

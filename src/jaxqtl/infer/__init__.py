@@ -1,3 +1,5 @@
+"""Linear and generalized linear model fitting and inference."""
+
 from ._glm import (
     AbstractLinearModel,
     GeneralizedLinearModel,
