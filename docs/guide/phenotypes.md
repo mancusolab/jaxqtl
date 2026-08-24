@@ -17,6 +17,20 @@ Accepted aliases are case-insensitive:
 
 Inputs may end in `.bed`, `.bed.gz`, `.parquet`, or `.parquet.gz`.
 
+## Single-cell pseudobulk counts
+
+For a single-cell count-model analysis, aggregate cells by sum within each donor and annotated cell type. The result
+is one sample-level count for each donor, cell type, and gene. Summation preserves the exposure represented by the
+library-size offset; averaging cells does not.
+
+Fractional abundance estimates produced by a quantifier are valid inputs. jaxQTL does not require every observed
+phenotype value to be an integer.
+
+!!! note "Pseudobulking is specific to single-cell count workflows"
+
+    Gaussian analyses and molecular phenotypes that are already measured at the sample level do not require this
+    preprocessing step.
+
 ## Expression filters
 
 `--min-gene-expr-pct` removes genes that are nonzero in too few individuals. `--min-indiv-expr-pct` removes

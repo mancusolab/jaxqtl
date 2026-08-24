@@ -41,4 +41,5 @@ fields.
 
 - Use [Cis mapping](cis.md) to choose between permutation calibration and ACAT.
 - Use [Nominal mapping](nominal.md) to retain every association in each cis window.
+- Use [Post-process cis results](postprocessing.md) to filter failures and apply a study-level FDR procedure.
 - Review [Input formats](../reference/inputs.md) before substituting your own data.

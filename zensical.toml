@@ -38,6 +38,7 @@ nav = [
             "guide/cis.md",
             "guide/nominal.md",
             "guide/trans.md",
+            "guide/postprocessing.md",
             "guide/hpc.md",
         ] },
     ] },
