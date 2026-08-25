@@ -5,12 +5,24 @@ import jax.numpy as jnp
 import jax.random as rdm
 
 from jax import config
+from jax.scipy.special import gammaln, xlogy
 
 from jaxqtl.distribution._expfam import Binomial, Gamma, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
 
 
 config.update("jax_enable_x64", True)
+
+
+def test_poisson_negloglikelihood_accepts_fractional_response():
+    y = jnp.asarray([0.0, 1.5, 3.25])
+    mu = jnp.asarray([1.0, 2.0, 4.0])
+
+    actual = Poisson().negloglikelihood(jnp.empty((y.size, 0)), y, jnp.log(mu), 1.0)
+    expected = jnp.sum(mu - xlogy(y, mu) + gammaln(y + 1.0))
+
+    assert jnp.isfinite(actual)
+    assert float(actual) == pytest.approx(float(expected))
 
 
 @pytest.mark.parametrize(

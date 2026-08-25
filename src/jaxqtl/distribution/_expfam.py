@@ -15,7 +15,7 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 
 from jax import lax
-from jax.scipy.special import gammaln
+from jax.scipy.special import gammaln, xlogy
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ._links import (
@@ -475,7 +475,11 @@ class Poisson(ExponentialFamily):
     ) -> Array:
         y = jnp.asarray(y)
         eta = jnp.asarray(eta)
-        logprob = jnp.sum(jaxstats.poisson.logpmf(y, self.glink.inverse(eta)))
+        mu = self.glink.inverse(eta)
+        # Fractional abundance estimates are valid inputs, so do not apply the integer-support check in JAX's PMF.
+        logprob = xlogy(y, mu) - gammaln(y + 1.0) - mu
+        logprob = jnp.where(y < 0.0, -jnp.inf, logprob)
+        logprob = jnp.sum(logprob)
         return -logprob
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
