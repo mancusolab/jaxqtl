@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from logging import Logger
 from typing import Any, Literal
 
@@ -31,6 +33,8 @@ def map_cis(
     verbose: bool = True,
     log: Logger | None = None,
     seed: int = 123,
+    *,
+    tss_centered: bool = False,
 ):
     r"""Yield cis or nominal eQTL mapping results in bounded DataFrame chunks.
 
@@ -41,10 +45,12 @@ def map_cis(
     - `gene_test`: Gene-level p-value aggregation for cis mode. It is ignored in
       nominal mode.
     - `mode`: `"cis"` (per-gene lead SNP with multiple testing adjustment) or `"nominal"` (all variant stats).
-    - `window`: Cis window size in base pairs on each side of a gene TSS/stop.
+    - `window`: Cis window size in base pairs.
     - `verbose`: Whether to emit progress logging.
     - `log`: Optional logger to use; defaults to module logger.
     - `seed`: PRNG seed for permutation and tie-breaking.
+    - `tss_centered`: Center the window on the TSS when true. Otherwise, extend
+      the window upstream of the TSS and downstream of the TES.
 
     **Returns:**
 
@@ -75,7 +81,8 @@ def map_cis(
     pending = []
     pending_rows = 0
     yielded = False
-    for i, cis_data in enumerate(data.iter_cis(window)):
+    cis_iterator = data.iter_cis(window, tss_centered=True) if tss_centered else data.iter_cis(window)
+    for i, cis_data in enumerate(cis_iterator):
         gene_name = cis_data.gene_name
         chrom = cis_data.chrom
         lstart = cis_data.start

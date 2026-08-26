@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 import pytest
 
 import jax
@@ -43,6 +45,44 @@ def test_link_roundtrip_inverse(link, mu):
     assert jnp.all(jnp.isfinite(eta))
     assert jnp.all(jnp.isfinite(mu_back))
     assert jnp.allclose(mu_back, mu, rtol=1e-6, atol=1e-6)
+
+
+@pytest.mark.parametrize(
+    ("link", "eta"),
+    [
+        (IdentityLink(), jnp.linspace(0.1, 2.0, 21)),
+        (InverseLink(), jnp.linspace(0.1, 2.0, 21)),
+        (LogitLink(), jnp.linspace(-2.0, 2.0, 21)),
+        (PowerLink(0.5), jnp.linspace(0.1, 2.0, 21)),
+        (NBLink(0.3), jnp.linspace(-2.0, -0.1, 21)),
+    ],
+)
+def test_link_log_inverse_matches_log_of_inverse(link, eta):
+    expected = jnp.log(link.inverse(eta))
+
+    actual = link.log_inverse(eta)
+
+    assert jnp.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_log_link_log_inverse_is_stable_for_extreme_predictors():
+    eta = jnp.asarray([-1000.0, 1000.0])
+
+    actual = jax.jit(LogLink().log_inverse)(eta)
+    gradient = jax.grad(lambda value: LogLink().log_inverse(value))(1000.0)
+
+    assert jnp.all(jnp.isfinite(actual))
+    assert jnp.array_equal(actual, eta)
+    assert gradient == pytest.approx(1.0)
+
+
+def test_negative_binomial_negloglikelihood_is_finite_for_extreme_log_predictors():
+    y = jnp.asarray([0.0, 2.0])
+    eta = jnp.asarray([-1000.0, 1000.0])
+
+    actual = NegativeBinomial().negloglikelihood(jnp.empty((y.size, 0)), y, eta, 0.5)
+
+    assert jnp.isfinite(actual)
 
 
 @pytest.mark.parametrize(

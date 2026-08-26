@@ -19,15 +19,19 @@ All mapping commands require one genotype source plus `--pheno` and `--covar`.
 | --- | --- |
 | Genotypes | `--bfile`, `--pfile`, `--vcf`, `--bgen`, `--dosage` |
 | Covariates | `--covar-name`, `--rm-covar`, `--normalize-covar`, `--one-hot`, `--no-intercept` |
-| Offsets | `--offset`, `--offset-name-from-covar`, `--set-offset-from-libsize` |
-| Model | `--model`, `--test`, `--robust-se`, `--spa` |
-| Filters | `--keep`, `--exclude`, `--min-indiv-expr-pct`, `--min-gene-expr-pct`, `--maf` |
-| Phenotypes | `--gene-list`, `--genes`, `--window` |
-| Calibration | `--acat`, `--nperm` |
+| Library-size adjustment (offsets) | `--offset`, `--offset-name-from-covar`, `--set-offset-from-libsize` |
+| Model and variant testing | `--model`, `--test`, `--robust-se`, `--spa` |
+| Gene-level testing | `--acat`, `--nperm` |
+| Filters | `--keep`, `--exclude`, `--min-indiv-expr-pct`, `--min-gene-expr-pct`, `--maf`, `--chr` |
+| Phenotypes | `--gene-list`, `--genes`, `--window`, `--tss-centered` |
 | Solver | `--max-iter`, `--tol`, `--step-size`, `--solver` |
 | Runtime | `--seed`, `--platform`, `--verbose`, `--out` |
 
 Some accepted flags apply only to particular combinations. `--robust-se` requires a Wald test; `--spa` applies to
-score tests; `--acat` and `--nperm` affect only `cis`; and `--window` affects only `cis` and `nominal`.
+score tests; `--acat` and `--nperm` affect only `cis`; and `--window` and `--tss-centered` affect only `cis` and
+`nominal`.
+
+Mapping automatically retains expression phenotypes on chromosome labels shared with the genotype input. `--chr`
+further restricts both phenotypes and genotype variants to one exact label, which must occur in both inputs.
 
 See the [workflow guides](../guide/quickstart.md) for complete commands with compatible options.

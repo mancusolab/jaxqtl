@@ -9,6 +9,8 @@ import polars as pl
 import pyarrow as pa
 import pyarrow.parquet as pq
 
+from rich_argparse import ArgumentDefaultsRichHelpFormatter
+
 import jax
 
 from .distribution import Gaussian, NegativeBinomial, Poisson
@@ -44,6 +46,29 @@ from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState
 
 
+class _HelpFormatter(ArgumentDefaultsRichHelpFormatter):
+    """Render readable CLI help without treating help text as Rich markup."""
+
+    styles = {
+        "argparse.args": "#578fa4",
+        "argparse.groups": "#ff8700",
+        "argparse.help": "#b9bcba",
+        "argparse.metavar": "#00af87",
+        "argparse.prog": "#808080",
+        "argparse.syntax": "bold #b9bcba",
+        "argparse.text": "#b9bcba",
+        "argparse.default": "italic #b9bcba",
+        "argparse.deprecated": "bold red",
+    }
+    highlights = [*ArgumentDefaultsRichHelpFormatter.highlights, r"(?P<deprecated>Deprecated:)"]
+    # Preserve the capitalization chosen for jaxQTL's argument-group names.
+    group_name_formatter = str
+    # Prevent ordinary square brackets in descriptions/help strings from
+    # accidentally being interpreted as Rich markup.
+    text_markup = False
+    help_markup = False
+
+
 class _SplitAction(ap.Action):
     """Parse comma or space delimited command args into a list.
     Useful for pheno/pheno-col-num covar/covar-col-num.
@@ -75,16 +100,26 @@ class _SplitAction(ap.Action):
 
 
 def _create_common_subp(subp, name, help):
-    common_p = subp.add_parser(name, help=help)
+    common_p = subp.add_parser(name, help=help, formatter_class=_HelpFormatter)
+
+    genotypes = common_p.add_argument_group("Genotypes")
+    covariates = common_p.add_argument_group("Covariates")
+    offsets = common_p.add_argument_group("Library-size adjustment (offsets)")
+    model_testing = common_p.add_argument_group("Model and variant testing")
+    gene_level_testing = common_p.add_argument_group("Gene-level testing")
+    filters = common_p.add_argument_group("Filters")
+    phenotypes = common_p.add_argument_group("Phenotypes")
+    solver = common_p.add_argument_group("Solver")
+    runtime = common_p.add_argument_group("Runtime")
 
     # geno arguments
-    geno_group = common_p.add_mutually_exclusive_group(required=True)
-    geno_group.add_argument("--geno", help="deprecated; use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
+    geno_group = genotypes.add_mutually_exclusive_group(required=True)
+    geno_group.add_argument("--geno", help="Deprecated: use genoio-native inputs: --bfile, --pfile, --vcf, or --bgen.")
     geno_group.add_argument("--bfile", help="Prefix to PLINK1 BED/BIM/FAM triplets.")
     geno_group.add_argument("--pfile", help="Prefix to PLINK2 PGEN/PVAR/PSAM triplets.")
     geno_group.add_argument("--vcf", help="Path to an indexed VCF/BCF genotype file.")
     geno_group.add_argument("--bgen", help="Path to a BGEN genotype file.")
-    common_p.add_argument(
+    genotypes.add_argument(
         "--dosage",
         action="store_true",
         default=False,
@@ -92,9 +127,9 @@ def _create_common_subp(subp, name, help):
     )
 
     # pheno / covariate arguments
-    common_p.add_argument("--pheno", help="Path to phenotypes", required=True)
-    common_p.add_argument("--covar", help="Path to covariate data", required=True)
-    covar_group = common_p.add_mutually_exclusive_group()
+    phenotypes.add_argument("--pheno", help="Path to phenotypes", required=True)
+    covariates.add_argument("--covar", help="Path to covariate data", required=True)
+    covar_group = covariates.add_mutually_exclusive_group()
     covar_group.add_argument(
         "--covar-name",
         nargs="+",
@@ -107,13 +142,13 @@ def _create_common_subp(subp, name, help):
         action=_SplitAction,
         help="Covariate name(s) to exclude (comma/space delimited). All other covariates are included during analysis",
     )
-    common_p.add_argument(
+    covariates.add_argument(
         "--normalize-covar",
         action="store_true",
         default=False,
         help="Normalize covariates to have zero mean and unit variance.",
     )
-    common_p.add_argument(
+    covariates.add_argument(
         "--one-hot",
         action="store_true",
         default=False,
@@ -122,7 +157,7 @@ def _create_common_subp(subp, name, help):
             " The category corresponding to the first observation will be dropped for co-linearity reasons."
         ),
     )
-    common_p.add_argument(
+    covariates.add_argument(
         "--no-intercept",
         action="store_true",
         default=False,
@@ -133,40 +168,37 @@ def _create_common_subp(subp, name, help):
     )
 
     # offset options. can only select one; otherwse we don't have an offset
-    offset_group = common_p.add_mutually_exclusive_group()
+    offset_group = offsets.add_mutually_exclusive_group()
     offset_group.add_argument(
         "--offset",
-        help=(
-            "Path to offset file in tsv format."
-            "Expects exactly two columns (with header). The first should be iid-like and second the offset name"
-        ),
+        help=("Path to a two-column TSV containing sample IDs and fixed model offsets, typically log library sizes."),
     )
     offset_group.add_argument(
         "--offset-name-from-covar",
-        help="Covariate name to use as fixed offset",
+        help="Use a covariate column as the fixed model offset; its coefficient is not estimated.",
     )
     offset_group.add_argument(
         "--set-offset-from-libsize",
         action="store_true",
         default=False,
-        help="Compute log(library size) on the fly and use as fixed as fixed offset",
+        help="Calculate log library size from phenotype counts and use it as the fixed model offset.",
     )
 
     # statistical test arguments
-    common_p.add_argument("--model", choices=["gaussian", "poisson", "nb"], default="nb", help="eQTL model")
-    common_p.add_argument(
+    model_testing.add_argument("--model", choices=["gaussian", "poisson", "nb"], default="nb", help="eQTL model")
+    model_testing.add_argument(
         "--test",
         choices=["wald", "score"],
         default="score",
         help="Test to perform during scan. We recommend 'score' for cis mapping and 'wald' for nominal mapping",
     )
-    common_p.add_argument(
+    model_testing.add_argument(
         "--robust-se",
         action="store_true",
         default=False,
         help="Compute Huber-White sandwich standard errors for Wald tests. Only valid with '--test wald'",
     )
-    common_p.add_argument(
+    model_testing.add_argument(
         "--spa",
         action="store_true",
         default=False,
@@ -177,7 +209,7 @@ def _create_common_subp(subp, name, help):
     )
 
     # filtering arguments
-    sample_group = common_p.add_mutually_exclusive_group()
+    sample_group = filters.add_mutually_exclusive_group()
     sample_group.add_argument(
         "--keep",
         help="Path to file of iids to analyze. All other iids are discarded during current analysis.",
@@ -187,7 +219,7 @@ def _create_common_subp(subp, name, help):
         help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
     )
 
-    common_p.add_argument(
+    filters.add_argument(
         "--min-indiv-expr-pct",
         type=float,
         default=None,
@@ -196,19 +228,23 @@ def _create_common_subp(subp, name, help):
             "non-zero expression (e.g., '0.1')"
         ),
     )
-    common_p.add_argument(
+    filters.add_argument(
         "--min-gene-expr-pct",
         type=float,
         default=0.0,
         help="Exclude genes expressed in fewer than specified percentage of individuals (e.g., '0.1')",
     )
-    common_p.add_argument(
+    filters.add_argument(
         "--maf",
         type=float,
         default=None,
         help="Exclude variants with minor allele frequency below this threshold.",
     )
-    gene_group = common_p.add_mutually_exclusive_group()
+    filters.add_argument(
+        "--chr",
+        help="Restrict genotype variants and phenotypes to this exact chromosome label.",
+    )
+    gene_group = phenotypes.add_mutually_exclusive_group()
     gene_group.add_argument(
         "--gene-list",
         help="Path to gene list (no header). All other genes will be discarded during analysis",
@@ -229,48 +265,45 @@ def _create_common_subp(subp, name, help):
     """
     # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
 
-    """
-    # functionality not supported yet
-    chrom_group = common_p.add_mutually_exclusive_group()
-    chrom_group.add_argument(
-        "--chr",
-        help="Excludes all variants (and pheno) not on specified chromosome",
+    phenotypes.add_argument(
+        "--window",
+        type=int,
+        default=500_000,
+        help="Cis window size in base pairs.",
     )
-    chrom_group.add_argument(
-        "--autosome",
+    phenotypes.add_argument(
+        "--tss-centered",
         action="store_true",
         default=False,
-        help="Excludes all unplaced and non-autosomal variants",
+        help="Center the cis window on the TSS instead of extending it across the gene body from TSS to TES.",
     )
-    """
-    common_p.add_argument("--window", type=int, default=500_000, help="One sided window size (bps) with respect to TSS")
 
     # inference/runtime arguments
-    common_p.add_argument(
+    gene_level_testing.add_argument(
         "--acat",
         default=False,
         action="store_true",
         help="Perform ACAT for gene-level p-values rather than Beta approximation to permutation testing",
     )
-    common_p.add_argument(
+    gene_level_testing.add_argument(
         "--nperm",
         type=int,
         default=1000,
         help="Number of permutations to perform to bootstrap Beta approximation to permutation testing",
     )
-    common_p.add_argument("--max-iter", type=int, default=1000, help="Maximum number of iterations for GLM inference")
-    common_p.add_argument("--tol", type=float, default=1e-3, help="Tolerance for termination during GLM inference")
-    common_p.add_argument("--step-size", type=float, default=1.0, help="Initial step-size during GLM inference")
+    solver.add_argument("--max-iter", type=int, default=1000, help="Maximum number of iterations for GLM inference")
+    solver.add_argument("--tol", type=float, default=1e-3, help="Tolerance for termination during GLM inference")
+    solver.add_argument("--step-size", type=float, default=1.0, help="Initial step-size during GLM inference")
 
-    common_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization")
-    common_p.add_argument(
+    runtime.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization")
+    solver.add_argument(
         "--solver",
         choices=["cholesky", "cg", "qr"],
         default="cholesky",
         help="The linear solver to use during model fitting",
     )
 
-    common_p.add_argument(
+    runtime.add_argument(
         "-p",
         "--platform",
         type=str,
@@ -278,13 +311,13 @@ def _create_common_subp(subp, name, help):
         default="cpu",
         help="Machine platform: cpu, gpu or tpu",
     )
-    common_p.add_argument(
+    runtime.add_argument(
         "--verbose",
         action="store_true",
         default=False,
         help="Verbose for logger",
     )
-    common_p.add_argument("--out", "-o", type=str, default="jaxqtl", help="out file prefix")
+    runtime.add_argument("--out", "-o", type=str, default="jaxqtl", help="out file prefix")
     return common_p
 
 
@@ -340,6 +373,7 @@ def _cis_scan(args, log):
             gene_test=perm_test,
             mode="cis",
             window=args.window,
+            tss_centered=args.tss_centered,
             verbose=args.verbose,
             log=log,
             seed=args.seed,
@@ -391,6 +425,7 @@ def _nominal_scan(args, log):
             gene_test=perm_test,
             mode="nominal",
             window=args.window,
+            tss_centered=args.tss_centered,
             verbose=args.verbose,
             log=log,
             seed=args.seed,
@@ -455,28 +490,36 @@ def _unique_chromosome_labels(chromosomes: pl.Series) -> set[str]:
     return set(chromosomes.unique().cast(pl.Utf8).to_list())
 
 
-def _validate_chromosome_labels(expr_data, geno_data) -> None:
-    """Reject phenotype chromosome labels that are absent from genotype metadata."""
+def _validate_chromosome_labels(expr_data, geno_data, chromosome: str | None = None) -> set[str]:
+    """Return chromosome labels eligible for analysis after validating exact matches."""
     phenotype_chromosomes = _unique_chromosome_labels(expr_data.pheno_meta.get_column("chrom"))
     genotype_chromosomes = _unique_chromosome_labels(geno_data.variants().get_column("chrom"))
-    phenotype_only = sorted(phenotype_chromosomes - genotype_chromosomes)
-    if not phenotype_only:
-        return
-
     phenotype_labels = sorted(phenotype_chromosomes)
     genotype_labels = sorted(genotype_chromosomes)
-    if phenotype_chromosomes.isdisjoint(genotype_chromosomes):
-        raise ValueError(
-            "No chromosome labels overlap between phenotype and genotype data. "
-            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}. "
-            "A chromosome naming mismatch (for example, 'Chr1' versus '1') may cause all genes to be skipped."
-        )
-    else:
-        raise ValueError(
-            "Phenotype chromosome labels absent from genotype data: "
-            f"{phenotype_only}. Genes on these chromosomes will be skipped. "
-            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}."
-        )
+
+    if chromosome is not None:
+        missing_sources = []
+        if chromosome not in phenotype_chromosomes:
+            missing_sources.append("phenotype")
+        if chromosome not in genotype_chromosomes:
+            missing_sources.append("genotype")
+        if missing_sources:
+            sources = " and ".join(missing_sources)
+            raise ValueError(
+                f"Requested chromosome {chromosome!r} is absent from {sources} data. "
+                f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}."
+            )
+        return {chromosome}
+
+    overlap = phenotype_chromosomes & genotype_chromosomes
+    if overlap:
+        return overlap
+
+    raise ValueError(
+        "No chromosome labels overlap between phenotype and genotype data. "
+        f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}. "
+        "A chromosome naming mismatch (for example, 'Chr1' versus '1') may cause all genes to be skipped."
+    )
 
 
 def _common_setup(args, log):
@@ -591,11 +634,12 @@ def _common_setup(args, log):
     expr_data = ExpressionData.from_bedfile(
         args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
     )
+    chromosome = getattr(args, "chr", None)
+    analysis_chromosomes = _validate_chromosome_labels(expr_data, geno_data, chromosome=chromosome)
+    expr_data = expr_data.filter_genes_by_chromosomes(analysis_chromosomes)
     expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
     if args.min_indiv_expr_pct:
         expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
-
-    _validate_chromosome_labels(expr_data, geno_data)
 
     covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
@@ -642,6 +686,7 @@ def _common_setup(args, log):
         drop_samples=inds_to_exclude,
         read_options=GenotypeReadOptions(dosage="dosage" if getattr(args, "dosage", False) else "hardcall"),
         min_maf=args.maf,
+        chromosome=chromosome,
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 
@@ -671,7 +716,7 @@ def main(args):
     propagate to the caller.
     """
     argp = ap.ArgumentParser(
-        formatter_class=ap.ArgumentDefaultsHelpFormatter,
+        formatter_class=_HelpFormatter,
     )
     subp = argp.add_subparsers(dest="cmd", required=True, help="Subcommands for linear-dag")
 
@@ -699,27 +744,32 @@ def main(args):
             "Compute gene expression principal components."
             " This uses a randomized probabilistic PCA algorithm and will be dependent on `--seed`."
         ),
+        formatter_class=_HelpFormatter,
     )
-    gepcs_p.add_argument("--pheno", help="Path to phenotypes", required=True)
-    gepcs_p.add_argument(
+    inputs = gepcs_p.add_argument_group("Inputs")
+    pca_options = gepcs_p.add_argument_group("PCA options")
+    runtime = gepcs_p.add_argument_group("Runtime and output")
+
+    inputs.add_argument("--pheno", help="Path to phenotypes", required=True)
+    pca_options.add_argument(
         "--num-pcs",
         type=int,
         help="Number of principal components to compute",
     )
-    gepcs_p.add_argument("--covar", help="Path to covariate data", required=True)
-    gepcs_p.add_argument(
+    inputs.add_argument("--covar", help="Path to covariate data", required=True)
+    pca_options.add_argument(
         "--transform",
         choices=["tmm", "log1p"],
         default=None,
         help="Transformation to perform on observed gene expression before computing PCs.",
     )
-    gepcs_p.add_argument(
+    pca_options.add_argument(
         "--min-gene-expr-pct",
         type=float,
         default=0.0,
         help="Keep genes with expression levels above specified value",
     )
-    gepcs_p.add_argument(
+    runtime.add_argument(
         "-p",
         "--platform",
         type=str,
@@ -727,14 +777,14 @@ def main(args):
         default="cpu",
         help="Machine platform: cpu, gpu or tpu",
     )
-    gepcs_p.add_argument(
+    runtime.add_argument(
         "--verbose",
         action="store_true",
         default=False,
         help="Verbose for logger",
     )
-    gepcs_p.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization.")
-    gepcs_p.add_argument(
+    runtime.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization.")
+    runtime.add_argument(
         "--out",
         "-o",
         type=str,

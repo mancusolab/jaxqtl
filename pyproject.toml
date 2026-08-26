@@ -51,6 +51,7 @@ dependencies = [
     "polars",
     "qtl",
     "pyarrow",
+    "rich-argparse>=1.8.0",
 ]
 
 [project.scripts]

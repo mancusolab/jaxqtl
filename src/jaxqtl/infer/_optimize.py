@@ -1,5 +1,7 @@
 # pattern: Functional Core
 
+import math
+
 from typing import NamedTuple
 
 import equinox as eqx
@@ -13,6 +15,9 @@ from jaxtyping import Array, ScalarLike
 
 from ..distribution import ExponentialFamily
 from ._solve import AbstractLinearSolve
+
+
+_MAX_STEP_TRIALS = 25
 
 
 class SolveResult(NamedTuple):
@@ -32,7 +37,6 @@ class SolveResult(NamedTuple):
     disp: Array
 
 
-@eqx.filter_jit
 def irls(
     X: Array,
     y: Array,
@@ -58,46 +62,103 @@ def irls(
     - `solver`: Linear solver implementing [`jaxqtl.infer.AbstractLinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.
     - `tol`: Convergence tolerance on the change in objective value.
-    - `step_size`: Step size applied to the IRLS update.
+    - `step_size`: Initial step size for each IRLS update. Rejected updates are
+      retried with successively halved step sizes.
     - `disp_init`: Initial dispersion estimate.
 
     **Returns:**
 
     A [`jaxqtl.infer.SolveResult`][] containing fitted coefficients, dispersion, and convergence metadata.
     """
+    if not math.isfinite(step_size) or step_size <= 0:
+        raise ValueError("step_size must be finite and greater than 0")
+
+    return _irls(X, y, offset, eta, family, solver, max_iter, tol, step_size, disp_init)
+
+
+@eqx.filter_jit
+def _irls(
+    X: Array,
+    y: Array,
+    offset: Array,
+    eta: Array,
+    family: ExponentialFamily,
+    solver: AbstractLinearSolve,
+    max_iter: int,
+    tol: float,
+    step_size: float,
+    disp_init: ScalarLike,
+) -> SolveResult:
     X = jnp.asarray(X)
     y = jnp.asarray(y)
     offset = jnp.asarray(offset)
     eta = jnp.asarray(eta)
     disp_init = jnp.asarray(disp_init)
-    n, p = X.shape
+    _, p = X.shape
 
     def body_fun(val: tuple):
-        likelihood_o, diff, num_iter, beta_o, eta_o, disp_o = val
+        likelihood_o, diff, num_iter, beta_o, eta_o, disp_o, failed_o = val
 
         mu_k, g_deriv_k, weight = family.calc_weight(eta_o, disp_o)
-        r = eta_o + g_deriv_k * (y - mu_k) * step_size - offset
 
-        beta = solver.wgt_lstsq(X, r, weight)
+        def halving_cond(trial: tuple):
+            trial_step, num_trials, accepted, likelihood, beta, eta, disp = trial
+            return jnp.logical_and(~accepted, num_trials < _MAX_STEP_TRIALS)
 
-        eta_n = X @ beta + offset
+        def halving_body(trial: tuple):
+            trial_step, num_trials, accepted, likelihood, beta, eta, disp = trial
+            r = eta_o + g_deriv_k * (y - mu_k) * trial_step - offset
+            beta_trial = solver.wgt_lstsq(X, r, weight)
+            eta_trial = X @ beta_trial + offset
+            disp_trial = family.update_dispersion(X, y, eta_trial, disp_o, trial_step)
+            likelihood_trial = family.negloglikelihood(X, y, eta_trial, disp_trial)
 
-        alpha_n = family.update_dispersion(X, y, eta_n, disp_o, step_size)
-        likelihood_n = family.negloglikelihood(X, y, eta_n, alpha_n)
+            finite_trial = (
+                jnp.isfinite(likelihood_trial)
+                & jnp.all(jnp.isfinite(beta_trial))
+                & jnp.all(jnp.isfinite(eta_trial))
+                & jnp.all(jnp.isfinite(disp_trial))
+            )
+            accept_trial = finite_trial & (likelihood_trial <= likelihood_o)
+
+            likelihood = jnp.where(accept_trial, likelihood_trial, likelihood)
+            beta = jnp.where(accept_trial, beta_trial, beta)
+            eta = jnp.where(accept_trial, eta_trial, eta)
+            disp = jnp.where(accept_trial, disp_trial, disp)
+
+            return trial_step / 2.0, num_trials + 1, accept_trial, likelihood, beta, eta, disp
+
+        trial_init = (
+            jnp.asarray(step_size),
+            jnp.asarray(0),
+            jnp.asarray(False),
+            likelihood_o,
+            beta_o,
+            eta_o,
+            disp_o,
+        )
+        _, _, accepted, likelihood_n, beta_n, eta_n, disp_n = lax.while_loop(
+            halving_cond,
+            halving_body,
+            trial_init,
+        )
+
         diff = likelihood_n - likelihood_o
+        failed_n = ~accepted
 
-        return likelihood_n, diff, num_iter + 1, beta, eta_n, alpha_n
+        return likelihood_n, diff, num_iter + 1, beta_n, eta_n, disp_n, failed_n
 
     def cond_fun(val: tuple):
-        likelihood_o, diff, num_iter, beta, eta, disp = val
-        cond_l = jnp.logical_and(jnp.fabs(diff) > tol, num_iter <= max_iter)
-        return cond_l
+        likelihood_o, diff, num_iter, beta, eta, disp, failed = val
+        return (jnp.fabs(diff) > tol) & (num_iter < max_iter) & ~failed
 
-    init_beta = jnp.zeros(p)
-    init_tuple = (10000.0, 10000.0, 0, init_beta, eta + offset, disp_init)
+    init_beta = solver.lstsq(X, eta)
+    init_eta = X @ init_beta + offset
+    init_likelihood = family.negloglikelihood(X, y, init_eta, disp_init)
+    init_tuple = (init_likelihood, jnp.asarray(jnp.inf), 0, init_beta, init_eta, disp_init, jnp.asarray(False))
 
-    likelihood_n, diff, num_iters, beta, eta, disp = lax.while_loop(cond_fun, body_fun, init_tuple)
-    converged = jnp.logical_and(jnp.fabs(diff) < tol, num_iters <= max_iter)
+    likelihood_n, diff, num_iters, beta, eta, disp, failed = lax.while_loop(cond_fun, body_fun, init_tuple)
+    converged = ~failed & jnp.isfinite(likelihood_n) & (jnp.fabs(diff) < tol) & (num_iters <= max_iter)
 
     return SolveResult(beta, num_iters, converged, disp)
 

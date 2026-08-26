@@ -1,3 +1,6 @@
+# pattern: Imperative Shell
+
+from collections.abc import Collection
 from dataclasses import dataclass
 from functools import partial
 from os import PathLike
@@ -57,6 +60,27 @@ class ExpressionData:
         phenotypes. The `iid` column is excluded.
         """
         return self.pheno.select(pl.all().exclude("iid")).to_jax().astype(float)  # ug i dont like this casting
+
+    def filter_genes_by_chromosomes(self, chromosomes: Collection[str]) -> "ExpressionData":
+        r"""Keep phenotypes whose chromosome label is in `chromosomes`.
+
+        Expression columns and phenotype metadata remain in phenotype-metadata
+        order. Library sizes are preserved from the original expression input.
+
+        **Arguments:**
+
+        - `chromosomes`: Exact chromosome labels to retain.
+
+        **Returns:**
+
+        A new `ExpressionData` containing only phenotypes on the requested
+        chromosomes.
+        """
+        chromosome_labels = list(chromosomes)
+        meta = self.pheno_meta.filter(pl.col("chrom").cast(pl.Utf8).is_in(chromosome_labels))
+        names = meta.get_column("phenotype_id").to_list()
+        pheno = self.pheno.select(["iid", *names])
+        return ExpressionData(pheno=pheno, pheno_meta=meta, libsize=self.libsize)
 
     @property
     def offset_from_libsize(self) -> pl.DataFrame:

@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 from typing import ClassVar, TYPE_CHECKING
 
@@ -538,7 +540,7 @@ class NegativeBinomial(ExponentialFamily):
         disp = jnp.asarray(disp)
         log_r = -jnp.log(disp)
         r = jnp.exp(log_r)
-        log_mu = jnp.log(self.glink.inverse(eta))
+        log_mu = self.glink.log_inverse(eta)
         log_mu_plus_r = jnp.logaddexp(log_mu, log_r)
 
         log_p = log_mu - log_mu_plus_r

@@ -3,6 +3,9 @@
 Cis mapping tests variants within a window around each molecular phenotype and reports one selected association per
 phenotype. The output includes the lead variant, its nominal association, and a gene-level adjusted p-value.
 
+The `--window` value defaults to 500,000 bases. By default, the interval extends from `TSS - window` through
+`TES + window`. Add `--tss-centered` to instead use `TSS - window` through `TSS + window`.
+
 ## Permutation calibration
 
 The default procedure permutes the phenotype, records an extreme statistic across the cis window, and fits a Beta

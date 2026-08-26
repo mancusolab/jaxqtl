@@ -127,6 +127,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         geno=None,
         vcf=None,
         dosage=False,
+        chr=None,
         maf=None,
         pheno="tutorial/input/CD4_NC.N100.bed.gz",
         covar="tutorial/input/donor_features.tsv",
@@ -148,6 +149,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         min_gene_expr_pct=0.0,
         gene_list="tutorial/input/genelist_5",
         genes=None,
+        tss_centered=False,
         window=500_000,
         acat=False,
         nperm=1000,
@@ -227,14 +229,30 @@ def test_chromosome_mismatch_error_identifies_zero_overlap() -> None:
     assert "1" in str(exc_info.value)
 
 
-def test_chromosome_mismatch_error_identifies_partial_overlap() -> None:
-    expression = SimpleNamespace(pheno_meta=pl.DataFrame({"chrom": ["1", "Chr2"]}))
-    genotype = _ChromosomeMetadataDataset(["1", "2"])
+def test_chromosome_validation_accepts_genotype_chromosome_subset() -> None:
+    expression = SimpleNamespace(pheno_meta=pl.DataFrame({"chrom": ["chr1", "chr22"]}))
+    genotype = _ChromosomeMetadataDataset(["chr22"])
 
-    with pytest.raises(ValueError, match="Phenotype chromosome labels absent from genotype data") as exc_info:
-        cli._validate_chromosome_labels(expression, genotype)
+    overlap = cli._validate_chromosome_labels(expression, genotype)
 
-    assert "Chr2" in str(exc_info.value)
+    assert overlap == {"chr22"}
+
+
+@pytest.mark.parametrize(
+    ("phenotype_chromosomes", "genotype_chromosomes", "missing_source"),
+    [
+        (["chr1"], ["chr1", "chr22"], "phenotype"),
+        (["chr1", "chr22"], ["chr1"], "genotype"),
+    ],
+)
+def test_chromosome_validation_rejects_requested_chromosome_missing_from_input(
+    phenotype_chromosomes: list[str], genotype_chromosomes: list[str], missing_source: str
+) -> None:
+    expression = SimpleNamespace(pheno_meta=pl.DataFrame({"chrom": phenotype_chromosomes}))
+    genotype = _ChromosomeMetadataDataset(genotype_chromosomes)
+
+    with pytest.raises(ValueError, match=rf"Requested chromosome 'chr22'.*{missing_source}"):
+        cli._validate_chromosome_labels(expression, genotype, chromosome="chr22")
 
 
 def test_cli_help_marks_legacy_genotype_inputs() -> None:
@@ -247,7 +265,10 @@ def test_cli_help_marks_legacy_genotype_inputs() -> None:
     assert "Prefix to PLINK2 PGEN/PVAR/PSAM triplets." in help_text
     assert "Path to an indexed VCF/BCF genotype file." in help_text
     assert "Path to a BGEN genotype file." in help_text
+    assert "Deprecated:" in help_text
     assert "--maf" in help_text
+    assert "--chr" in help_text
+    assert "--tss-centered" in help_text
 
 
 def test_common_setup_uses_genoio_minimum_maf_filter() -> None:
@@ -263,6 +284,33 @@ def test_common_setup_uses_genoio_minimum_maf_filter() -> None:
     }
 
 
+def test_common_setup_filters_expression_to_genotype_chromosome_overlap() -> None:
+    args = _common_setup_args("trans")
+    args.gene_list = None
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert ready_data.expression.pheno_meta.get_column("chrom").unique().to_list() == ["22"]
+    assert ready_data.expression.pheno.columns == [
+        "iid",
+        *ready_data.expression.pheno_meta.get_column("phenotype_id").to_list(),
+    ]
+
+
+def test_common_setup_applies_requested_chromosome_to_genotype_filter() -> None:
+    args = _common_setup_args("trans")
+    args.chr = "22"
+
+    ready_data, _, _, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert ready_data.expression.pheno_meta.get_column("chrom").unique().to_list() == ["22"]
+    assert ready_data.variant_filter.to_ir() == {
+        "op": "and",
+        "left": genoio.polymorphic().to_ir(),
+        "right": genoio.chrom("22").to_ir(),
+    }
+
+
 def test_cli_help_exposes_dosage_genotype_mode() -> None:
     stdout = StringIO()
     with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
@@ -272,6 +320,80 @@ def test_cli_help_exposes_dosage_genotype_mode() -> None:
     help_text = " ".join(stdout.getvalue().split())
     assert "--dosage" in help_text
     assert "Read genotype dosages instead of hard calls." in help_text
+
+
+def test_mapping_help_organizes_options_and_displays_defaults() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["cis", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = stdout.getvalue()
+    headings = [
+        "Genotypes:",
+        "Covariates:",
+        "Library-size adjustment (offsets):",
+        "Model and variant testing:",
+        "Gene-level testing:",
+        "Filters:",
+        "Phenotypes:",
+        "Solver:",
+        "Runtime:",
+    ]
+    heading_positions = [help_text.index(heading) for heading in headings]
+    assert heading_positions == sorted(heading_positions)
+    sections = {
+        heading: help_text[start:end]
+        for heading, start, end in zip(headings, heading_positions, [*heading_positions[1:], len(help_text)])
+    }
+    assert "--bfile" in sections["Genotypes:"]
+    assert "--covar-name" in sections["Covariates:"]
+    assert "--set-offset-from-libsize" in sections["Library-size adjustment (offsets):"]
+    assert "--window" in sections["Phenotypes:"]
+    assert "(default: 500000)" in help_text
+
+
+def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["compute-pcs", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = stdout.getvalue()
+    headings = ["Inputs:", "PCA options:", "Runtime and output:"]
+    heading_positions = [help_text.index(heading) for heading in headings]
+    assert heading_positions == sorted(heading_positions)
+    sections = {
+        heading: help_text[start:end]
+        for heading, start, end in zip(headings, heading_positions, [*heading_positions[1:], len(help_text)])
+    }
+    assert "--pheno" in sections["Inputs:"]
+    assert "--num-pcs" in sections["PCA options:"]
+    assert "--platform" in sections["Runtime and output:"]
+    assert "(default: cpu)" in help_text
+
+
+def test_help_formatter_preserves_literal_square_brackets() -> None:
+    parser = cli.ap.ArgumentParser(formatter_class=cli._HelpFormatter)
+    parser.add_argument("--example", help="Use values in [square brackets].")
+
+    help_text = parser.format_help()
+
+    assert "[square brackets]" in help_text
+    assert cli._HelpFormatter.text_markup is False
+    assert cli._HelpFormatter.help_markup is False
+    assert cli._HelpFormatter.styles == {
+        "argparse.args": "#578fa4",
+        "argparse.groups": "#ff8700",
+        "argparse.help": "#b9bcba",
+        "argparse.metavar": "#00af87",
+        "argparse.prog": "#808080",
+        "argparse.syntax": "bold #b9bcba",
+        "argparse.text": "#b9bcba",
+        "argparse.default": "italic #b9bcba",
+        "argparse.deprecated": "bold red",
+    }
+    assert r"(?P<deprecated>Deprecated:)" in cli._HelpFormatter.highlights
 
 
 @pytest.mark.parametrize(
@@ -410,6 +532,34 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
     assert [chunk.height for chunk in chunks] == [2, 1]
     assert chunks[0]["phenotype_id"].to_list() == ["gene0", "gene1"]
     assert chunks[1]["phenotype_id"].to_list() == ["gene2"]
+
+
+def test_map_cis_forwards_tss_centered_window_mode() -> None:
+    class FakeData:
+        requested_window = None
+
+        def iter_cis(self, window, *, tss_centered=False):
+            self.requested_window = (window, tss_centered)
+            return iter(())
+
+    data = FakeData()
+    test = SimpleNamespace(model=SimpleNamespace(family=object()))
+
+    map_cis = getattr(cis_map, "map_cis")
+    list(
+        map_cis(
+            data,
+            test,
+            None,
+            mode="nominal",
+            window=123,
+            tss_centered=True,
+            verbose=False,
+            log=_LoggerStub(),
+        )
+    )
+
+    assert data.requested_window == (123, True)
 
 
 def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None:
@@ -579,7 +729,7 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
 
 
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    args = SimpleNamespace(window=500_000, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
+    args = SimpleNamespace(window=500_000, tss_centered=False, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
     test = SimpleNamespace(name="score")
     perm_test = SimpleNamespace(name="acat")
     dat = SimpleNamespace(num_genes=2)
@@ -626,7 +776,7 @@ def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_pa
 
 
 def test_nominal_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
-    args = SimpleNamespace(window=500_000, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
+    args = SimpleNamespace(window=500_000, tss_centered=False, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
     test = SimpleNamespace(name="score")
     dat = SimpleNamespace(num_genes=2)
 
