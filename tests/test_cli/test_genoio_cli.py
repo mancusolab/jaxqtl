@@ -265,6 +265,7 @@ def test_cli_help_marks_legacy_genotype_inputs() -> None:
     assert "Prefix to PLINK2 PGEN/PVAR/PSAM triplets." in help_text
     assert "Path to an indexed VCF/BCF genotype file." in help_text
     assert "Path to a BGEN genotype file." in help_text
+    assert "Deprecated:" in help_text
     assert "--maf" in help_text
     assert "--chr" in help_text
     assert "--tss-centered" in help_text
@@ -319,6 +320,80 @@ def test_cli_help_exposes_dosage_genotype_mode() -> None:
     help_text = " ".join(stdout.getvalue().split())
     assert "--dosage" in help_text
     assert "Read genotype dosages instead of hard calls." in help_text
+
+
+def test_mapping_help_organizes_options_and_displays_defaults() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["cis", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = stdout.getvalue()
+    headings = [
+        "Genotypes:",
+        "Covariates:",
+        "Library-size adjustment (offsets):",
+        "Model and variant testing:",
+        "Gene-level testing:",
+        "Filters:",
+        "Phenotypes:",
+        "Solver:",
+        "Runtime:",
+    ]
+    heading_positions = [help_text.index(heading) for heading in headings]
+    assert heading_positions == sorted(heading_positions)
+    sections = {
+        heading: help_text[start:end]
+        for heading, start, end in zip(headings, heading_positions, [*heading_positions[1:], len(help_text)])
+    }
+    assert "--bfile" in sections["Genotypes:"]
+    assert "--covar-name" in sections["Covariates:"]
+    assert "--set-offset-from-libsize" in sections["Library-size adjustment (offsets):"]
+    assert "--window" in sections["Phenotypes:"]
+    assert "(default: 500000)" in help_text
+
+
+def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
+    stdout = StringIO()
+    with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:
+        cli.main(["compute-pcs", "--help"])
+
+    assert exc_info.value.code == 0
+    help_text = stdout.getvalue()
+    headings = ["Inputs:", "PCA options:", "Runtime and output:"]
+    heading_positions = [help_text.index(heading) for heading in headings]
+    assert heading_positions == sorted(heading_positions)
+    sections = {
+        heading: help_text[start:end]
+        for heading, start, end in zip(headings, heading_positions, [*heading_positions[1:], len(help_text)])
+    }
+    assert "--pheno" in sections["Inputs:"]
+    assert "--num-pcs" in sections["PCA options:"]
+    assert "--platform" in sections["Runtime and output:"]
+    assert "(default: cpu)" in help_text
+
+
+def test_help_formatter_preserves_literal_square_brackets() -> None:
+    parser = cli.ap.ArgumentParser(formatter_class=cli._HelpFormatter)
+    parser.add_argument("--example", help="Use values in [square brackets].")
+
+    help_text = parser.format_help()
+
+    assert "[square brackets]" in help_text
+    assert cli._HelpFormatter.text_markup is False
+    assert cli._HelpFormatter.help_markup is False
+    assert cli._HelpFormatter.styles == {
+        "argparse.args": "#578fa4",
+        "argparse.groups": "#ff8700",
+        "argparse.help": "#b9bcba",
+        "argparse.metavar": "#00af87",
+        "argparse.prog": "#808080",
+        "argparse.syntax": "bold #b9bcba",
+        "argparse.text": "#b9bcba",
+        "argparse.default": "italic #b9bcba",
+        "argparse.deprecated": "bold red",
+    }
+    assert r"(?P<deprecated>Deprecated:)" in cli._HelpFormatter.highlights
 
 
 @pytest.mark.parametrize(

@@ -19,11 +19,11 @@ All mapping commands require one genotype source plus `--pheno` and `--covar`.
 | --- | --- |
 | Genotypes | `--bfile`, `--pfile`, `--vcf`, `--bgen`, `--dosage` |
 | Covariates | `--covar-name`, `--rm-covar`, `--normalize-covar`, `--one-hot`, `--no-intercept` |
-| Offsets | `--offset`, `--offset-name-from-covar`, `--set-offset-from-libsize` |
-| Model | `--model`, `--test`, `--robust-se`, `--spa` |
+| Library-size adjustment (offsets) | `--offset`, `--offset-name-from-covar`, `--set-offset-from-libsize` |
+| Model and variant testing | `--model`, `--test`, `--robust-se`, `--spa` |
+| Gene-level testing | `--acat`, `--nperm` |
 | Filters | `--keep`, `--exclude`, `--min-indiv-expr-pct`, `--min-gene-expr-pct`, `--maf`, `--chr` |
 | Phenotypes | `--gene-list`, `--genes`, `--window`, `--tss-centered` |
-| Calibration | `--acat`, `--nperm` |
 | Solver | `--max-iter`, `--tol`, `--step-size`, `--solver` |
 | Runtime | `--seed`, `--platform`, `--verbose`, `--out` |
 
