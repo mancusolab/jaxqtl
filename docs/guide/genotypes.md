@@ -19,6 +19,10 @@ Each mapping command requires exactly one genotype source:
 Use `--maf FLOAT` to exclude variants below a minimum minor-allele frequency. The filter is applied by the genotype
 reader before cis regions or trans blocks are converted to JAX arrays.
 
+By default, mapping retains expression phenotypes only on exact chromosome labels present in the genotype input. Use
+`--chr LABEL` to restrict both expression phenotypes and genotype variants to one chromosome. Labels are matched
+exactly: for example, `chr22` and `22` are different labels. The requested label must occur in both inputs.
+
 The legacy `--geno` option is rejected. Use one of the four format-specific options above.
 
 See [Input formats](../reference/inputs.md#genotypes) for the required companion files and metadata fields.

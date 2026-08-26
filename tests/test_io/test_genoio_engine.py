@@ -144,6 +144,16 @@ def test_default_variant_filter_applies_minimum_maf() -> None:
     }
 
 
+def test_default_variant_filter_applies_chromosome() -> None:
+    observed = default_variant_filter(chromosome="1")
+
+    assert observed.to_ir() == {
+        "op": "and",
+        "left": genoio.polymorphic().to_ir(),
+        "right": genoio.chrom("1").to_ir(),
+    }
+
+
 def test_normalize_variant_info_preserves_genoio_counted_allele_convention() -> None:
     variants = pl.DataFrame(
         {
@@ -242,9 +252,25 @@ def test_ready_data_state_iter_cis_uses_genoio_regions_with_polymorphic_filter()
     assert len(dataset.consumed_regions) == 1
     region = cast(genoio.FilterExpr, dataset.consumed_regions[0])
     assert region.to_ir()["op"] == "and"
+    assert region.to_ir()["left"] == genoio.region("1:1-20").to_ir()
+    assert cis_data.start == 1
+    assert cis_data.end == 20
     assert read_options["samples"] == ["iid1", "iid2", "iid3"]
     assert read_options["missing"] == "impute"
     assert read_options["return_variants"] is True
+
+
+def test_ready_data_state_iter_cis_centers_window_on_tss() -> None:
+    dataset = _SyntheticGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "cov": [1.0, 2.0, 3.0]})
+    ready = ReadyDataState.from_data(cast(genoio.Dataset, dataset), _expression(), covar)
+
+    cis_data = next(ready.iter_cis(window=5, tss_centered=True))
+
+    region = cast(genoio.FilterExpr, dataset.consumed_regions[0])
+    assert region.to_ir()["left"] == genoio.region("1:1-10").to_ir()
+    assert cis_data.start == 1
+    assert cis_data.end == 10
 
 
 def test_ready_data_state_iter_cis_streams_regions_before_first_yield() -> None:

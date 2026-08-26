@@ -1,15 +1,47 @@
+# pattern: Imperative Shell
+
 from pathlib import Path
 
 import numpy as np
+import polars as pl
 import pytest
 
-from jaxqtl.io._pheno import bed_transform_y
+from jaxqtl.io._pheno import bed_transform_y, ExpressionData
 
 
 def _write_bed(tmp_path: Path, body: str) -> Path:
     path = tmp_path / "phenotypes.bed"
     path.write_text(body)
     return path
+
+
+def test_expression_data_filters_genes_by_chromosome_and_preserves_libsize() -> None:
+    expression = ExpressionData(
+        pheno=pl.DataFrame(
+            {
+                "iid": ["sample1", "sample2"],
+                "gene1": [1.0, 2.0],
+                "gene2": [3.0, 4.0],
+                "gene3": [5.0, 6.0],
+            }
+        ),
+        pheno_meta=pl.DataFrame(
+            {
+                "chrom": ["chr1", "chr2", "chr1"],
+                "start": [10, 20, 30],
+                "end": [11, 21, 31],
+                "phenotype_id": ["gene1", "gene2", "gene3"],
+            }
+        ),
+        libsize=pl.DataFrame({"iid": ["sample1", "sample2"], "libsize": [9.0, 12.0]}),
+    )
+
+    filtered = expression.filter_genes_by_chromosomes({"chr2"})
+
+    assert filtered.pheno.columns == ["iid", "gene2"]
+    assert filtered.pheno_meta.get_column("phenotype_id").to_list() == ["gene2"]
+    assert filtered.pheno_meta.get_column("chrom").to_list() == ["chr2"]
+    assert filtered.libsize.equals(expression.libsize)
 
 
 def test_bed_transform_y_log1p_filters_zero_rows_and_transforms_columns(tmp_path: Path) -> None:

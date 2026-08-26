@@ -18,7 +18,8 @@ jaxqtl nominal \
 
 This writes `tutorial/output/nominal.nominal.wald.parquet.gz`.
 
-The `--window` value is the number of bases added on each side of the phenotype interval and defaults to 500,000.
-Unlike `cis`, nominal mode does not run Beta-permutation calibration or ACAT.
+The `--window` value defaults to 500,000 bases. By default, the interval extends from `TSS - window` through
+`TES + window`. Add `--tss-centered` to instead use `TSS - window` through `TSS + window`. Unlike `cis`, nominal mode
+does not run Beta-permutation calibration or ACAT.
 
 See [Nominal output](../reference/outputs.md#nominal-output) for the output columns.

@@ -26,8 +26,9 @@ The mapping commands accept one of three mutually exclusive offset sources:
 ## When to compute library size
 
 Compute library size before filtering phenotypes. Removing genes first changes the total exposure. The
-`ExpressionData` loader follows this order when phenotype filters are supplied, but it cannot recover genes that were
-removed before the file was written.
+`ExpressionData` loader follows this order when phenotype filters are supplied. Automatic chromosome-overlap filtering
+and `--chr` filtering also preserve library sizes computed from the complete loaded phenotype file. The loader cannot
+recover genes that were removed before the file was written.
 
 Use a precomputed offset when the phenotype input is already restricted to a chromosome, gene list, or expression
 subset.

@@ -1,3 +1,5 @@
+# pattern: Functional Core
+
 from abc import abstractmethod
 
 import equinox as eqx
@@ -41,6 +43,23 @@ class AbstractLink(eqx.Module):
         Mean parameter $\mu$.
         """
         pass
+
+    def log_inverse(self, eta: ArrayLike) -> Array:
+        r"""Compute the logarithm of the inverse link, $\log(g^{-1}(\eta))$.
+
+        Concrete links may override this fallback when a direct expression is
+        more numerically stable than taking the logarithm after inversion.
+
+        **Arguments:**
+
+        - `eta`: Linear predictor $\eta$.
+
+        **Returns:**
+
+        Logarithm of the mean parameter $\mu$.
+        """
+        eta = jnp.asarray(eta)
+        return jnp.log(self.inverse(eta))
 
     @abstractmethod
     def deriv(self, mu: ArrayLike) -> Array:
@@ -348,6 +367,19 @@ class LogLink(AbstractLink):
         """
         eta = jnp.asarray(eta)
         return jnp.exp(eta)
+
+    def log_inverse(self, eta: ArrayLike) -> Array:
+        r"""Compute $\log(g^{-1}(\eta)) = \eta$ without exponentiating.
+
+        **Arguments:**
+
+        - `eta`: Linear predictor $\eta$.
+
+        **Returns:**
+
+        Logarithm of the mean parameter $\mu$.
+        """
+        return jnp.asarray(eta)
 
     def deriv(self, mu: ArrayLike) -> Array:
         r"""Compute $g'(\mu)$ for the log link.

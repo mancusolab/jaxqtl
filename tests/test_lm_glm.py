@@ -91,6 +91,12 @@ def test_linear_model_rejects_nonidentity_link():
         LinearModel(family=Gaussian(glink=LogLink()))
 
 
+@pytest.mark.parametrize("step_size", (0.0, -1.0, float("nan"), float("inf"), float("-inf")))
+def test_generalized_linear_model_rejects_invalid_step_size_at_construction(step_size):
+    with pytest.raises(ValueError, match="step_size must be finite and greater than 0"):
+        GeneralizedLinearModel(step_size=step_size)
+
+
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
 @pytest.mark.parametrize(
     ("link", "sm_link"),
@@ -257,6 +263,37 @@ def test_negative_binomial_fit_with_offset_matches_jit():
         )
     np.testing.assert_array_equal(np.asarray(jitted.num_iters), np.asarray(eager.num_iters))
     np.testing.assert_array_equal(np.asarray(jitted.converged), np.asarray(eager.converged))
+
+
+def test_negative_binomial_fit_halves_rejected_full_steps():
+    rng = np.random.default_rng(1)
+    n, p = 48, 6
+    X = np.column_stack((np.ones(n), rng.normal(size=(n, p - 1))))
+    y = np.zeros(n)
+    expressed = rng.choice(n, size=10, replace=False)
+    y[expressed] = rng.lognormal(mean=3.0, sigma=2.0, size=expressed.size)
+    X = jnp.asarray(X)
+    y = jnp.asarray(y)
+
+    model = GeneralizedLinearModel(
+        family=NegativeBinomial(),
+        max_iter=500,
+        tol=1e-4,
+        step_size=1.0,
+    )
+    eager = model.fit(X, y)
+    jitted = eqx.filter_jit(model.fit)(X, y)
+
+    for state in (eager, jitted):
+        assert bool(np.asarray(state.converged))
+        assert int(np.asarray(state.num_iters)) <= model.max_iter
+        assert np.all(np.isfinite(np.asarray(state.beta)))
+        assert np.all(np.isfinite(np.asarray(state.eta)))
+        assert np.isfinite(np.asarray(state.disp))
+        assert np.asarray(state.disp) > 0.0
+
+    np.testing.assert_allclose(np.asarray(jitted.beta), np.asarray(eager.beta), rtol=1e-5, atol=1e-5)
+    np.testing.assert_allclose(np.asarray(jitted.disp), np.asarray(eager.disp), rtol=1e-5, atol=1e-5)
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))

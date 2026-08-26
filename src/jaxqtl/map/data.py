@@ -134,16 +134,18 @@ class ReadyDataState:
         """Number of phenotypes available after alignment."""
         return self.expression.pheno_meta.height
 
-    def iter_cis(self, window: int) -> Iterator[CisData]:
+    def iter_cis(self, window: int, *, tss_centered: bool = False) -> Iterator[CisData]:
         r"""Yield aligned data for each phenotype's cis window.
 
-        Regions are read lazily from the genotype dataset. Each region spans
-        `window` bases before the feature start through `window` bases after its end,
-        with the lower coordinate clipped to 1.
+        Regions are read lazily from the genotype dataset. By default, each region
+        spans `window` bases before the TSS through `window` bases after the TES.
+        When `tss_centered` is true, both bounds are relative to the TSS. The lower
+        coordinate is clipped to 1.
 
         **Arguments:**
 
-        - `window`: Number of bases to add on each side of each feature.
+        - `window`: Cis window size in base pairs.
+        - `tss_centered`: Center both window bounds on the TSS when true.
 
         **Returns:**
 
@@ -156,7 +158,7 @@ class ReadyDataState:
         def regions() -> Iterator[genoio.FilterExpr]:
             for y, gene_name, chrom, gene_start, gene_end in self.expression:
                 start = max(1, gene_start - window)
-                end = gene_end + window
+                end = (gene_start if tss_centered else gene_end) + window
                 gene_window_queue.append((y, gene_name, chrom, gene_start, gene_end, start, end))
                 yield region_filter(str(chrom), start, end, self.variant_filter)
 
@@ -209,13 +211,15 @@ class ReadyDataState:
         drop_samples: list[str] | None = None,
         read_options: GenotypeReadOptions | None = None,
         min_maf: float | None = None,
+        chromosome: str | None = None,
     ) -> "ReadyDataState":
         r"""Align genotype, expression, covariates, and offsets on IID.
 
         The retained sample order follows the genotype dataset after applying the
         optional sample filter. Only samples present in every input are retained.
         Covariates are converted to a JAX array, and `min_maf` becomes part of the
-        lazy global variant filter.
+        lazy global variant filter. An optional chromosome label restricts
+        genotype reads to that exact label.
 
         **Arguments:**
 
@@ -228,6 +232,7 @@ class ReadyDataState:
         - `drop_samples`: Optional sample IDs to remove from the genotype source.
         - `read_options`: Genotype read options. Defaults to `GenotypeReadOptions()`.
         - `min_maf`: Optional minimum minor allele frequency.
+        - `chromosome`: Optional exact chromosome label to retain.
 
         **Returns:**
 
@@ -274,7 +279,7 @@ class ReadyDataState:
             covar=covar_array,
             offset=offset_array,
             read_options=read_options or GenotypeReadOptions(),
-            variant_filter=default_variant_filter(min_maf=min_maf),
+            variant_filter=default_variant_filter(min_maf=min_maf, chromosome=chromosome),
         )
 
 

@@ -1,7 +1,9 @@
 # pattern: Functional Core
 
+import math
+
 from abc import abstractmethod
-from typing import NamedTuple
+from typing import cast, NamedTuple
 
 import equinox as eqx
 import jax.numpy as jnp
@@ -297,8 +299,8 @@ class GeneralizedLinearModel(AbstractLinearModel):
       [`jaxqtl.infer.CholeskySolve`][].
     - `max_iter`: Maximum number of IRLS iterations. Defaults to 1000.
     - `tol`: Convergence tolerance on the change in objective. Defaults to `1e-3`.
-    - `step_size`: Multiplier applied to each IRLS working-response update. Defaults
-      to 1.
+    - `step_size`: Initial trial step for IRLS backtracking. Rejected trials use
+      successively halved steps. Defaults to 1.
     """
 
     family: ExponentialFamily = Gaussian()
@@ -309,6 +311,10 @@ class GeneralizedLinearModel(AbstractLinearModel):
     step_size: float = 1.0
 
     _init: _AbstractInit = eqx.field(init=False)
+
+    def __check_init__(self):
+        if not math.isfinite(self.step_size) or self.step_size <= 0:
+            raise ValueError("step_size must be finite and greater than 0")
 
     def __post_init__(self):
         if isinstance(self.family, NegativeBinomial):
@@ -349,6 +355,7 @@ class GeneralizedLinearModel(AbstractLinearModel):
         beta, n_iter, converged, disp = irls(
             X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init
         )
+        n_iter = cast(Array, n_iter)
         eta = X @ beta + offset
         mu, link_prime, weight = self.family.calc_weight(eta, disp)
         resid = (y - mu) * link_prime  # note: this is the working resid

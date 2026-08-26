@@ -208,6 +208,10 @@ def _create_common_subp(subp, name, help):
         default=None,
         help="Exclude variants with minor allele frequency below this threshold.",
     )
+    common_p.add_argument(
+        "--chr",
+        help="Restrict genotype variants and phenotypes to this exact chromosome label.",
+    )
     gene_group = common_p.add_mutually_exclusive_group()
     gene_group.add_argument(
         "--gene-list",
@@ -229,21 +233,18 @@ def _create_common_subp(subp, name, help):
     """
     # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
 
-    """
-    # functionality not supported yet
-    chrom_group = common_p.add_mutually_exclusive_group()
-    chrom_group.add_argument(
-        "--chr",
-        help="Excludes all variants (and pheno) not on specified chromosome",
+    common_p.add_argument(
+        "--window",
+        type=int,
+        default=500_000,
+        help="Cis window size in base pairs.",
     )
-    chrom_group.add_argument(
-        "--autosome",
+    common_p.add_argument(
+        "--tss-centered",
         action="store_true",
         default=False,
-        help="Excludes all unplaced and non-autosomal variants",
+        help="Center the cis window on the TSS instead of extending it across the gene body from TSS to TES.",
     )
-    """
-    common_p.add_argument("--window", type=int, default=500_000, help="One sided window size (bps) with respect to TSS")
 
     # inference/runtime arguments
     common_p.add_argument(
@@ -340,6 +341,7 @@ def _cis_scan(args, log):
             gene_test=perm_test,
             mode="cis",
             window=args.window,
+            tss_centered=args.tss_centered,
             verbose=args.verbose,
             log=log,
             seed=args.seed,
@@ -391,6 +393,7 @@ def _nominal_scan(args, log):
             gene_test=perm_test,
             mode="nominal",
             window=args.window,
+            tss_centered=args.tss_centered,
             verbose=args.verbose,
             log=log,
             seed=args.seed,
@@ -455,28 +458,36 @@ def _unique_chromosome_labels(chromosomes: pl.Series) -> set[str]:
     return set(chromosomes.unique().cast(pl.Utf8).to_list())
 
 
-def _validate_chromosome_labels(expr_data, geno_data) -> None:
-    """Reject phenotype chromosome labels that are absent from genotype metadata."""
+def _validate_chromosome_labels(expr_data, geno_data, chromosome: str | None = None) -> set[str]:
+    """Return chromosome labels eligible for analysis after validating exact matches."""
     phenotype_chromosomes = _unique_chromosome_labels(expr_data.pheno_meta.get_column("chrom"))
     genotype_chromosomes = _unique_chromosome_labels(geno_data.variants().get_column("chrom"))
-    phenotype_only = sorted(phenotype_chromosomes - genotype_chromosomes)
-    if not phenotype_only:
-        return
-
     phenotype_labels = sorted(phenotype_chromosomes)
     genotype_labels = sorted(genotype_chromosomes)
-    if phenotype_chromosomes.isdisjoint(genotype_chromosomes):
-        raise ValueError(
-            "No chromosome labels overlap between phenotype and genotype data. "
-            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}. "
-            "A chromosome naming mismatch (for example, 'Chr1' versus '1') may cause all genes to be skipped."
-        )
-    else:
-        raise ValueError(
-            "Phenotype chromosome labels absent from genotype data: "
-            f"{phenotype_only}. Genes on these chromosomes will be skipped. "
-            f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}."
-        )
+
+    if chromosome is not None:
+        missing_sources = []
+        if chromosome not in phenotype_chromosomes:
+            missing_sources.append("phenotype")
+        if chromosome not in genotype_chromosomes:
+            missing_sources.append("genotype")
+        if missing_sources:
+            sources = " and ".join(missing_sources)
+            raise ValueError(
+                f"Requested chromosome {chromosome!r} is absent from {sources} data. "
+                f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}."
+            )
+        return {chromosome}
+
+    overlap = phenotype_chromosomes & genotype_chromosomes
+    if overlap:
+        return overlap
+
+    raise ValueError(
+        "No chromosome labels overlap between phenotype and genotype data. "
+        f"Phenotype labels: {phenotype_labels}; genotype labels: {genotype_labels}. "
+        "A chromosome naming mismatch (for example, 'Chr1' versus '1') may cause all genes to be skipped."
+    )
 
 
 def _common_setup(args, log):
@@ -591,11 +602,12 @@ def _common_setup(args, log):
     expr_data = ExpressionData.from_bedfile(
         args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
     )
+    chromosome = getattr(args, "chr", None)
+    analysis_chromosomes = _validate_chromosome_labels(expr_data, geno_data, chromosome=chromosome)
+    expr_data = expr_data.filter_genes_by_chromosomes(analysis_chromosomes)
     expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
     if args.min_indiv_expr_pct:
         expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
-
-    _validate_chromosome_labels(expr_data, geno_data)
 
     covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
@@ -642,6 +654,7 @@ def _common_setup(args, log):
         drop_samples=inds_to_exclude,
         read_options=GenotypeReadOptions(dosage="dosage" if getattr(args, "dosage", False) else "hardcall"),
         min_maf=args.maf,
+        chromosome=chromosome,
     )
     log.info("Finished reading and aligning genotype, phenotype, covariate data.")
 

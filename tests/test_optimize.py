@@ -1,16 +1,118 @@
+# pattern: Functional Core
+
+from typing import ClassVar
+
 import numpy as np
 import pytest
 
+import equinox as eqx
 import jax.numpy as jnp
 
 from jax import config, random
 
-from jaxqtl.distribution._expfam import Poisson
-from jaxqtl.infer._optimize import infer_beta_params, irls, lstsq
+from jaxqtl.distribution._expfam import ExponentialFamily, Poisson
+from jaxqtl.distribution._links import AbstractLink, IdentityLink
+from jaxqtl.infer import irls
+from jaxqtl.infer._optimize import infer_beta_params, lstsq
 from jaxqtl.infer._solve import CholeskySolve, QRSolve
 
 
 config.update("jax_enable_x64", True)
+
+
+class _QuadraticTrialFamily(ExponentialFamily):
+    glink: AbstractLink
+    optimum: float
+    nonfinite_above: float
+    _valid_links: ClassVar[list[type[AbstractLink]]] = [IdentityLink]
+
+    def __init__(self, optimum: float, nonfinite_above: float = float("inf")):
+        self.glink = IdentityLink()
+        self.optimum = optimum
+        self.nonfinite_above = nonfinite_above
+
+    def scale(self, X, y, mu):
+        return jnp.asarray(1.0)
+
+    def negloglikelihood(self, X, y, eta, disp):
+        objective = jnp.sum(jnp.square(jnp.asarray(eta) - self.optimum))
+        return jnp.where(jnp.any(jnp.asarray(eta) > self.nonfinite_above), jnp.nan, objective)
+
+    def variance(self, mu, disp=1.0):
+        return jnp.ones_like(jnp.asarray(mu))
+
+    def sample(self, key, eta, disp=1.0):
+        return jnp.asarray(eta)
+
+
+def _run_single_iteration(family, y, disp_init=1.0):
+    return irls(
+        jnp.ones((1, 1)),
+        jnp.asarray([y]),
+        jnp.asarray(0.0),
+        jnp.asarray([0.0]),
+        family,
+        CholeskySolve(),
+        max_iter=1,
+        tol=0.0,
+        step_size=1.0,
+        disp_init=jnp.asarray(disp_init),
+    )
+
+
+@pytest.mark.parametrize("step_size", (0.0, -1.0, float("nan"), float("inf"), float("-inf")))
+def test_irls_rejects_invalid_step_size_at_public_boundary(step_size):
+    with pytest.raises(ValueError, match="step_size must be finite and greater than 0"):
+        irls(
+            jnp.ones((1, 1)),
+            jnp.asarray([1.0]),
+            jnp.asarray(0.0),
+            jnp.asarray([0.0]),
+            _QuadraticTrialFamily(optimum=0.0),
+            CholeskySolve(),
+            max_iter=1,
+            step_size=step_size,
+            disp_init=jnp.asarray(1.0),
+        )
+
+
+def test_irls_public_wrapper_supports_outer_filter_jit():
+    state = eqx.filter_jit(irls)(
+        jnp.ones((1, 1)),
+        jnp.asarray([2.0]),
+        jnp.asarray(0.0),
+        jnp.asarray([0.0]),
+        _QuadraticTrialFamily(optimum=0.75),
+        CholeskySolve(),
+        max_iter=1,
+        tol=0.0,
+        step_size=1.0,
+        disp_init=jnp.asarray(1.0),
+    )
+
+    np.testing.assert_allclose(np.asarray(state.beta), [1.0])
+
+
+def test_irls_rejects_objective_increase_then_accepts_halved_step():
+    state = _run_single_iteration(_QuadraticTrialFamily(optimum=0.75), y=2.0)
+
+    np.testing.assert_allclose(np.asarray(state.beta), [1.0])
+
+
+def test_irls_rejects_nonfinite_candidate_then_accepts_halved_step():
+    state = _run_single_iteration(_QuadraticTrialFamily(optimum=0.75, nonfinite_above=1.5), y=2.0)
+
+    np.testing.assert_allclose(np.asarray(state.beta), [1.0])
+
+
+def test_irls_exhaustion_preserves_prior_finite_state_and_reports_failure():
+    state = _run_single_iteration(_QuadraticTrialFamily(optimum=0.0), y=1.0, disp_init=2.0)
+
+    np.testing.assert_allclose(np.asarray(state.beta), [0.0])
+    np.testing.assert_allclose(np.asarray(state.disp), 2.0)
+    assert np.all(np.isfinite(np.asarray(state.beta)))
+    assert np.isfinite(np.asarray(state.disp))
+    assert not bool(state.converged)
 
 
 @pytest.mark.parametrize("solver", [QRSolve(), CholeskySolve()])
