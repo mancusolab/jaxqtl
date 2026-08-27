@@ -12,7 +12,6 @@ extra_css = ["_static/custom_css.css"]
 
 extra_javascript = [
     "_static/mathjax.js",
-    "https://polyfill.io/v3/polyfill.min.js?features=es6",
     "https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js",
 ]
 
