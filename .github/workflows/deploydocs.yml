@@ -16,6 +16,8 @@ concurrency:
 
 jobs:
   deploy:
+    # Keep the repository environment's custom policies aligned with both
+    # manual deployments from main and release deployments from v* tags.
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}

@@ -74,7 +74,9 @@ jobs:
         if: github.event_name == 'release'
         uses: softprops/action-gh-release@v3.0.1
         with:
-          files: dist/*
+          files: |
+            dist/*.whl
+            dist/*.tar.gz
 
       - name: Prune uv cache
         if: always()
