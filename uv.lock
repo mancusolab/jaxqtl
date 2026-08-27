@@ -457,7 +457,6 @@ dependencies = [
     { name = "optimistix" },
     { name = "polars" },
     { name = "pyarrow" },
-    { name = "qtl" },
     { name = "rich-argparse" },
 ]
 
@@ -466,6 +465,7 @@ dev = [
     { name = "coverage", extra = ["toml"] },
     { name = "pytest" },
     { name = "pytest-cov" },
+    { name = "qtl" },
     { name = "ruff" },
     { name = "statsmodels" },
     { name = "ty" },
@@ -491,7 +491,7 @@ requires-dist = [
     { name = "pyarrow" },
     { name = "pytest", marker = "extra == 'dev'" },
     { name = "pytest-cov", marker = "extra == 'dev'" },
-    { name = "qtl" },
+    { name = "qtl", marker = "extra == 'dev'" },
     { name = "rich-argparse", specifier = ">=1.8.0" },
     { name = "ruff", marker = "extra == 'dev'", specifier = ">=0.0.243" },
     { name = "statsmodels", marker = "extra == 'dev'" },

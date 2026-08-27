@@ -3,9 +3,15 @@
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import polars as pl
 import pytest
+import qtl.norm
 
+import jax
+import jax.numpy as jnp
+
+from jaxqtl.io._normalization import edger_cpm, inverse_normal_transform
 from jaxqtl.io._pheno import bed_transform_y, ExpressionData
 
 
@@ -62,32 +68,40 @@ def test_bed_transform_y_log1p_filters_zero_rows_and_transforms_columns(tmp_path
     np.testing.assert_allclose(out["s2"].to_numpy(), np.log1p(np.array([1.0, 5.0])))
 
 
-def test_bed_transform_y_tmm_applies_external_transforms(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+def test_jax_normalization_matches_qtl_norm_under_jit() -> None:
+    counts = np.array(
+        [
+            [0.0, 20.0, 30.0],
+            [100.0, 120.0, 80.0],
+            [5.0, 7.0, 11.0],
+            [60.0, 45.0, 90.0],
+            [25.0, 35.0, 20.0],
+            [40.0, 50.0, 65.0],
+        ]
+    )
+    expected_cpm = qtl.norm.edger_cpm(pd.DataFrame(counts), normalized_lib_sizes=True)
+    expected = np.asarray(qtl.norm.inverse_normal_transform(expected_cpm))
+
+    actual_cpm = jax.jit(edger_cpm)(jnp.asarray(counts))
+    actual = jax.jit(inverse_normal_transform)(actual_cpm)
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+
+def test_bed_transform_y_tmm_matches_qtl_norm(tmp_path: Path) -> None:
     path = _write_bed(
         tmp_path,
         "#Chr\tstart\tend\tgene\ts1\ts2\nX\t10\t20\tgene1\t1\t2\nX\t30\t40\tgene2\t0\t0\nX\t50\t60\tgene3\t3\t4\n",
     )
-    captured: dict[str, np.ndarray] = {}
-
-    def fake_edger_cpm(counts, normalized_lib_sizes=True):
-        captured["counts"] = np.asarray(counts)
-        return captured["counts"] * 2
-
-    def fake_inverse_normal_transform(counts):
-        counts_array = np.asarray(counts)
-        # make output deterministic and row order-preserving
-        return np.arange(counts_array.size, dtype=float).reshape(counts_array.shape)
-
-    monkeypatch.setattr("jaxqtl.io._pheno.qtl.norm.edger_cpm", fake_edger_cpm)
-    monkeypatch.setattr("jaxqtl.io._pheno.qtl.norm.inverse_normal_transform", fake_inverse_normal_transform)
-
     out = bed_transform_y(path, method="tmm")
 
     assert out.height == 2
-    assert captured["counts"].shape == (2, 2)
-    np.testing.assert_allclose(captured["counts"], np.array([[1.0, 2.0], [3.0, 4.0]]))
-    np.testing.assert_allclose(out["s1"].to_numpy(), np.array([0.0, 2.0]))
-    np.testing.assert_allclose(out["s2"].to_numpy(), np.array([1.0, 3.0]))
+    expected_cpm = qtl.norm.edger_cpm(
+        pd.DataFrame(np.array([[1.0, 2.0], [3.0, 4.0]])),
+        normalized_lib_sizes=True,
+    )
+    expected = np.asarray(qtl.norm.inverse_normal_transform(expected_cpm))
+    np.testing.assert_allclose(out[["s1", "s2"]].to_numpy(), expected, rtol=1e-5, atol=1e-5)
 
 
 def test_bed_transform_y_unsupported_mode_raises_error(tmp_path: Path) -> None:
