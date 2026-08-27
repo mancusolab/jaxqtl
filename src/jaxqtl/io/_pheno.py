@@ -8,16 +8,14 @@ from typing import Literal
 
 import numpy as np
 import polars as pl
-import qtl.io
-import qtl.norm
 
 import equinox as eqx
 import jax
 
 from jax import numpy as jnp
-from jax.scipy import stats as jsp_stats
 from jaxtyping import Array, PRNGKeyArray
 
+from ._normalization import edger_cpm, inverse_normal_transform
 from ._utils import validate_user_columns
 
 
@@ -198,8 +196,6 @@ class ExpressionData:
 
         if transform == "tmm":
             raise NotImplementedError("'tmm' transform not implemented yet.")
-            tmm_counts_df = edger_cpm(pheno, normalized_lib_sizes=True)
-            pheno = inverse_normal_transform(tmm_counts_df)
         elif transform == "log1p":
             pheno = jnp.log1p(pheno)  # prevent log(0)
 
@@ -378,13 +374,8 @@ def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
     if method == "log1p":
         count_df = count_df.with_columns([pl.col(name).log1p().alias(name) for name in expr_cols])
     elif method == "tmm":
-        # use edger TMM method to calculate size factor and convert to counts per million
-        tmm_counts = qtl.norm.edger_cpm(
-            count_df.select(pl.col(expr_cols)).to_numpy(),
-            normalized_lib_sizes=True,
-        )
-        # inverse normal transformation on each gene (row)
-        norm_df = np.asarray(qtl.norm.inverse_normal_transform(tmm_counts))
+        tmm_counts = edger_cpm(count_df.select(pl.col(expr_cols)).to_numpy())
+        norm_df = np.asarray(inverse_normal_transform(tmm_counts))
         if norm_df.shape[0] == count_df.height:
             count_df = count_df.with_columns([pl.Series(name, norm_df[:, i]) for i, name in enumerate(expr_cols)])
         else:
@@ -393,148 +384,6 @@ def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
         raise ValueError(f"Unsupported mode {method}")
 
     return count_df
-
-
-def edger_cpm(counts_df, tmm=None, normalized_lib_sizes=True):
-    """
-    Return edgeR normalized/rescaled CPM (counts per million)
-
-    Reproduces edgeR::cpm.DGEList
-    """
-    lib_size = counts_df.sum(axis=0)
-    if normalized_lib_sizes:
-        if tmm is None:
-            tmm = edger_calcnormfactors(counts_df)
-        lib_size = lib_size * tmm
-    return counts_df / lib_size * 1e6
-
-
-def edger_calcnormfactors(
-    counts,
-    ref=None,
-    logratio_trim=0.3,
-    sum_trim=0.05,
-    acutoff=-1e10,
-):
-    """
-    JAX version of edgeR::calcNormFactors.default (TMM normalization).
-
-    Parameters
-    ----------
-    counts : array-like, shape (G, S)
-        Count matrix (genes x samples). Typically counts_df.values.
-    ref : int or None
-        Reference sample index. If None, chosen as in edgeR.
-    logratio_trim : float
-        Proportion to trim from M-values (log fold change).
-    sum_trim : float
-        Proportion to trim from A-values (average log expression).
-    acutoff : float
-        Minimum A-value.
-    verbose : bool
-        If True, print reference index (host-side, not jitted).
-
-    Returns
-    -------
-    tmm : jax.numpy.ndarray, shape (S,)
-        TMM normalization factors.
-    """
-    Y = jnp.asarray(counts, dtype=jnp.float32)  # shape (G, S)
-    G, ns = Y.shape
-
-    # library sizes
-    N = jnp.sum(Y, axis=0)  # shape (S,)
-
-    # select reference sample if not given
-    if ref is None:
-        Y_norm_tmp = Y / N
-        f75 = jnp.percentile(Y_norm_tmp, 75.0, axis=0)  # shape (S,)
-        dev = jnp.abs(f75 - jnp.mean(f75))
-        ref = int(jnp.argmin(dev))
-
-    # normalized counts and reference column
-    Y_norm = Y / N
-    ref_profile = Y[:, ref] / N[ref]  # shape (G,)
-
-    # log fold change (M) and average log expression (A)
-    logR = jnp.log2(Y_norm / ref_profile[:, None])  # shape (G, S)
-    logYnorm = jnp.log2(Y_norm)
-    log_ref = jnp.log2(ref_profile)
-    absE = 0.5 * (logYnorm + log_ref[:, None])  # shape (G, S)
-
-    # weights v (w in paper)
-    v = (N - Y) / (N * Y)  # shape (G, S)
-    v = v + v[:, ref][:, None]  # v_i + v_ref
-
-    def tmm_for_sample(logR_col, absE_col, v_col):
-        """
-        Compute TMM factor for a single sample (column).
-        logR_col, absE_col, v_col: shape (G,)
-        """
-        # finite & above A cutoff
-        fin = jnp.isfinite(logR_col) & jnp.isfinite(absE_col) & (absE_col > acutoff)
-
-        n = jnp.sum(fin)  # number of "valid" genes
-
-        def nonempty_case(args):
-            logR_col, absE_col, v_col, fin, n = args
-
-            # Use NaNs to tell rankdata which entries to ignore
-            logR_for_rank = jnp.where(fin, logR_col, jnp.nan)
-            absE_for_rank = jnp.where(fin, absE_col, jnp.nan)
-
-            rankR = jsp_stats.rankdata(
-                logR_for_rank,
-                method="average",
-                axis=None,
-                nan_policy="omit",
-            )
-            rankE = jsp_stats.rankdata(
-                absE_for_rank,
-                method="average",
-                axis=None,
-                nan_policy="omit",
-            )
-
-            n_f = n.astype(jnp.float32)
-
-            loL = jnp.floor(n_f * logratio_trim) + 1.0
-            hiL = n_f + 1.0 - loL
-            loS = jnp.floor(n_f * sum_trim) + 1.0
-            hiS = n_f + 1.0 - loS
-
-            keep = fin & (rankR >= loL) & (rankR <= hiL) & (rankE >= loS) & (rankE <= hiS)
-
-            w = v_col  # variance term; paper has a known typo about 1/v
-
-            num = jnp.nansum(jnp.where(keep, logR_col / w, 0.0))
-            den = jnp.nansum(jnp.where(keep, 1.0 / w, 0.0))
-
-            # guard against den == 0
-            tmm_val = jnp.where(den > 0.0, 2.0 ** (num / den), 1.0)
-            return tmm_val
-
-        # if no valid genes for this column, just return 1.0
-        tmm_val = jax.lax.cond(
-            n > 0,
-            nonempty_case,
-            lambda _: jnp.array(1.0, dtype=jnp.float32),
-            (logR_col, absE_col, v_col, fin, n),
-        )
-        return tmm_val
-
-    # vectorize over columns (samples)
-    tmm = jax.vmap(tmm_for_sample, in_axes=1)(logR, absE, v)  # shape (S,)
-
-    # center normalization factors to have geometric mean 1
-    tmm = tmm / jnp.exp(jnp.mean(jnp.log(tmm)))
-    return tmm
-
-
-def inverse_normal_transform(pheno):
-    """Apply inverse normal transform across observations."""
-    r = jsp_stats.rankdata(pheno)
-    return jsp_stats.norm.ppf(r / (pheno.shape[0] + 1))
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4))

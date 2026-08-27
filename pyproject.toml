@@ -49,7 +49,6 @@ dependencies = [
     "optimistix",
     "genoio>=0.1.0",
     "polars",
-    "qtl",
     "pyarrow",
     "rich-argparse>=1.8.0",
 ]
@@ -68,6 +67,7 @@ dev = [
   "pytest",
   "pytest-cov",
   "statsmodels",
+  "qtl",
   "ruff>=0.0.243",
   "ty>=0.0.44",
 ]
