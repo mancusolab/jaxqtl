@@ -352,8 +352,28 @@ class ExpressionData:
 
 
 def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
-    """Perform transformation on gene expression count matrix
-    count_df: rows are genes, columns are individual ID
+    r"""Transform expression values in a BED-style count matrix.
+
+    The input's first four columns are preserved as feature metadata. Remaining
+    columns are sample counts. Genes with zero counts across every sample are
+    removed before transformation.
+
+    **Arguments:**
+
+    - `pheno_path`: Path to a tab-delimited BED-style matrix with four metadata
+      columns followed by one count column per sample.
+    - `method`: `"log1p"` applies `log(1 + count)` independently to each count.
+      `"tmm"` applies TMM-normalized CPM followed by a row-wise inverse-normal
+      transform across samples.
+
+    **Returns:**
+
+    A Polars frame containing the retained metadata columns and transformed
+    sample-expression columns.
+
+    **Raises:**
+
+    - `ValueError`: If `method` is not `"log1p"` or `"tmm"`.
     """
     count_df = pl.read_csv(
         str(pheno_path),

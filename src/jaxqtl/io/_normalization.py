@@ -24,7 +24,36 @@ def edger_calcnormfactors(
     sum_trim: float = 0.05,
     acutoff: float = -1e10,
 ) -> jax.Array:
-    """Calculate edgeR-style TMM scaling factors for a gene-by-sample matrix."""
+    r"""Calculate edgeR-style TMM scaling factors for a gene-by-sample count matrix.
+
+    TMM (trimmed mean of M-values) estimates a sample-specific scaling factor
+    from finite log-ratios and average log-expression values. The returned
+    factors have geometric mean one. This is the normalization-factor step used
+    by [`edger_cpm`][].
+
+    **Arguments:**
+
+    - `counts`: Nonnegative count matrix with shape `(g, n)`, where rows are
+      genes and columns are samples. Each sample must have a positive library
+      size. Remove genes with zero counts in every sample before calling this
+      function.
+    - `ref`: Optional zero-based reference-sample column. If `None`, select the
+      sample whose upper-quartile normalized expression is closest to the mean.
+    - `logratio_trim`: Fraction trimmed from each tail of the log-ratio ranks.
+    - `sum_trim`: Fraction trimmed from each tail of the average-expression
+      ranks.
+    - `acutoff`: Minimum average log-expression retained for factor estimation.
+
+    **Returns:**
+
+    A floating-point JAX array with shape `(n,)` containing one TMM factor per
+    sample.
+
+    **Failure Modes:**
+
+    A sample with zero total counts produces nonfinite values. Invalid count
+    values, such as negative counts or NaNs, can also produce nonfinite factors.
+    """
     counts_array = _as_inexact_array(counts)
     library_sizes = jnp.sum(counts_array, axis=0)
     normalized_counts = counts_array / library_sizes
@@ -95,7 +124,27 @@ def edger_cpm(
     tmm: jax.Array | None = None,
     normalized_lib_sizes: bool = True,
 ) -> jax.Array:
-    """Return edgeR-style TMM-normalized counts per million."""
+    r"""Return edgeR-style TMM-normalized counts per million.
+
+    The effective library size is the column sum of `counts` multiplied by its
+    TMM factor. Set `normalized_lib_sizes=False` to use unadjusted library sizes.
+
+    **Arguments:**
+
+    - `counts`: Nonnegative gene-by-sample count matrix with shape `(g, n)`.
+    - `tmm`: Optional TMM factors with shape `(n,)`. If `None`, factors are
+      calculated from `counts` with [`edger_calcnormfactors`][].
+    - `normalized_lib_sizes`: Whether to apply TMM factors to library sizes.
+
+    **Returns:**
+
+    A floating-point JAX array with shape `(g, n)` of counts per million.
+
+    **Failure Modes:**
+
+    A zero effective library size produces nonfinite values. Rows with zero
+    counts in every sample should be removed before factor estimation.
+    """
     counts_array = _as_inexact_array(counts)
     library_sizes = jnp.sum(counts_array, axis=0)
     if normalized_lib_sizes:
@@ -105,7 +154,21 @@ def edger_cpm(
 
 
 def inverse_normal_transform(values: Any) -> jax.Array:
-    """Apply a rank-based inverse-normal transform along the final axis."""
+    r"""Apply a rank-based inverse-normal transform along the final axis.
+
+    Ties receive their average rank. Each rank is scaled by $n + 1$, where $n$
+    is the length of the final axis, then transformed with the standard-normal
+    quantile function.
+
+    **Arguments:**
+
+    - `values`: Floating-point or integer array. For an expression matrix with
+      shape `(g, n)`, rows are transformed independently across the `n` samples.
+
+    **Returns:**
+
+    A floating-point JAX array with the same shape as `values`.
+    """
     values_array = _as_inexact_array(values)
     ranks = jsp_stats.rankdata(values_array, axis=-1, method="average")
     return jsp_stats.norm.ppf(ranks / (values_array.shape[-1] + 1))
