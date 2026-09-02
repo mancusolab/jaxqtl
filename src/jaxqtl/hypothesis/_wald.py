@@ -59,6 +59,9 @@ class WaldTest(AbstractHypothesisTest):
                 lambda g_res: model.fit(g_res[:, jnp.newaxis], y_resid, std_err=self.std_err, df_resid=df_resid),
                 in_axes=1,
             )(G_resid)
+            negloglikelihood = jax.vmap(
+                lambda g_res, eta, disp: model.family.negloglikelihood(g_res[:, jnp.newaxis], y_resid, eta, disp)
+            )(G_resid.T, result.eta, result.disp)
 
             # The residualized fits have one coefficient each; the association API returns one scalar per variant.
             state = TestResult(
@@ -69,6 +72,7 @@ class WaldTest(AbstractHypothesisTest):
                 num_iters=result.num_iters,
                 converged=result.converged,
                 disp=result.disp,
+                negloglikelihood=negloglikelihood,
             )
         else:
 
@@ -84,6 +88,7 @@ class WaldTest(AbstractHypothesisTest):
                     num_iters=glmstate.num_iters,
                     converged=glmstate.converged,
                     disp=glmstate.disp,
+                    negloglikelihood=self.model.family.negloglikelihood(M, y, glmstate.eta, glmstate.disp),
                 )
 
             _, state = lax.scan(_func, 0.0, G.T)

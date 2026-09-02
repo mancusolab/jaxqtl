@@ -21,8 +21,8 @@ class TestResult(NamedTuple):
     r"""Container for per-variant association test results.
 
     For a genotype matrix with `m` variants, association fields have shape `(m,)`.
-    Convergence and dispersion may be scalars when a score test reuses one null-model
-    fit, or arrays with shape `(m,)` when models are fitted per variant.
+    Convergence, dispersion, and negative log-likelihood may be scalars when a score test reuses one null-model fit,
+    or arrays with shape `(m,)` when models are fitted per variant.
 
     **Attributes:**
 
@@ -33,6 +33,7 @@ class TestResult(NamedTuple):
     - `num_iters`: Model-fitting iteration counts.
     - `converged`: Model convergence indicators.
     - `disp`: Fitted family dispersion or scale values.
+    - `negloglikelihood`: Negative log-likelihood objective at the fitted model.
     """
 
     beta: Array
@@ -42,6 +43,7 @@ class TestResult(NamedTuple):
     num_iters: Array
     converged: Array
     disp: Array
+    negloglikelihood: Array
 
 
 class AbstractHypothesisTest(eqx.Module):

@@ -513,6 +513,7 @@ class SpaTest(AbstractHypothesisTest):
             num_iters=glmstate_cov_only.num_iters,
             converged=glmstate_cov_only.converged,
             disp=glmstate_cov_only.disp,
+            negloglikelihood=self.model.family.negloglikelihood(X, y, glmstate_cov_only.eta, glmstate_cov_only.disp),
         )
 
     @property

@@ -265,6 +265,25 @@ def test_negative_binomial_fit_with_offset_matches_jit():
     np.testing.assert_array_equal(np.asarray(jitted.converged), np.asarray(eager.converged))
 
 
+@pytest.mark.parametrize("dispersion", (1e-5, 1e-3, 1e-2, 1e-1, 1.0, 10.0))
+def test_negative_binomial_fit_recovers_dispersion(dispersion):
+    rng = np.random.default_rng(19)
+    n = 1000
+    X = sm.add_constant(rng.normal(size=(n, 1)), prepend=True)
+    beta = np.array([0, 0.1])  # set b0=-3 gives expression percent about 4%, bo=0 gives 60%, b0=2 gives near 100%
+    # proposed method: failed at b0=-3, 0
+    # current method with step size 0.1: tend to overestimate when true dispersion is small
+    mu = np.exp(X @ beta)
+    size = 1.0 / dispersion
+    y = rng.negative_binomial(size, size / (size + mu))
+
+    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=1000, tol=1e-6, step_size=1)
+    state = model.fit(jnp.asarray(X), jnp.asarray(y))
+
+    assert bool(np.asarray(state.converged))
+    np.testing.assert_allclose(np.asarray(state.disp), dispersion, rtol=0.15, atol=2e-3)
+
+
 def test_negative_binomial_fit_halves_rejected_full_steps():
     rng = np.random.default_rng(1)
     n, p = 48, 6

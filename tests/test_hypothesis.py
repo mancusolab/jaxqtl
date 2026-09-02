@@ -44,6 +44,8 @@ def test_gaussian_wald_matches_explicit_full_model(solver, std_err):
     np.testing.assert_allclose(np.asarray(result.se), [fit.se[-1] for fit in expected], rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(result.z), [fit.z[-1] for fit in expected], rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(result.p), [fit.p[-1] for fit in expected], rtol=2e-4, atol=2e-5)
+    expected_objective = [model.family.negloglikelihood(X, y, fit.eta, fit.disp) for fit in expected]
+    np.testing.assert_allclose(np.asarray(result.negloglikelihood), expected_objective, rtol=2e-4, atol=2e-5)
 
 
 @pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
@@ -70,7 +72,7 @@ def test_gaussian_wald_with_offset_matches_full_model_and_jit(offset_kind, std_e
         assert actual.shape == (m,)
         np.testing.assert_allclose(actual, oracle, rtol=2e-4, atol=2e-5)
 
-    for field in ("beta", "se", "z", "p", "disp"):
+    for field in ("beta", "se", "z", "p", "disp", "negloglikelihood"):
         np.testing.assert_allclose(
             np.asarray(getattr(jitted, field)),
             np.asarray(getattr(eager, field)),
@@ -136,6 +138,9 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
         assert np.all(np.isfinite(actual))
         np.testing.assert_allclose(actual, oracle, rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(eager.disp), dispersion, rtol=2e-4, atol=2e-5)
+    null_fit = test.model.fit(X, y, offset, test.std_err)
+    expected_objective = test.model.family.negloglikelihood(X, y, null_fit.eta, null_fit.disp)
+    np.testing.assert_allclose(np.asarray(eager.negloglikelihood), expected_objective, rtol=2e-4, atol=2e-5)
     assert np.asarray(eager.disp).shape == ()
     assert np.asarray(eager.num_iters).shape == ()
     assert np.asarray(eager.converged).shape == ()
@@ -143,7 +148,7 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
     assert np.all(np.isfinite(np.asarray(eager.num_iters)))
     assert bool(np.asarray(eager.converged))
 
-    for field in ("beta", "se", "z", "p", "disp"):
+    for field in ("beta", "se", "z", "p", "disp", "negloglikelihood"):
         np.testing.assert_allclose(
             np.asarray(getattr(jitted, field)),
             np.asarray(getattr(eager, field)),

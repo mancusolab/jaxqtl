@@ -196,6 +196,7 @@ def _empty_nominal_columns() -> dict[str, Any]:
         "se": pl.Float64,
         "pvalue": pl.Float64,
         "nb_alpha": pl.Float64,
+        "negloglikelihood": pl.Float64,
         "model_converged": pl.Boolean,
     }
 
@@ -222,6 +223,7 @@ def _empty_cis_columns(gene_test) -> dict[str, Any]:
         "pvalue_adj": pl.Float64,
         "adj_method": pl.Utf8,
         "nb_alpha": pl.Float64,
+        "negloglikelihood": pl.Float64,
         "model_converged": pl.Boolean,
         "result_valid": pl.Boolean,
         "failure_reason": pl.Utf8,
@@ -302,6 +304,7 @@ def _process_cis_result(
             "pvalue_adj": None,
             "adj_method": method,
             "nb_alpha": None,
+            "negloglikelihood": None,
             "model_converged": None,
             "result_valid": False,
             "failure_reason": _NO_FINITE_PVALUES,
@@ -349,6 +352,11 @@ def _process_cis_result(
     else:
         glm_converged = bool(test_result.converged)
 
+    if jnp.ndim(test_result.negloglikelihood) > 0:
+        negloglikelihood = float(test_result.negloglikelihood[vdx_int])
+    else:
+        negloglikelihood = float(test_result.negloglikelihood)
+
     result = {
         "phenotype_id": cis_data.gene_name,
         "chrom": cis_data.chrom,
@@ -370,6 +378,7 @@ def _process_cis_result(
         "pvalue_adj": lead_adj_pvalue,
         "adj_method": method,
         "nb_alpha": nb_alpha,
+        "negloglikelihood": negloglikelihood,
         "model_converged": glm_converged,
         "result_valid": True,
         "failure_reason": None,
@@ -395,12 +404,18 @@ def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.Da
     else:
         glm_converged = np.full_like(test_result.beta, test_result.converged)
 
+    if jnp.ndim(test_result.negloglikelihood) > 0:
+        negloglikelihood = np.asarray(test_result.negloglikelihood)
+    else:
+        negloglikelihood = np.full_like(test_result.beta, test_result.negloglikelihood)
+
     region_df = region_df.with_columns(
         pl.lit(cis_data.gene_name).alias("phenotype_id"),
         pl.Series("beta", np.asarray(test_result.beta)),
         pl.Series("se", np.asarray(test_result.se)),
         pl.Series("pvalue", np.asarray(test_result.p)),
         pl.Series("nb_alpha", nb_alpha),
+        pl.Series("negloglikelihood", negloglikelihood),
         pl.Series("model_converged", glm_converged),
     )
     # put pheno id in front

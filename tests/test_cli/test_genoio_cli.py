@@ -109,6 +109,7 @@ def _test_result(pvalues: list[float]) -> AssocTestResult:
         num_iters=jnp.array(1),
         converged=jnp.array(True),
         disp=jnp.array(0.4),
+        negloglikelihood=jnp.array(12.5),
     )
 
 
@@ -478,6 +479,7 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
         "beta",
         "se",
         "pvalue",
+        "negloglikelihood",
         "model_converged",
     ]
 
@@ -520,6 +522,7 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                 num_iters=jnp.array([1]),
                 converged=jnp.array([True]),
                 disp=jnp.array(0.0),
+                negloglikelihood=jnp.array(12.5),
             )
 
     # Lower the private flush threshold so the test observes batching without a large fixture.
@@ -584,6 +587,7 @@ def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None
         "beta",
         "se",
         "pvalue",
+        "negloglikelihood",
         "model_converged",
     ]
 
@@ -614,6 +618,7 @@ def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
         "pvalue",
         "pvalue_adj",
         "adj_method",
+        "negloglikelihood",
         "model_converged",
         "result_valid",
         "failure_reason",
@@ -650,6 +655,7 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
         "pvalue_adj": None,
         "adj_method": "ACAT",
         "nb_alpha": None,
+        "negloglikelihood": None,
         "model_converged": None,
         "result_valid": False,
         "failure_reason": "no_finite_pvalues",
@@ -686,8 +692,17 @@ def test_process_cis_result_selects_minimum_finite_pvalue() -> None:
 
     assert result["snp"] == "gene1_rs2"
     assert result["pvalue"] == pytest.approx(0.02)
+    assert result["negloglikelihood"] == pytest.approx(12.5)
     assert result["result_valid"] is True
     assert result["failure_reason"] is None
+
+
+def test_process_nominal_result_records_each_fitted_objective() -> None:
+    test_result = _test_result([0.01, 0.02])._replace(negloglikelihood=jnp.array([10.0, 11.0]))
+
+    result = cis_map._process_nominal_result(_cis_data(), test_result)
+
+    assert result["negloglikelihood"].to_list() == [10.0, 11.0]
 
 
 @pytest.mark.parametrize("invalid_first", [True, False])
@@ -718,6 +733,7 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     assert output.schema["snp"] == pl.Utf8
     assert output.schema["pos"] == pl.Int64
     assert output.schema["pvalue"] == pl.Float64
+    assert output.schema["negloglikelihood"] == pl.Float64
     assert invalid_row["snp"].item() is None
     assert invalid_row["pos"].item() is None
     assert invalid_row["pvalue"].item() is None

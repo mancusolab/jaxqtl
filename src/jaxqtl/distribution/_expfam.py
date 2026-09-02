@@ -569,6 +569,28 @@ class NegativeBinomial(ExponentialFamily):
 
         return _alpha_score(log_alpha), _alpha_hess(log_alpha)
 
+    # def update_dispersion(
+    #     self,
+    #     X: ArrayLike,
+    #     y: ArrayLike,
+    #     eta: ArrayLike,
+    #     disp: ScalarLike = 0.1,
+    #     step_size: ScalarLike = 0.1,
+    # ) -> Array:
+    #     # alpha := disp
+    #     # we optimize over log(alpha) isntead of alpha, but in theory we could compute exact geodesics on NB manifold
+    #     # which could enable Riemannian optimization, but this is fine for now...
+    #     X = jnp.asarray(X)
+    #     y = jnp.asarray(y)
+    #     eta = jnp.asarray(eta)
+    #     disp = jnp.asarray(disp)
+    #     step_size = jnp.asarray(step_size)
+    #     log_alpha = jnp.log(disp)
+    #     score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
+    #     log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-9), jnp.log(1e9))
+    #
+    #     return jnp.exp(log_alpha_n)
+
     def update_dispersion(
         self,
         X: ArrayLike,
@@ -577,19 +599,71 @@ class NegativeBinomial(ExponentialFamily):
         disp: ScalarLike = 0.1,
         step_size: ScalarLike = 0.1,
     ) -> Array:
-        # alpha := disp
-        # we optimize over log(alpha) isntead of alpha, but in theory we could compute exact geodesics on NB manifold
-        # which could enable Riemannian optimization, but this is fine for now...
         X = jnp.asarray(X)
         y = jnp.asarray(y)
         eta = jnp.asarray(eta)
-        disp = jnp.asarray(disp)
+        alpha = jnp.asarray(disp)
         step_size = jnp.asarray(step_size)
-        log_alpha = jnp.log(disp)
-        score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
-        log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-9), jnp.log(1e9))
 
-        return jnp.exp(log_alpha_n)
+        # Keep compatibility with the current NB likelihood, which requires
+        # strictly positive alpha. If negloglikelihood is later made safe at
+        # alpha == 0, this can become a true boundary at zero.
+        alpha = jnp.clip(alpha, 1e-9, 1e9)
+
+        mu = jnp.clip(
+            self.glink.inverse(eta),
+            self._bounds[0],
+            self._bounds[1],
+        )
+
+        # Exact derivatives of the NLL in theta = log(alpha).
+        log_alpha = jnp.log(alpha)
+        score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
+
+        # Variance-manifold metric:
+        #
+        #   m_alpha = 1/2 sum_i [mu_i / (1 + alpha mu_i)]^2
+        #
+        # and associated connection.
+        q = mu / (1.0 + alpha * mu)
+        A2 = jnp.sum(q * q)
+        A3 = jnp.sum(q * q * q)
+
+        # Metric and Christoffel symbol in theta = log(alpha):
+        #
+        #   m_theta     = alpha^2 m_alpha
+        #   Gamma_theta = 1 - alpha A3/A2
+        metric = 0.5 * alpha**2 * A2
+        gamma = 1.0 - alpha * (A3 / A2)
+
+        # Covariant/Riemannian Hessian.
+        riemann_hess = hess - gamma * score
+
+        # Modified Riemannian Newton curvature.
+        #
+        # Flooring at the metric has two useful consequences:
+        #   1. curvature is always positive;
+        #   2. the Newton step can never be larger than the corresponding
+        #      natural-gradient step solely because H_R is close to zero.
+        curvature = jnp.maximum(riemann_hess, metric)
+
+        # Tangent vector in theta coordinates.
+        v_theta = -score / curvature
+
+        # Convert to the alpha-coordinate tangent.
+        v_alpha = alpha * v_theta
+
+        # Cheap second-order retraction for the variance geometry.
+        #
+        # Gamma_alpha = -A3/A2, hence L = -1/Gamma_alpha = A2/A3.
+        # This approaches:
+        #
+        #   alpha + v_alpha             near the Poisson boundary,
+        #   alpha * exp(v_alpha/alpha)  for large alpha.
+        L = A2 / A3
+        alpha_new = alpha + L * jnp.expm1(step_size * v_alpha / L)
+
+        return jnp.clip(alpha_new, 1e-9, 1e9)
 
     def estimate_dispersion(
         self,
