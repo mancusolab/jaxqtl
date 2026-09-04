@@ -8,7 +8,7 @@ import pytest
 import equinox as eqx
 import jax.numpy as jnp
 
-from jaxqtl.distribution import Gaussian, LogLink
+from jaxqtl.distribution import Gaussian, LogLink, NegativeBinomial
 from jaxqtl.hypothesis import ScoreTest, SpaTest, WaldTest
 from jaxqtl.infer import (
     CGSolve,
@@ -44,6 +44,8 @@ def test_gaussian_wald_matches_explicit_full_model(solver, std_err):
     np.testing.assert_allclose(np.asarray(result.se), [fit.se[-1] for fit in expected], rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(result.z), [fit.z[-1] for fit in expected], rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(result.p), [fit.p[-1] for fit in expected], rtol=2e-4, atol=2e-5)
+    expected_objective = [model.family.negloglikelihood(X, y, fit.eta, fit.disp) for fit in expected]
+    np.testing.assert_allclose(np.asarray(result.negloglikelihood), expected_objective, rtol=2e-4, atol=2e-5)
 
 
 @pytest.mark.parametrize("offset_kind", ("scalar", "vector"))
@@ -70,7 +72,7 @@ def test_gaussian_wald_with_offset_matches_full_model_and_jit(offset_kind, std_e
         assert actual.shape == (m,)
         np.testing.assert_allclose(actual, oracle, rtol=2e-4, atol=2e-5)
 
-    for field in ("beta", "se", "z", "p", "disp"):
+    for field in ("beta", "se", "z", "p", "disp", "negloglikelihood"):
         np.testing.assert_allclose(
             np.asarray(getattr(jitted, field)),
             np.asarray(getattr(eager, field)),
@@ -136,6 +138,9 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
         assert np.all(np.isfinite(actual))
         np.testing.assert_allclose(actual, oracle, rtol=2e-4, atol=2e-5)
     np.testing.assert_allclose(np.asarray(eager.disp), dispersion, rtol=2e-4, atol=2e-5)
+    null_fit = test.model.fit(X, y, offset, test.std_err)
+    expected_objective = test.model.family.negloglikelihood(X, y, null_fit.eta, null_fit.disp)
+    np.testing.assert_allclose(np.asarray(eager.negloglikelihood), expected_objective, rtol=2e-4, atol=2e-5)
     assert np.asarray(eager.disp).shape == ()
     assert np.asarray(eager.num_iters).shape == ()
     assert np.asarray(eager.converged).shape == ()
@@ -143,7 +148,7 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
     assert np.all(np.isfinite(np.asarray(eager.num_iters)))
     assert bool(np.asarray(eager.converged))
 
-    for field in ("beta", "se", "z", "p", "disp"):
+    for field in ("beta", "se", "z", "p", "disp", "negloglikelihood"):
         np.testing.assert_allclose(
             np.asarray(getattr(jitted, field)),
             np.asarray(getattr(eager, field)),
@@ -152,6 +157,44 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
         )
     np.testing.assert_array_equal(np.asarray(jitted.num_iters), np.asarray(eager.num_iters))
     np.testing.assert_array_equal(np.asarray(jitted.converged), np.asarray(eager.converged))
+
+
+@pytest.mark.parametrize("test_type", (ScoreTest, WaldTest))
+def test_negative_binomial_tests_report_fitted_objective(test_type):
+    rng = np.random.default_rng(23)
+    n, m = 120, 2
+    X = np.column_stack((np.ones(n), rng.normal(size=n)))
+    G = rng.binomial(2, 0.3, size=(n, m)).astype(float)
+    offset = np.linspace(-0.2, 0.2, n)
+    eta = X @ np.array([0.4, -0.15]) + 0.2 * G[:, 0] + offset
+    mu = np.exp(eta)
+    alpha = 0.3
+    y = rng.negative_binomial(1.0 / alpha, 1.0 / (1.0 + alpha * mu))
+
+    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4)
+    result = test_type(model=model).test(X, G, y, offset)
+
+    if test_type is ScoreTest:
+        fits = [model.fit(X, y, offset)]
+    else:
+        fits = [model.fit(jnp.column_stack((X, G[:, index])), y, offset) for index in range(m)]
+    expected = [
+        model.family.negloglikelihood(
+            X if test_type is ScoreTest else jnp.column_stack((X, G[:, index])),
+            y,
+            fit.eta,
+            fit.disp,
+        )
+        for index, fit in enumerate(fits)
+    ]
+
+    assert np.all(np.isfinite(np.asarray(result.negloglikelihood)))
+    if test_type is ScoreTest:
+        assert np.asarray(result.negloglikelihood).shape == ()
+        np.testing.assert_allclose(np.asarray(result.negloglikelihood), np.asarray(expected[0]))
+    else:
+        assert result.negloglikelihood.shape == (m,)
+        np.testing.assert_allclose(np.asarray(result.negloglikelihood), np.asarray(expected))
 
 
 @pytest.mark.parametrize("test_type", (ScoreTest, SpaTest))
