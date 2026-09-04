@@ -17,7 +17,7 @@ import jax.random as rdm
 import jax.scipy.stats as jaxstats
 
 from jax import lax
-from jax.scipy.special import gammaln, xlogy
+from jax.scipy.special import digamma, gammaln, polygamma, xlogy
 from jaxtyping import Array, ArrayLike, ScalarLike
 
 from ._links import (
@@ -510,9 +510,8 @@ _NB2_SERIES_SWITCH = 1e-3
 _NB2_ALGDIV_R_SWITCH = 1e3
 
 
-def _nb2_log1p_over_x(x: Array) -> Array:
-    """Evaluate ``log1p(x) / x`` with stable derivatives near zero."""
-    small = jnp.abs(x) <= _NB2_SERIES_SWITCH
+def _nb2_log1p_over_x_series(x: Array) -> Array:
+    """Approximate ``log1p(x) / x`` around zero through eighth order."""
     series = 1.0 / 9.0
     series = -1.0 / 8.0 + x * series
     series = 1.0 / 7.0 + x * series
@@ -521,20 +520,23 @@ def _nb2_log1p_over_x(x: Array) -> Array:
     series = -1.0 / 4.0 + x * series
     series = 1.0 / 3.0 + x * series
     series = -1.0 / 2.0 + x * series
-    series = 1.0 + x * series
-    x_safe = jnp.where(small, jnp.ones_like(x), x)
-    direct = jnp.log1p(x_safe) / x_safe
-    return jnp.where(small, series, direct)
+    return 1.0 + x * series
 
 
-def _nb2_centered_lgamma_ratio_series(y: Array, alpha: Array) -> Array:
-    """Expand ``gammaln(1/alpha + y) - gammaln(1/alpha) + y log(alpha)`` at zero."""
+def _nb2_centered_lgamma_ratio_series_coefficients(y: Array) -> tuple[Array, ...]:
+    """Return coefficients for the centered log-Gamma ratio expansion."""
     ym1 = y - 1.0
     c1 = y * ym1 / 2.0
     c2 = -y * ym1 * (2.0 * y - 1.0) / 12.0
     c3 = y**2 * ym1**2 / 12.0
     c4 = -y * ym1 * (2.0 * y - 1.0) * (3.0 * y**2 - 3.0 * y - 1.0) / 120.0
     c5 = y**2 * ym1**2 * (2.0 * y**2 - 2.0 * y - 1.0) / 60.0
+    return c1, c2, c3, c4, c5
+
+
+def _nb2_centered_lgamma_ratio_series(y: Array, alpha: Array) -> Array:
+    """Expand ``gammaln(1/alpha + y) - gammaln(1/alpha) + y log(alpha)`` at zero."""
+    c1, c2, c3, c4, c5 = _nb2_centered_lgamma_ratio_series_coefficients(y)
     return alpha * (c1 + alpha * (c2 + alpha * (c3 + alpha * (c4 + alpha * c5))))
 
 
@@ -566,12 +568,27 @@ def _nb2_centered_lgamma_ratio(y: Array, alpha: Array) -> Array:
     """Evaluate the NB2 log-Gamma ratio using series, algdiv, or direct evaluation."""
     max_y = jnp.max(y)
     use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
-    alpha_safe = jnp.where(use_series, jnp.ones_like(alpha), alpha)
-    r = 1.0 / alpha_safe
-    direct = gammaln(r + y) - gammaln(r) + y * jnp.log(alpha_safe)
-    algdiv = _nb2_algdiv_centered(y, r)
-    use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_y <= r)
-    return jnp.where(use_series, _nb2_centered_lgamma_ratio_series(y, alpha), jnp.where(use_algdiv, algdiv, direct))
+
+    def series(operands):
+        response, dispersion, _ = operands
+        return _nb2_centered_lgamma_ratio_series(response, dispersion)
+
+    def nonseries(operands):
+        response, dispersion, max_response = operands
+        r = 1.0 / dispersion
+        use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_response <= r)
+
+        def algdiv(values):
+            response, r, _ = values
+            return _nb2_algdiv_centered(response, r)
+
+        def direct(values):
+            response, r, dispersion = values
+            return gammaln(r + response) - gammaln(r) + response * jnp.log(dispersion)
+
+        return lax.cond(use_algdiv, algdiv, direct, (response, r, dispersion))
+
+    return lax.cond(use_series, series, nonseries, (y, alpha, max_y))
 
 
 def _nb2_mean_terms(y: Array, log_mu: Array, alpha: Array) -> Array:
@@ -585,9 +602,10 @@ def _nb2_mean_terms(y: Array, log_mu: Array, alpha: Array) -> Array:
     series_mu = jnp.exp(jnp.where(use_series, log_mu, jnp.zeros_like(log_mu)))
     finite_series_mu = jnp.isfinite(series_mu)
     series_x = alpha * jnp.where(finite_series_mu, series_mu, jnp.ones_like(series_mu))
-    series_x = jnp.where(finite_series_mu, series_x, jnp.where(alpha == 0.0, 0.0, jnp.inf))
-    series_log_probability = log_mu - jnp.log1p(series_x)
-    series_mean_penalty = series_mu * _nb2_log1p_over_x(series_x)
+    series_x = jnp.where(use_series & finite_series_mu & (alpha >= 0.0), series_x, jnp.zeros_like(series_x))
+    series_ratio = _nb2_log1p_over_x_series(series_x)
+    series_log_probability = log_mu - series_x * series_ratio
+    series_mean_penalty = series_mu * series_ratio
 
     direct_log_x = jnp.where(use_series, jnp.zeros_like(log_x), log_x)
     direct_log_probability = -log_alpha - jax.nn.softplus(-direct_log_x)
@@ -597,6 +615,100 @@ def _nb2_mean_terms(y: Array, log_mu: Array, alpha: Array) -> Array:
     log_probability = jnp.where(y == 0.0, jnp.zeros_like(log_probability), log_probability)
     mean_penalty = jnp.where(use_series, series_mean_penalty, direct_mean_penalty)
     return y * log_probability - mean_penalty
+
+
+def _nb2_horner_times_x(x: Array, coefficients: tuple[Array, ...]) -> Array:
+    """Evaluate a coefficient sequence with no constant term using Horner's rule."""
+    value = coefficients[-1]
+    for coefficient in coefficients[-2::-1]:
+        value = coefficient + x * value
+    return x * value
+
+
+def _nb2_mean_log_alpha_score_hessian(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array]:
+    """Return elementwise log-probability derivatives with respect to log-dispersion."""
+    alpha_positive = alpha > 0.0
+    alpha_safe = jnp.where(alpha_positive, alpha, jnp.ones_like(alpha))
+    log_alpha = jnp.log(alpha_safe)
+    log_x = log_alpha + log_mu
+    use_series = ~alpha_positive | (log_x <= jnp.log(_NB2_SERIES_SWITCH))
+
+    series_mu = jnp.exp(jnp.where(use_series, log_mu, jnp.zeros_like(log_mu)))
+    finite_series_mu = jnp.isfinite(series_mu)
+    series_mu_safe = jnp.where(finite_series_mu, series_mu, jnp.zeros_like(series_mu))
+    series_x = alpha * series_mu_safe
+    series_x = jnp.where(use_series & alpha_positive, series_x, jnp.zeros_like(series_x))
+    # Coefficients follow by differentiating
+    # ``-y * log1p(x) - mu * log1p(x) / x`` with respect to ``log(alpha)``.
+    score_coefficients = tuple(
+        ((-1.0) ** order) * (y - order * series_mu_safe / (order + 1.0)) for order in range(1, 9)
+    ) + (-y,)
+    # The final coefficient is the ninth-order term contributed by ``-y * log1p(x)``.
+    hessian_coefficients = tuple(order * coefficient for order, coefficient in enumerate(score_coefficients, start=1))
+    series_score = _nb2_horner_times_x(series_x, score_coefficients)
+    series_hessian = _nb2_horner_times_x(series_x, hessian_coefficients)
+
+    r = 1.0 / alpha_safe
+    x_fraction = jax.nn.sigmoid(log_x)
+    log1p_x = jax.nn.softplus(log_x)
+    direct_score = r * (log1p_x - x_fraction) - y * x_fraction
+    direct_hessian = -r * log1p_x + 2.0 * r * x_fraction - (r + y) * x_fraction * (1.0 - x_fraction)
+
+    return jnp.where(use_series, series_score, direct_score), jnp.where(use_series, series_hessian, direct_hessian)
+
+
+def _nb2_centered_lgamma_log_alpha_score_hessian(y: Array, alpha: Array) -> tuple[Array, Array]:
+    """Return summed log-probability derivatives of the centered log-Gamma ratio."""
+    max_y = jnp.max(y)
+    use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
+
+    def series(operands):
+        response, dispersion, _ = operands
+        c1, c2, c3, c4, c5 = _nb2_centered_lgamma_ratio_series_coefficients(response)
+        score = dispersion * (
+            c1 + dispersion * (2.0 * c2 + dispersion * (3.0 * c3 + dispersion * (4.0 * c4 + 5.0 * dispersion * c5)))
+        )
+        hessian = dispersion * (
+            c1 + dispersion * (4.0 * c2 + dispersion * (9.0 * c3 + dispersion * (16.0 * c4 + 25.0 * dispersion * c5)))
+        )
+        return jnp.sum(score), jnp.sum(hessian)
+
+    def nonseries(operands):
+        response, dispersion, max_response = operands
+        r = 1.0 / dispersion
+        use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_response <= r)
+
+        def algdiv(values):
+            response, dispersion = values
+
+            def objective(log_dispersion):
+                return jnp.sum(_nb2_algdiv_centered(response, jnp.exp(-log_dispersion)))
+
+            # Retain AD for this cancellation-resistant polynomial branch; it is
+            # selected only in the intermediate regime and avoids duplicate formulas.
+            score = jax.grad(objective)
+            return jax.value_and_grad(score)(jnp.log(dispersion))
+
+        def direct(values):
+            response, dispersion = values
+            r = 1.0 / dispersion
+            # Analytic log-dispersion derivatives avoid tracing the full direct
+            # likelihood through two nested automatic-differentiation passes.
+            delta_digamma = digamma(r + response) - digamma(r)
+            score = response - r * delta_digamma
+            hessian = r * delta_digamma + r**2 * (polygamma(1, r + response) - polygamma(1, r))
+            return jnp.sum(score), jnp.sum(hessian)
+
+        return lax.cond(use_algdiv, algdiv, direct, (response, dispersion))
+
+    return lax.cond(use_series, series, nonseries, (y, alpha, max_y))
+
+
+def _nb2_log_alpha_score_hessian(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array]:
+    """Return the summed NB2 NLL score and Hessian with respect to log-dispersion."""
+    gamma_score, gamma_hessian = _nb2_centered_lgamma_log_alpha_score_hessian(y, alpha)
+    mean_score, mean_hessian = _nb2_mean_log_alpha_score_hessian(y, log_mu, alpha)
+    return -(gamma_score + jnp.sum(mean_score)), -(gamma_hessian + jnp.sum(mean_hessian))
 
 
 class NegativeBinomial(ExponentialFamily):
@@ -643,18 +755,9 @@ class NegativeBinomial(ExponentialFamily):
         return mu + disp * (mu**2)
 
     def _log_alpha_score_and_hessian(self, X: Array, y: Array, eta: Array, log_alpha: Array) -> tuple[Array, Array]:
-        """
-        internally take exponential such as to take derivative wrt 1/alpha
-        """
-
-        def _ll(log_alpha_):
-            alpha_ = jnp.exp(log_alpha_)
-            return self.negloglikelihood(X, y, eta, alpha_)
-
-        _alpha_score = jax.grad(_ll)
-        _alpha_hess = jax.hessian(_ll)
-
-        return _alpha_score(log_alpha), _alpha_hess(log_alpha)
+        """Return the NLL score and Hessian with respect to log-dispersion."""
+        log_mu = self.glink.log_inverse(eta)
+        return _nb2_log_alpha_score_hessian(y, log_mu, jnp.exp(log_alpha))
 
     def update_dispersion(
         self,

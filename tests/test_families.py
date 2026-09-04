@@ -10,7 +10,16 @@ from jax import config
 from jax.scipy.special import gammaln, xlogy
 from jax.scipy.stats import nbinom
 
-from jaxqtl.distribution._expfam import Binomial, Gamma, Gaussian, NegativeBinomial, Poisson
+from jaxqtl.distribution._expfam import (
+    _nb2_centered_lgamma_ratio,
+    _nb2_log_alpha_score_hessian,
+    _nb2_mean_terms,
+    Binomial,
+    Gamma,
+    Gaussian,
+    NegativeBinomial,
+    Poisson,
+)
 from jaxqtl.distribution._links import IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
 
 
@@ -146,6 +155,44 @@ def test_negative_binomial_tiny_dispersion_is_stable_under_jit_and_vmap():
     for eager_value, compiled_value in zip(eager, compiled, strict=True):
         assert jnp.all(jnp.isfinite(eager_value))
         assert jnp.allclose(compiled_value, eager_value, rtol=1e-10, atol=1e-10)
+
+
+def test_nb2_centered_lgamma_ratio_graph_uses_scalar_cond():
+    y = jnp.asarray([0.0, 1.5, 10.0])
+    alpha = jnp.asarray(0.2)
+
+    jaxpr = jax.make_jaxpr(_nb2_centered_lgamma_ratio)(y, alpha).jaxpr
+
+    # Guard against eager evaluation of every numerical regime via ``jnp.where``.
+    assert any(eqn.primitive.name == "cond" for eqn in jaxpr.eqns)
+
+
+def test_nb2_mean_terms_graph_avoids_redundant_log1p():
+    y = jnp.asarray([0.0, 1.5, 10.0])
+    log_mu = jnp.log(jnp.asarray([0.1, 1.0, 10.0]))
+    alpha = jnp.asarray(0.2)
+
+    jaxpr = jax.make_jaxpr(_nb2_mean_terms)(y, log_mu, alpha).jaxpr
+
+    # A top-level ``log1p`` means the series path has resumed duplicate work.
+    assert all(eqn.primitive.name != "log1p" for eqn in jaxpr.eqns)
+
+
+@pytest.mark.parametrize("alpha", [1e-6, 5e-4, 0.3])
+def test_nb2_log_alpha_score_hessian_matches_public_likelihood_autodiff(alpha):
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    eta = jnp.log(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
+    X = jnp.empty((y.size, 0))
+    family = NegativeBinomial()
+    log_alpha = jnp.log(jnp.asarray(alpha))
+
+    def objective(value):
+        return family.negloglikelihood(X, y, eta, jnp.exp(value))
+
+    expected = jnp.asarray([jax.grad(objective)(log_alpha), jax.hessian(objective)(log_alpha)])
+    actual = jnp.asarray(jax.jit(_nb2_log_alpha_score_hessian)(y, eta, jnp.asarray(alpha)))
+
+    assert jnp.allclose(actual, expected, rtol=1e-9, atol=1e-9)
 
 
 @pytest.mark.parametrize(
