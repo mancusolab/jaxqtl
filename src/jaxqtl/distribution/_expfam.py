@@ -508,6 +508,24 @@ class Poisson(ExponentialFamily):
 
 _NB2_SERIES_SWITCH = 1e-3
 _NB2_ALGDIV_R_SWITCH = 1e3
+_NB2_EXPREL_SERIES_SWITCH = 1e-3
+_NB2_DISPERSION_MIN = 1e-9
+_NB2_DISPERSION_MAX = 1e9
+
+
+def _nb2_exprel(value: Array) -> Array:
+    """Evaluate ``expm1(value) / value`` with stable first and second derivatives at zero."""
+    use_series = jnp.abs(value) <= _NB2_EXPREL_SERIES_SWITCH
+    series = 1.0 / 5040.0
+    series = 1.0 / 720.0 + value * series
+    series = 1.0 / 120.0 + value * series
+    series = 1.0 / 24.0 + value * series
+    series = 1.0 / 6.0 + value * series
+    series = 1.0 / 2.0 + value * series
+    series = 1.0 + value * series
+    safe_value = jnp.where(use_series, jnp.ones_like(value), value)
+    direct = jnp.expm1(safe_value) / safe_value
+    return jnp.where(use_series, series, direct)
 
 
 def _nb2_log1p_over_x_series(x: Array) -> Array:
@@ -625,8 +643,8 @@ def _nb2_horner_times_x(x: Array, coefficients: tuple[Array, ...]) -> Array:
     return x * value
 
 
-def _nb2_mean_log_alpha_score_hessian(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array]:
-    """Return elementwise log-probability derivatives with respect to log-dispersion."""
+def _nb2_mean_log_alpha_derivatives(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array, Array, Array]:
+    """Return mean-term score, centered Hessian, and metric reductions."""
     alpha_positive = alpha > 0.0
     alpha_safe = jnp.where(alpha_positive, alpha, jnp.ones_like(alpha))
     log_alpha = jnp.log(alpha_safe)
@@ -644,21 +662,32 @@ def _nb2_mean_log_alpha_score_hessian(y: Array, log_mu: Array, alpha: Array) -> 
         ((-1.0) ** order) * (y - order * series_mu_safe / (order + 1.0)) for order in range(1, 9)
     ) + (-y,)
     # The final coefficient is the ninth-order term contributed by ``-y * log1p(x)``.
-    hessian_coefficients = tuple(order * coefficient for order, coefficient in enumerate(score_coefficients, start=1))
+    centered_hessian_coefficients = tuple(
+        (order - 1) * coefficient for order, coefficient in enumerate(score_coefficients, start=1)
+    )
     series_score = _nb2_horner_times_x(series_x, score_coefficients)
-    series_hessian = _nb2_horner_times_x(series_x, hessian_coefficients)
+    series_centered_hessian = _nb2_horner_times_x(series_x, centered_hessian_coefficients)
 
     r = 1.0 / alpha_safe
     x_fraction = jax.nn.sigmoid(log_x)
     log1p_x = jax.nn.softplus(log_x)
     direct_score = r * (log1p_x - x_fraction) - y * x_fraction
-    direct_hessian = -r * log1p_x + 2.0 * r * x_fraction - (r + y) * x_fraction * (1.0 - x_fraction)
+    direct_centered_hessian = 2.0 * r * (x_fraction - log1p_x) + (r + y) * x_fraction**2
 
-    return jnp.where(use_series, series_score, direct_score), jnp.where(use_series, series_hessian, direct_hessian)
+    score = jnp.where(use_series, series_score, direct_score)
+    centered_hessian = jnp.where(use_series, series_centered_hessian, direct_centered_hessian)
+    metric_fraction = jnp.where(alpha_positive, x_fraction, jnp.zeros_like(x_fraction))
+    metric_fraction_squared = metric_fraction**2
+    return (
+        jnp.sum(score),
+        jnp.sum(centered_hessian),
+        jnp.sum(metric_fraction_squared),
+        jnp.sum(metric_fraction_squared * metric_fraction),
+    )
 
 
-def _nb2_centered_lgamma_log_alpha_score_hessian(y: Array, alpha: Array) -> tuple[Array, Array]:
-    """Return summed log-probability derivatives of the centered log-Gamma ratio."""
+def _nb2_centered_lgamma_log_alpha_derivatives(y: Array, alpha: Array) -> tuple[Array, Array]:
+    """Return the log-Gamma score and Hessian minus score for log-dispersion."""
     max_y = jnp.max(y)
     use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
 
@@ -668,10 +697,10 @@ def _nb2_centered_lgamma_log_alpha_score_hessian(y: Array, alpha: Array) -> tupl
         score = dispersion * (
             c1 + dispersion * (2.0 * c2 + dispersion * (3.0 * c3 + dispersion * (4.0 * c4 + 5.0 * dispersion * c5)))
         )
-        hessian = dispersion * (
-            c1 + dispersion * (4.0 * c2 + dispersion * (9.0 * c3 + dispersion * (16.0 * c4 + 25.0 * dispersion * c5)))
+        centered_hessian = dispersion**2 * (
+            2.0 * c2 + dispersion * (6.0 * c3 + dispersion * (12.0 * c4 + 20.0 * dispersion * c5))
         )
-        return jnp.sum(score), jnp.sum(hessian)
+        return jnp.sum(score), jnp.sum(centered_hessian)
 
     def nonseries(operands):
         response, dispersion, max_response = operands
@@ -681,13 +710,14 @@ def _nb2_centered_lgamma_log_alpha_score_hessian(y: Array, alpha: Array) -> tupl
         def algdiv(values):
             response, dispersion = values
 
-            def objective(log_dispersion):
-                return jnp.sum(_nb2_algdiv_centered(response, jnp.exp(-log_dispersion)))
+            def objective(alpha):
+                return jnp.sum(_nb2_algdiv_centered(response, 1.0 / alpha))
 
             # Retain AD for this cancellation-resistant polynomial branch; it is
             # selected only in the intermediate regime and avoids duplicate formulas.
-            score = jax.grad(objective)
-            return jax.value_and_grad(score)(jnp.log(dispersion))
+            alpha_score = jax.grad(objective)
+            alpha_gradient, alpha_hessian = jax.value_and_grad(alpha_score)(dispersion)
+            return dispersion * alpha_gradient, dispersion**2 * alpha_hessian
 
         def direct(values):
             response, dispersion = values
@@ -696,19 +726,45 @@ def _nb2_centered_lgamma_log_alpha_score_hessian(y: Array, alpha: Array) -> tupl
             # likelihood through two nested automatic-differentiation passes.
             delta_digamma = digamma(r + response) - digamma(r)
             score = response - r * delta_digamma
-            hessian = r * delta_digamma + r**2 * (polygamma(1, r + response) - polygamma(1, r))
-            return jnp.sum(score), jnp.sum(hessian)
+            centered_hessian = (
+                2.0 * r * delta_digamma + r**2 * (polygamma(1, r + response) - polygamma(1, r)) - response
+            )
+            return jnp.sum(score), jnp.sum(centered_hessian)
 
         return lax.cond(use_algdiv, algdiv, direct, (response, dispersion))
 
     return lax.cond(use_series, series, nonseries, (y, alpha, max_y))
 
 
-def _nb2_log_alpha_score_hessian(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array]:
-    """Return the summed NB2 NLL score and Hessian with respect to log-dispersion."""
-    gamma_score, gamma_hessian = _nb2_centered_lgamma_log_alpha_score_hessian(y, alpha)
-    mean_score, mean_hessian = _nb2_mean_log_alpha_score_hessian(y, log_mu, alpha)
-    return -(gamma_score + jnp.sum(mean_score)), -(gamma_hessian + jnp.sum(mean_hessian))
+def _nb2_log_alpha_derivatives(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array, Array, Array]:
+    """Return the NB2 NLL score, Hessian minus score, and metric reductions."""
+    gamma_score, gamma_centered_hessian = _nb2_centered_lgamma_log_alpha_derivatives(y, alpha)
+    mean_score, mean_centered_hessian, a2, a3 = _nb2_mean_log_alpha_derivatives(y, log_mu, alpha)
+    return (
+        -(gamma_score + mean_score),
+        -(gamma_centered_hessian + mean_centered_hessian),
+        a2,
+        a3,
+    )
+
+
+def _nb2_riemannian_direction(score: Array, centered_hessian: Array, a2: Array, a3: Array) -> tuple[Array, Array]:
+    """Return the variance-manifold Newton direction and ``A3 / A2``."""
+    metric = 0.5 * a2
+    metric_valid = jnp.isfinite(metric) & (metric > 0.0) & jnp.isfinite(a3)
+    safe_a2 = jnp.where(metric_valid, a2, jnp.ones_like(a2))
+    connection_complement = jnp.where(metric_valid, a3 / safe_a2, jnp.zeros_like(a3))
+    connection_complement = jnp.clip(connection_complement, 0.0, 1.0)
+
+    finite_score = jnp.isfinite(score)
+    safe_score = jnp.where(finite_score, score, jnp.zeros_like(score))
+    riemannian_hessian = centered_hessian + connection_complement * safe_score
+    use_riemannian_hessian = jnp.isfinite(riemannian_hessian) & (riemannian_hessian > 0.0)
+    curvature = jnp.where(use_riemannian_hessian, riemannian_hessian, metric)
+    direction_valid = metric_valid & finite_score & jnp.isfinite(curvature) & (curvature > 0.0)
+    safe_curvature = jnp.where(direction_valid, curvature, jnp.ones_like(curvature))
+    direction = jnp.where(direction_valid, -safe_score / safe_curvature, jnp.zeros_like(score))
+    return direction, connection_complement
 
 
 class NegativeBinomial(ExponentialFamily):
@@ -754,11 +810,6 @@ class NegativeBinomial(ExponentialFamily):
         disp = jnp.asarray(disp)
         return mu + disp * (mu**2)
 
-    def _log_alpha_score_and_hessian(self, X: Array, y: Array, eta: Array, log_alpha: Array) -> tuple[Array, Array]:
-        """Return the NLL score and Hessian with respect to log-dispersion."""
-        log_mu = self.glink.log_inverse(eta)
-        return _nb2_log_alpha_score_hessian(y, log_mu, jnp.exp(log_alpha))
-
     def update_dispersion(
         self,
         X: ArrayLike,
@@ -767,19 +818,36 @@ class NegativeBinomial(ExponentialFamily):
         disp: ScalarLike = 0.1,
         step_size: ScalarLike = 0.1,
     ) -> Array:
-        # alpha := disp
-        # we optimize over log(alpha) isntead of alpha, but in theory we could compute exact geodesics on NB manifold
-        # which could enable Riemannian optimization, but this is fine for now...
-        X = jnp.asarray(X)
+        r"""Take one variance-manifold modified-Newton step for NB2 dispersion.
+
+        **Arguments:**
+
+        - `X`: Design matrix, retained for the common family API but unused by this update.
+        - `y`: Response vector.
+        - `eta`: Linear predictor used to hold the fitted means fixed during the dispersion step.
+        - `disp`: Current NB2 dispersion `$alpha$`.
+        - `step_size`: Scalar multiplier for the tangent direction.
+
+        **Returns:**
+
+        The updated dispersion, clipped to `$[10^{-9}, 10^9]$`.
+
+        **Failure Modes:**
+
+        A nonpositive or nonfinite Riemannian Hessian uses the variance-manifold metric as a natural-gradient
+        fallback. If that metric or the score is invalid, the clipped input dispersion is returned unchanged.
+        """
         y = jnp.asarray(y)
         eta = jnp.asarray(eta)
-        disp = jnp.asarray(disp)
+        alpha = jnp.clip(jnp.asarray(disp), _NB2_DISPERSION_MIN, _NB2_DISPERSION_MAX)
         step_size = jnp.asarray(step_size)
-        log_alpha = jnp.log(disp)
-        score, hess = self._log_alpha_score_and_hessian(X, y, eta, log_alpha)
-        log_alpha_n = jnp.clip(log_alpha - step_size * (score / hess), jnp.log(1e-9), jnp.log(1e9))
-
-        return jnp.exp(log_alpha_n)
+        log_mu = self.glink.log_inverse(eta)
+        score, centered_hessian, a2, a3 = _nb2_log_alpha_derivatives(y, log_mu, alpha)
+        direction, connection_complement = _nb2_riemannian_direction(score, centered_hessian, a2, a3)
+        scaled_direction = step_size * direction
+        candidate = alpha * (1.0 + scaled_direction * _nb2_exprel(connection_complement * scaled_direction))
+        candidate = jnp.where(jnp.isnan(candidate), alpha, candidate)
+        return jnp.clip(candidate, _NB2_DISPERSION_MIN, _NB2_DISPERSION_MAX)
 
     def estimate_dispersion(
         self,

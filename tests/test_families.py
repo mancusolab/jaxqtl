@@ -12,8 +12,10 @@ from jax.scipy.stats import nbinom
 
 from jaxqtl.distribution._expfam import (
     _nb2_centered_lgamma_ratio,
-    _nb2_log_alpha_score_hessian,
+    _nb2_exprel,
+    _nb2_log_alpha_derivatives,
     _nb2_mean_terms,
+    _nb2_riemannian_direction,
     Binomial,
     Gamma,
     Gaussian,
@@ -179,7 +181,7 @@ def test_nb2_mean_terms_graph_avoids_redundant_log1p():
 
 
 @pytest.mark.parametrize("alpha", [1e-6, 5e-4, 0.3])
-def test_nb2_log_alpha_score_hessian_matches_public_likelihood_autodiff(alpha):
+def test_nb2_centered_log_alpha_hessian_matches_public_likelihood_autodiff(alpha):
     y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
     eta = jnp.log(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
     X = jnp.empty((y.size, 0))
@@ -189,10 +191,113 @@ def test_nb2_log_alpha_score_hessian_matches_public_likelihood_autodiff(alpha):
     def objective(value):
         return family.negloglikelihood(X, y, eta, jnp.exp(value))
 
-    expected = jnp.asarray([jax.grad(objective)(log_alpha), jax.hessian(objective)(log_alpha)])
-    actual = jnp.asarray(jax.jit(_nb2_log_alpha_score_hessian)(y, eta, jnp.asarray(alpha)))
+    expected_score = jax.grad(objective)(log_alpha)
+    expected_hessian = jax.hessian(objective)(log_alpha)
+    score, centered_hessian, a2, a3 = jax.jit(_nb2_log_alpha_derivatives)(y, eta, jnp.asarray(alpha))
+    z = jax.nn.sigmoid(log_alpha + eta)
 
-    assert jnp.allclose(actual, expected, rtol=1e-9, atol=1e-9)
+    assert float(score) == pytest.approx(float(expected_score), rel=1e-9, abs=1e-9)
+    assert float(score + centered_hessian) == pytest.approx(float(expected_hessian), rel=1e-9, abs=1e-9)
+    assert float(a2) == pytest.approx(float(jnp.sum(z**2)), rel=1e-12, abs=1e-12)
+    assert float(a3) == pytest.approx(float(jnp.sum(z**3)), rel=1e-12, abs=1e-12)
+
+
+def test_nb2_centered_log_alpha_hessian_is_stable_at_poisson_boundary():
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    mu = jnp.asarray([0.1, 1.0, 10.0, 100.0])
+    alpha = jnp.asarray(1e-12)
+    _, centered_hessian, _, _ = _nb2_log_alpha_derivatives(y, jnp.log(mu), alpha)
+    expected_alpha_hessian = jnp.sum(y * (y - 1.0) * (2.0 * y - 1.0) / 6.0 - y * mu**2 + 2.0 * mu**3 / 3.0)
+
+    assert jnp.isfinite(centered_hessian)
+    assert float(centered_hessian / alpha**2) == pytest.approx(float(expected_alpha_hessian), rel=1e-8)
+
+
+def test_nb2_exprel_is_stable_under_jit_and_second_order_autodiff():
+    values = jnp.asarray([-1.0, -1e-12, 0.0, 1e-12, 1.0])
+    safe_values = jnp.where(values == 0.0, jnp.ones_like(values), values)
+    expected = jnp.where(values == 0.0, 1.0, jnp.expm1(values) / safe_values)
+    actual = jax.jit(jax.vmap(_nb2_exprel))(values)
+    first_derivative = jax.grad(_nb2_exprel)(0.0)
+    second_derivative = jax.grad(jax.grad(_nb2_exprel))(0.0)
+
+    assert jnp.all(jnp.isfinite(actual))
+    assert jnp.allclose(actual, expected, rtol=1e-12, atol=1e-12)
+    assert float(first_derivative) == pytest.approx(0.5, rel=1e-12, abs=1e-12)
+    assert float(second_derivative) == pytest.approx(1.0 / 3.0, rel=1e-12, abs=1e-12)
+
+
+def test_nb2_riemannian_hessian_matches_explicit_log_alpha_formula():
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    eta = jnp.log(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
+    alpha = jnp.asarray(0.3)
+    X = jnp.empty((y.size, 0))
+    family = NegativeBinomial()
+    score, centered_hessian, a2, a3 = _nb2_log_alpha_derivatives(y, eta, alpha)
+    connection_complement = a3 / a2
+
+    def objective(log_alpha):
+        return family.negloglikelihood(X, y, eta, jnp.exp(log_alpha))
+
+    ordinary_hessian = jax.hessian(objective)(jnp.log(alpha))
+    expected = ordinary_hessian - (1.0 - connection_complement) * score
+    actual = centered_hessian + connection_complement * score
+
+    assert float(actual) == pytest.approx(float(expected), rel=1e-9, abs=1e-9)
+
+
+def test_nb2_riemannian_direction_uses_positive_hessian_and_metric_fallback():
+    score = jnp.asarray(2.0)
+    a2 = jnp.asarray(4.0)
+    a3 = jnp.asarray(1.0)
+    positive_direction, connection_complement = _nb2_riemannian_direction(score, jnp.asarray(3.0), a2, a3)
+    fallback_direction, fallback_connection = _nb2_riemannian_direction(score, jnp.asarray(-2.0), a2, a3)
+
+    assert float(connection_complement) == pytest.approx(0.25)
+    assert float(positive_direction) == pytest.approx(-2.0 / 3.5)
+    assert float(fallback_connection) == pytest.approx(0.25)
+    assert float(fallback_direction) == pytest.approx(-1.0)
+    assert float(score * fallback_direction) <= 0.0
+
+
+def test_nb2_riemannian_direction_is_noop_for_degenerate_metric():
+    direction, connection_complement = _nb2_riemannian_direction(
+        jnp.asarray(1.0), jnp.asarray(-1.0), jnp.asarray(0.0), jnp.asarray(0.0)
+    )
+
+    assert float(direction) == 0.0
+    assert float(connection_complement) == 0.0
+
+
+def test_negative_binomial_dispersion_update_uses_variance_manifold_retraction():
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    eta = jnp.log(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
+    X = jnp.empty((y.size, 0))
+    alpha = jnp.asarray(0.3)
+    step_size = jnp.asarray(0.1)
+    family = NegativeBinomial()
+    score, centered_hessian, a2, a3 = _nb2_log_alpha_derivatives(y, eta, alpha)
+    direction, connection_complement = _nb2_riemannian_direction(score, centered_hessian, a2, a3)
+    scaled_direction = step_size * direction
+    expected = alpha * (1.0 + scaled_direction * _nb2_exprel(connection_complement * scaled_direction))
+
+    actual = family.update_dispersion(X, y, eta, alpha, step_size)
+
+    assert float(actual) == pytest.approx(float(expected), rel=1e-12, abs=1e-12)
+
+
+def test_negative_binomial_dispersion_update_is_finite_and_bounded_for_extreme_inputs():
+    y = jnp.asarray([0.0, 0.5, 2.25, 100.0])
+    eta = jnp.asarray([-20.0, -2.0, 2.0, 20.0])
+    X = jnp.empty((y.size, 0))
+    dispersions = jnp.asarray([1e-12, 1e-9, 1e-4, 0.2, 10.0, 1e9, 1e12])
+    family = NegativeBinomial()
+
+    actual = jax.jit(jax.vmap(lambda alpha: family.update_dispersion(X, y, eta, alpha, 1.0)))(dispersions)
+
+    assert jnp.all(jnp.isfinite(actual))
+    assert jnp.all(actual >= 1e-9)
+    assert jnp.all(actual <= 1e9)
 
 
 @pytest.mark.parametrize(
