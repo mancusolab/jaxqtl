@@ -507,7 +507,8 @@ class Poisson(ExponentialFamily):
 
 
 _NB2_SERIES_SWITCH = 1e-3
-_NB2_ALGDIV_R_SWITCH = 1e3
+_NB2_ALGDIV_R_SWITCH = 8.0
+_NB2_LOG1P_REMAINDER_SERIES_SWITCH = 0.1
 _NB2_EXPREL_SERIES_SWITCH = 1e-3
 _NB2_DISPERSION_MIN = 1e-9
 _NB2_DISPERSION_MAX = 1e9
@@ -558,18 +559,35 @@ def _nb2_centered_lgamma_ratio_series(y: Array, alpha: Array) -> Array:
     return alpha * (c1 + alpha * (c2 + alpha * (c3 + alpha * (c4 + alpha * c5))))
 
 
+def _nb2_one_plus_x_log1p_minus_x(x: Array) -> Array:
+    """Evaluate ``(1 + x) * log1p(x) - x`` without cancellation near zero."""
+    use_series = jnp.abs(x) <= _NB2_LOG1P_REMAINDER_SERIES_SWITCH
+    series = 1.0 / 90.0
+    series = -1.0 / 72.0 + x * series
+    series = 1.0 / 56.0 + x * series
+    series = -1.0 / 42.0 + x * series
+    series = 1.0 / 30.0 + x * series
+    series = -1.0 / 20.0 + x * series
+    series = 1.0 / 12.0 + x * series
+    series = -1.0 / 6.0 + x * series
+    series = x**2 * (0.5 + x * series)
+    safe_x = jnp.where(use_series, jnp.ones_like(x), x)
+    direct = (1.0 + safe_x) * jnp.log1p(safe_x) - safe_x
+    return jnp.where(use_series, series, direct)
+
+
 def _nb2_algdiv_centered(y: Array, r: Array) -> Array:
-    """Evaluate the centered log-Gamma ratio with the large-``r`` algdiv expansion."""
+    """Evaluate the centered log-Gamma ratio with the TOMS 708 expansion for ``r >= 8``."""
     c0 = 0.0833333333333333
     c1 = -0.00277777777760991
     c2 = 0.000793650666825390
     c3 = -0.000595202931351870
     c4 = 0.000837308034031215
-    c5 = -0.00165322962708173
+    c5 = -0.00165322962780713
 
     h = y / r
-    x = h / (1.0 + h)
-    d = r + (y - 0.5)
+    correction_weight = h / (1.0 + h)
+    x = 1.0 / (1.0 + h)
     x2 = x * x
     s3 = 1.0 + x + x2
     s5 = 1.0 + x + x2 * s3
@@ -578,8 +596,8 @@ def _nb2_algdiv_centered(y: Array, r: Array) -> Array:
     s11 = 1.0 + x + x2 * s9
     t = (1.0 / r) ** 2
     w = ((((c5 * s11 * t + c4 * s9) * t + c3 * s7) * t + c2 * s5) * t + c1 * s3) * t + c0
-    w *= x / r
-    return d * jnp.log1p(y / r) - w - y
+    w *= correction_weight / r
+    return r * _nb2_one_plus_x_log1p_minus_x(h) - 0.5 * jnp.log1p(h) - w
 
 
 def _nb2_centered_lgamma_ratio(y: Array, alpha: Array) -> Array:
@@ -588,13 +606,13 @@ def _nb2_centered_lgamma_ratio(y: Array, alpha: Array) -> Array:
     use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
 
     def series(operands):
-        response, dispersion, _ = operands
+        response, dispersion = operands
         return _nb2_centered_lgamma_ratio_series(response, dispersion)
 
     def nonseries(operands):
-        response, dispersion, max_response = operands
+        response, dispersion = operands
         r = 1.0 / dispersion
-        use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_response <= r)
+        use_algdiv = r >= _NB2_ALGDIV_R_SWITCH
 
         def algdiv(values):
             response, r, _ = values
@@ -606,7 +624,7 @@ def _nb2_centered_lgamma_ratio(y: Array, alpha: Array) -> Array:
 
         return lax.cond(use_algdiv, algdiv, direct, (response, r, dispersion))
 
-    return lax.cond(use_series, series, nonseries, (y, alpha, max_y))
+    return lax.cond(use_series, series, nonseries, (y, alpha))
 
 
 def _nb2_mean_terms(y: Array, log_mu: Array, alpha: Array) -> Array:
@@ -692,7 +710,7 @@ def _nb2_centered_lgamma_log_alpha_derivatives(y: Array, alpha: Array) -> tuple[
     use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
 
     def series(operands):
-        response, dispersion, _ = operands
+        response, dispersion = operands
         c1, c2, c3, c4, c5 = _nb2_centered_lgamma_ratio_series_coefficients(response)
         score = dispersion * (
             c1 + dispersion * (2.0 * c2 + dispersion * (3.0 * c3 + dispersion * (4.0 * c4 + 5.0 * dispersion * c5)))
@@ -703,9 +721,9 @@ def _nb2_centered_lgamma_log_alpha_derivatives(y: Array, alpha: Array) -> tuple[
         return jnp.sum(score), jnp.sum(centered_hessian)
 
     def nonseries(operands):
-        response, dispersion, max_response = operands
+        response, dispersion = operands
         r = 1.0 / dispersion
-        use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_response <= r)
+        use_algdiv = r >= _NB2_ALGDIV_R_SWITCH
 
         def algdiv(values):
             response, dispersion = values
@@ -733,7 +751,7 @@ def _nb2_centered_lgamma_log_alpha_derivatives(y: Array, alpha: Array) -> tuple[
 
         return lax.cond(use_algdiv, algdiv, direct, (response, dispersion))
 
-    return lax.cond(use_series, series, nonseries, (y, alpha, max_y))
+    return lax.cond(use_series, series, nonseries, (y, alpha))
 
 
 def _nb2_log_alpha_derivatives(y: Array, log_mu: Array, alpha: Array) -> tuple[Array, Array, Array, Array]:
