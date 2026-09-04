@@ -506,11 +506,104 @@ class Poisson(ExponentialFamily):
         return rdm.poisson(key, lam=lam)
 
 
+_NB2_SERIES_SWITCH = 1e-3
+_NB2_ALGDIV_R_SWITCH = 1e3
+
+
+def _nb2_log1p_over_x(x: Array) -> Array:
+    """Evaluate ``log1p(x) / x`` with stable derivatives near zero."""
+    small = jnp.abs(x) <= _NB2_SERIES_SWITCH
+    series = 1.0 / 9.0
+    series = -1.0 / 8.0 + x * series
+    series = 1.0 / 7.0 + x * series
+    series = -1.0 / 6.0 + x * series
+    series = 1.0 / 5.0 + x * series
+    series = -1.0 / 4.0 + x * series
+    series = 1.0 / 3.0 + x * series
+    series = -1.0 / 2.0 + x * series
+    series = 1.0 + x * series
+    x_safe = jnp.where(small, jnp.ones_like(x), x)
+    direct = jnp.log1p(x_safe) / x_safe
+    return jnp.where(small, series, direct)
+
+
+def _nb2_centered_lgamma_ratio_series(y: Array, alpha: Array) -> Array:
+    """Expand ``gammaln(1/alpha + y) - gammaln(1/alpha) + y log(alpha)`` at zero."""
+    ym1 = y - 1.0
+    c1 = y * ym1 / 2.0
+    c2 = -y * ym1 * (2.0 * y - 1.0) / 12.0
+    c3 = y**2 * ym1**2 / 12.0
+    c4 = -y * ym1 * (2.0 * y - 1.0) * (3.0 * y**2 - 3.0 * y - 1.0) / 120.0
+    c5 = y**2 * ym1**2 * (2.0 * y**2 - 2.0 * y - 1.0) / 60.0
+    return alpha * (c1 + alpha * (c2 + alpha * (c3 + alpha * (c4 + alpha * c5))))
+
+
+def _nb2_algdiv_centered(y: Array, r: Array) -> Array:
+    """Evaluate the centered log-Gamma ratio with the large-``r`` algdiv expansion."""
+    c0 = 0.0833333333333333
+    c1 = -0.00277777777760991
+    c2 = 0.000793650666825390
+    c3 = -0.000595202931351870
+    c4 = 0.000837308034031215
+    c5 = -0.00165322962708173
+
+    h = y / r
+    x = h / (1.0 + h)
+    d = r + (y - 0.5)
+    x2 = x * x
+    s3 = 1.0 + x + x2
+    s5 = 1.0 + x + x2 * s3
+    s7 = 1.0 + x + x2 * s5
+    s9 = 1.0 + x + x2 * s7
+    s11 = 1.0 + x + x2 * s9
+    t = (1.0 / r) ** 2
+    w = ((((c5 * s11 * t + c4 * s9) * t + c3 * s7) * t + c2 * s5) * t + c1 * s3) * t + c0
+    w *= x / r
+    return d * jnp.log1p(y / r) - w - y
+
+
+def _nb2_centered_lgamma_ratio(y: Array, alpha: Array) -> Array:
+    """Evaluate the NB2 log-Gamma ratio using series, algdiv, or direct evaluation."""
+    max_y = jnp.max(y)
+    use_series = (alpha <= 0.0) | (alpha * max_y <= _NB2_SERIES_SWITCH)
+    alpha_safe = jnp.where(use_series, jnp.ones_like(alpha), alpha)
+    r = 1.0 / alpha_safe
+    direct = gammaln(r + y) - gammaln(r) + y * jnp.log(alpha_safe)
+    algdiv = _nb2_algdiv_centered(y, r)
+    use_algdiv = (r >= _NB2_ALGDIV_R_SWITCH) & (max_y <= r)
+    return jnp.where(use_series, _nb2_centered_lgamma_ratio_series(y, alpha), jnp.where(use_algdiv, algdiv, direct))
+
+
+def _nb2_mean_terms(y: Array, log_mu: Array, alpha: Array) -> Array:
+    """Return the NB2 mean-dependent log-probability terms without exponentiating extreme means."""
+    alpha_positive = alpha > 0.0
+    alpha_safe = jnp.where(alpha_positive, alpha, jnp.ones_like(alpha))
+    log_alpha = jnp.log(alpha_safe)
+    log_x = log_alpha + log_mu
+    use_series = ~alpha_positive | (log_x <= jnp.log(_NB2_SERIES_SWITCH))
+
+    series_mu = jnp.exp(jnp.where(use_series, log_mu, jnp.zeros_like(log_mu)))
+    finite_series_mu = jnp.isfinite(series_mu)
+    series_x = alpha * jnp.where(finite_series_mu, series_mu, jnp.ones_like(series_mu))
+    series_x = jnp.where(finite_series_mu, series_x, jnp.where(alpha == 0.0, 0.0, jnp.inf))
+    series_log_probability = log_mu - jnp.log1p(series_x)
+    series_mean_penalty = series_mu * _nb2_log1p_over_x(series_x)
+
+    direct_log_x = jnp.where(use_series, jnp.zeros_like(log_x), log_x)
+    direct_log_probability = -log_alpha - jax.nn.softplus(-direct_log_x)
+    direct_mean_penalty = jax.nn.softplus(direct_log_x) / alpha_safe
+
+    log_probability = jnp.where(use_series, series_log_probability, direct_log_probability)
+    log_probability = jnp.where(y == 0.0, jnp.zeros_like(log_probability), log_probability)
+    mean_penalty = jnp.where(use_series, series_mean_penalty, direct_mean_penalty)
+    return y * log_probability - mean_penalty
+
+
 class NegativeBinomial(ExponentialFamily):
     r"""NB2 parameterization with dispersion $\alpha$ (variance $\mu + \alpha \mu^2$) and density
     $f(y \mid \mu, \alpha) = \frac{\Gamma(y+r)}{\Gamma(r)\,y!}\left(\frac{r}{r+\mu}\right)^r
-    \left(\frac{\mu}{r+\mu}\right)^y$ where $r = 1/\alpha$. The dispersion satisfies $\alpha > 0$ and the mean $\mu$
-    lies in $\mathbb{R}_{+}$.
+    \left(\frac{\mu}{r+\mu}\right)^y$ where $r = 1/\alpha$ for $\alpha > 0$. The dispersion satisfies
+    $\alpha \geq 0$, the mean $\mu$ lies in $\mathbb{R}_{+}$, and $\alpha = 0$ evaluates the Poisson limit.
 
     !!! info
 
@@ -537,18 +630,12 @@ class NegativeBinomial(ExponentialFamily):
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, disp: ScalarLike) -> Array:
         y = jnp.asarray(y)
         eta = jnp.asarray(eta)
-        disp = jnp.asarray(disp)
-        log_r = -jnp.log(disp)
-        r = jnp.exp(log_r)
+        alpha = jnp.asarray(disp)
         log_mu = self.glink.log_inverse(eta)
-        log_mu_plus_r = jnp.logaddexp(log_mu, log_r)
-
-        log_p = log_mu - log_mu_plus_r
-        log1m_p = log_r - log_mu_plus_r
-
-        term1 = gammaln(y + r) - gammaln(y + 1) - gammaln(r)
-        term2 = r * log1m_p + y * log_p
-        return -jnp.sum(term1 + term2)
+        logprob = _nb2_centered_lgamma_ratio(y, alpha) - gammaln(y + 1.0) + _nb2_mean_terms(y, log_mu, alpha)
+        nll = -jnp.sum(logprob)
+        invalid = (alpha < 0.0) | jnp.any(y < 0.0)
+        return jnp.where(invalid, jnp.inf, nll)
 
     def variance(self, mu: ArrayLike, disp: ScalarLike = 1.0) -> Array:
         mu = jnp.asarray(mu)

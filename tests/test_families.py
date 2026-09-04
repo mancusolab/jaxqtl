@@ -8,6 +8,7 @@ import jax.random as rdm
 
 from jax import config
 from jax.scipy.special import gammaln, xlogy
+from jax.scipy.stats import nbinom
 
 from jaxqtl.distribution._expfam import Binomial, Gamma, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import IdentityLink, InverseLink, LogitLink, LogLink, NBLink, PowerLink
@@ -83,6 +84,83 @@ def test_negative_binomial_negloglikelihood_is_finite_for_extreme_log_predictors
     actual = NegativeBinomial().negloglikelihood(jnp.empty((y.size, 0)), y, eta, 0.5)
 
     assert jnp.isfinite(actual)
+
+
+def test_negative_binomial_negloglikelihood_matches_jax_in_moderate_regime():
+    y = jnp.asarray([0.0, 1.0, 3.0, 20.0])
+    mu = jnp.asarray([0.2, 1.5, 4.0, 25.0])
+    alpha = 0.4
+    size = 1.0 / alpha
+
+    actual = NegativeBinomial().negloglikelihood(jnp.empty((y.size, 0)), y, jnp.log(mu), alpha)
+    expected = -jnp.sum(nbinom.logpmf(y, size, size / (size + mu)))
+
+    assert float(actual) == pytest.approx(float(expected), rel=1e-12, abs=1e-12)
+
+
+def test_negative_binomial_poisson_limit_is_infinite_not_nan_for_extreme_log_predictor():
+    y = jnp.asarray([0.0, 2.0])
+    eta = jnp.asarray([-1000.0, 1000.0])
+
+    actual = NegativeBinomial().negloglikelihood(jnp.empty((y.size, 0)), y, eta, 0.0)
+
+    assert jnp.isposinf(actual)
+
+
+def test_negative_binomial_poisson_limit_has_finite_first_and_second_derivatives():
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    mu = jnp.asarray([0.1, 1.0, 10.0, 100.0])
+    eta = jnp.log(mu)
+    X = jnp.empty((y.size, 0))
+    family = NegativeBinomial()
+
+    def objective(alpha):
+        return family.negloglikelihood(X, y, eta, alpha)
+
+    actual = objective(0.0)
+    gradient = jax.grad(objective)(0.0)
+    hessian = jax.grad(jax.grad(objective))(0.0)
+    expected = Poisson().negloglikelihood(X, y, eta, 1.0)
+    expected_gradient = jnp.sum(y * mu - mu**2 / 2.0 - y * (y - 1.0) / 2.0)
+    expected_hessian = jnp.sum(y * (y - 1.0) * (2.0 * y - 1.0) / 6.0 - y * mu**2 + 2.0 * mu**3 / 3.0)
+
+    assert float(actual) == pytest.approx(float(expected), rel=1e-12, abs=1e-12)
+    assert float(gradient) == pytest.approx(float(expected_gradient), rel=1e-12, abs=1e-12)
+    assert float(hessian) == pytest.approx(float(expected_hessian), rel=1e-12, abs=1e-12)
+
+
+def test_negative_binomial_tiny_dispersion_is_stable_under_jit_and_vmap():
+    y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    eta = jnp.log(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
+    X = jnp.empty((y.size, 0))
+    family = NegativeBinomial()
+
+    def value_gradient_hessian(alpha):
+        objective = lambda value: family.negloglikelihood(X, y, eta, value)
+        return objective(alpha), jax.grad(objective)(alpha), jax.grad(jax.grad(objective))(alpha)
+
+    alpha = jnp.asarray([0.0, 1e-16, 1e-12, 1e-9, 1e-6, 1e-3, 1.0])
+    eager = jax.vmap(value_gradient_hessian)(alpha)
+    compiled = jax.jit(jax.vmap(value_gradient_hessian))(alpha)
+
+    for eager_value, compiled_value in zip(eager, compiled, strict=True):
+        assert jnp.all(jnp.isfinite(eager_value))
+        assert jnp.allclose(compiled_value, eager_value, rtol=1e-10, atol=1e-10)
+
+
+@pytest.mark.parametrize(
+    ("y", "disp"),
+    [
+        (jnp.asarray([0.0, -0.5, 2.0]), 0.2),
+        (jnp.asarray([0.0, 0.5, 2.0]), -0.2),
+    ],
+)
+def test_negative_binomial_rejects_negative_response_or_dispersion(y, disp):
+    eta = jnp.zeros_like(y)
+
+    actual = NegativeBinomial().negloglikelihood(jnp.empty((y.size, 0)), y, eta, disp)
+
+    assert jnp.isposinf(actual)
 
 
 @pytest.mark.parametrize(
