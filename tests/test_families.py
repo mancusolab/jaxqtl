@@ -11,6 +11,7 @@ from jax.scipy.special import gammaln, xlogy
 from jax.scipy.stats import nbinom
 
 from jaxqtl.distribution._expfam import (
+    _nb2_algdiv_centered,
     _nb2_centered_lgamma_ratio,
     _nb2_log_alpha_score_hessian,
     _nb2_mean_terms,
@@ -165,6 +166,17 @@ def test_nb2_centered_lgamma_ratio_graph_uses_scalar_cond():
 
     # Guard against eager evaluation of every numerical regime via ``jnp.where``.
     assert any(eqn.primitive.name == "cond" for eqn in jaxpr.eqns)
+
+
+def test_nb2_algdiv_centered_matches_lgamma_for_fractional_counts():
+    y = jnp.asarray([0.0, 0.5, 2.25, 10.0, 50.0])
+    r = jnp.asarray(10.0)
+    alpha = 1.0 / r
+    expected = gammaln(r + y) - gammaln(r) + y * jnp.log(alpha)
+
+    actual = _nb2_algdiv_centered(y, r)
+
+    assert jnp.allclose(actual, expected, rtol=0.0, atol=1e-11)
 
 
 def test_nb2_mean_terms_graph_avoids_redundant_log1p():
