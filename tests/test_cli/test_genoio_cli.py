@@ -156,6 +156,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         nperm=1000,
         max_iter=1000,
         tol=1e-3,
+        gtol=1e-3,
         step_size=1.0,
         seed=0,
         solver="cholesky",
@@ -171,6 +172,15 @@ def test_common_setup_rejects_robust_score_test() -> None:
 
     with pytest.raises(ValueError, match="--robust-se is only compatible with --test wald"):
         cli._common_setup(args, _LoggerStub())
+
+
+def test_common_setup_forwards_gradient_tolerance() -> None:
+    args = _common_setup_args("cis")
+    args.gtol = 2e-5
+
+    _, _, model, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert model.gtol == args.gtol
 
 
 def test_bfile_constructs_genoio_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -455,6 +465,8 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
             "--test",
             "score",
             "--set-offset-from-libsize",
+            "--gtol",
+            "1e-4",
             "--normalize-covar",
             "--platform",
             "cpu",

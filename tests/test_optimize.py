@@ -6,15 +6,16 @@ import numpy as np
 import pytest
 
 import equinox as eqx
+import jax
 import jax.numpy as jnp
 
 from jax import config, random
 
-from jaxqtl.distribution._expfam import ExponentialFamily, Poisson
+from jaxqtl.distribution._expfam import ExponentialFamily, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import AbstractLink, IdentityLink
 from jaxqtl.infer import irls
 from jaxqtl.infer._optimize import infer_beta_params, lstsq
-from jaxqtl.infer._solve import CholeskySolve, QRSolve
+from jaxqtl.infer._solve import AbstractLinearSolve, CholeskySolve, QRSolve
 
 
 config.update("jax_enable_x64", True)
@@ -61,8 +62,9 @@ def _run_single_iteration(family, y, disp_init=1.0):
 
 
 @pytest.mark.parametrize("step_size", (0.0, -1.0, float("nan"), float("inf"), float("-inf")))
-def test_irls_rejects_invalid_step_size_at_public_boundary(step_size):
-    with pytest.raises(ValueError, match="step_size must be finite and greater than 0"):
+@pytest.mark.parametrize("parameter", ("step_size", "gtol"))
+def test_irls_rejects_invalid_solver_control_at_public_boundary(step_size, parameter):
+    with pytest.raises(ValueError, match=f"{parameter} must be finite and greater than 0"):
         irls(
             jnp.ones((1, 1)),
             jnp.asarray([1.0]),
@@ -71,8 +73,8 @@ def test_irls_rejects_invalid_step_size_at_public_boundary(step_size):
             _QuadraticTrialFamily(optimum=0.0),
             CholeskySolve(),
             max_iter=1,
-            step_size=step_size,
             disp_init=jnp.asarray(1.0),
+            **{parameter: step_size},
         )
 
 
@@ -113,6 +115,96 @@ def test_irls_exhaustion_preserves_prior_finite_state_and_reports_failure():
     assert np.all(np.isfinite(np.asarray(state.beta)))
     assert np.isfinite(np.asarray(state.disp))
     assert not bool(state.converged)
+
+
+def test_irls_small_likelihood_change_does_not_hide_large_beta_gradient():
+    state = irls(
+        jnp.ones((4, 1)),
+        jnp.full(4, 2.0),
+        jnp.asarray(0.0),
+        jnp.zeros(4),
+        Poisson(),
+        CholeskySolve(),
+        max_iter=2,
+        step_size=1e-6,
+        disp_init=1.0,
+    )
+
+    assert state.num_iters == 2
+    assert not bool(state.converged)
+
+
+@pytest.mark.parametrize(("counts", "converged"), [([0, 1, 1, 2], True), ([0, 0, 0, 4], False)])
+def test_irls_lower_dispersion_bound_requires_correct_gradient_sign(counts, converged):
+    # Both have mean one. A sub-roundoff step leaves the parameters unchanged;
+    # only the underdispersed sample has a constrained optimum at the floor.
+    state = irls(
+        jnp.ones((4, 1)),
+        jnp.asarray(counts, dtype=float),
+        jnp.asarray(0.0),
+        jnp.zeros(4),
+        NegativeBinomial(),
+        CholeskySolve(),
+        max_iter=2,
+        step_size=1e-30,
+        disp_init=1e-9,
+    )
+
+    assert bool(state.converged) == converged
+
+
+def test_irls_backtracking_uses_one_weighted_solve():
+    calls = []
+
+    class CountingSolve(AbstractLinearSolve):
+        def wgt_lstsq(self, X, r, weights):
+            jax.debug.callback(lambda: calls.append(1))
+            return CholeskySolve().wgt_lstsq(X, r, weights)
+
+        def lstsq(self, X, r):
+            return CholeskySolve().lstsq(X, r)
+
+    state = irls(
+        jnp.ones((1, 1)),
+        jnp.asarray([16.0]),
+        jnp.asarray(0.0),
+        jnp.zeros(1),
+        _QuadraticTrialFamily(optimum=0.75),
+        CountingSolve(),
+        max_iter=1,
+        disp_init=1.0,
+    )
+    jax.block_until_ready(state)
+    jax.effects_barrier()
+
+    np.testing.assert_allclose(np.asarray(state.beta), [1.0])
+    assert len(calls) == 1
+
+
+def test_irls_gradient_check_is_invariant_to_column_units_under_vmap():
+    X = jnp.column_stack((jnp.ones(6), jnp.asarray([-1.0, -1.0, 0.0, 0.0, 1.0, 1.0])))
+    y = jnp.asarray([0.0, 1.0, 1.0, 2.0, 2.0, 4.0])
+    scales = jnp.asarray([1e-4, 1.0, 1e4])
+
+    @eqx.filter_jit
+    @eqx.filter_vmap
+    def fit(scale):
+        design = X * jnp.asarray([1.0, scale])
+        return irls(
+            design, y, jnp.asarray(0.0), jnp.zeros(6), Poisson(), CholeskySolve(), tol=1.0, gtol=1e-6, disp_init=1.0
+        )
+
+    states = fit(scales)
+    single = irls(X, y, jnp.asarray(0.0), jnp.zeros(6), Poisson(), CholeskySolve(), tol=1.0, gtol=1e-6, disp_init=1.0)
+
+    assert jnp.all(states.converged)
+    np.testing.assert_array_equal(states.num_iters, jnp.full(3, single.num_iters))
+    np.testing.assert_allclose(states.beta[:, 0], single.beta[0], atol=1e-10)
+    np.testing.assert_allclose(states.beta[:, 1] * scales, single.beta[1], atol=1e-10)
+    # Independent Poisson NLL gradient at the returned coefficients.
+    gradient = X.T @ (jnp.exp(X @ single.beta) - y)
+    error = jnp.max(jnp.abs(gradient) / (y.size * jnp.sqrt(jnp.mean(X**2, axis=0))))
+    assert error <= 1e-6
 
 
 @pytest.mark.parametrize("solver", [QRSolve(), CholeskySolve()])
