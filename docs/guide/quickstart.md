@@ -22,13 +22,10 @@ Both approaches report a lead variant and a gene-level p-value:
 | SPA + ACAT | Fast gene-level testing without permutations | Sensitive to variant p-value calibration; SPA strongly recommended |
 | Beta permutation | Calibrate statistics against a permutation reference | More computation; requires valid permutations and successful calibration |
 
-!!! warning "Compute offsets from the full gene matrix"
-
-    `--set-offset-from-libsize` computes `log(library size)` from every phenotype still present in the input file.
-    If the phenotype file has already been restricted, supply the precomputed log offset with `--offset` instead.
-    See [Offsets](offsets.md) before analyzing production data.
 
 ### Permutation calibration
+
+Permutation testing fits a Beta approximation to the permutation-derived null distribution to estimate a gene-level p-value.
 
 ```bash
 jaxqtl cis \
@@ -45,6 +42,12 @@ jaxqtl cis \
 ```
 
 The command writes `tutorial/output/quickstart.cis.score.perm.parquet.gz`.
+
+!!! warning "Compute offsets from the full gene matrix"
+
+    `--set-offset-from-libsize` computes `log(library size)` from every phenotype still present in the input file.
+    If the phenotype file has already been restricted, supply the precomputed log offset with `--offset` instead.
+    See [Offsets](offsets.md) before analyzing production data.
 
 ### Faster scans with SPA and ACAT
 
@@ -66,8 +69,7 @@ jaxqtl cis \
   --out tutorial/output/quickstart_spa_acat
 ```
 
-The command writes `tutorial/output/quickstart_spa_acat.cis.score.spa.acat.parquet.gz`. No permutations are run,
-and `--nperm` is unused.
+The command writes `tutorial/output/quickstart_spa_acat.cis.score.spa.acat.parquet.gz`.
 
 !!! warning "Use SPA with score-test ACAT"
 
