@@ -10,10 +10,11 @@ import jax
 import jax.numpy as jnp
 
 from jaxqtl.distribution import NegativeBinomial, Poisson
-from jaxqtl.hypothesis import ACAT, BetaPermutation, GaussianCGF, ScoreTest, SpaTest, WaldTest
+from jaxqtl.hypothesis import AbstractAggregateTest, ACAT, BetaPermutation, GaussianCGF, ScoreTest, SpaTest, WaldTest
 from jaxqtl.hypothesis._aggregate import BetaCalibration
 from jaxqtl.infer import BetaParams, GeneralizedLinearModel, HuberError, LinearModel
 from jaxqtl.map import _scan
+from jaxqtl.map.cis import _run_cis_scan, map_cis_single, select_lead_variant
 
 
 def _inputs(m=7) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -22,6 +23,34 @@ def _inputs(m=7) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
     G = jax.random.normal(keys[1], (40, m))
     y = 0.2 * X[:, 1] + jax.random.normal(keys[2], (40,))
     return X, G, y, jnp.linspace(-0.1, 0.1, 40)
+
+
+@pytest.mark.parametrize("blocked", [False, True])
+@pytest.mark.parametrize("field", ["p", "z"])
+def test_custom_aggregation_only_defines_statistics_not_scan_execution(blocked, field):
+    class MinimumPvalue(AbstractAggregateTest):
+        def init(self, dtype, *, num_variants):
+            return jnp.asarray(jnp.inf, dtype=dtype)
+
+        def update(self, state, values, valid):
+            return jnp.minimum(state, jnp.min(jnp.where(valid, values, jnp.inf)))
+
+        def finalize(self, state, reference):
+            return state, None
+
+        def statistic(self, result):
+            return getattr(result, field)
+
+        @property
+        def name(self):
+            return "minimum"
+
+    X, G, y, offset = _inputs()
+    test = ScoreTest(LinearModel())
+    scan = _scan.AssociationScan(test, MinimumPvalue(), block_size=4 if blocked else None)
+    result, (pvalue, auxiliary) = _run_cis_scan(scan, X, G, y, offset, jax.random.key(1))[:2]
+    assert jnp.allclose(pvalue, jnp.min(getattr(result, field)))
+    assert auxiliary is None
 
 
 def _wald_inputs(m=7, *, counts=False, vector_offset=True) -> tuple[jax.Array, jax.Array, jax.Array, jax.Array]:
@@ -115,14 +144,13 @@ def test_scan_uses_concrete_initialization_and_matches_direct_acat(test):
     X, G, y, offset = _inputs()
     scan = _scan.AssociationScan(test, ACAT(), block_size=4)
     observed = eqx.filter_jit(test)(X, G, y, offset)
-    expected = eqx.filter_jit(ACAT())(X, G, y, offset, observed, test, jax.random.key(1))
-    result, aggregate = scan.run(X, G, y, offset, jax.random.key(1))
+    expected = map_cis_single(X, G, y, offset, test, ACAT(), jax.random.key(1))[1]
+    result, aggregate = _run_cis_scan(scan, X, G, y, offset, jax.random.key(1))[:2]
     for actual, reference in zip(
         jax.tree.leaves((result, aggregate)), jax.tree.leaves((observed, expected)), strict=True
     ):
         assert jnp.allclose(actual, reference, rtol=2e-4, atol=1e-5, equal_nan=True)
     assert scan.blocked
-    assert scan.cache_clear_interval is None
 
 
 @pytest.mark.parametrize(
@@ -141,10 +169,10 @@ def test_block_scan_reuses_compilation_for_new_window_sizes(caplog, test, counts
     key = jax.random.key(1)
     jax.clear_caches()
     with jax.log_compiles(True), caplog.at_level(logging.WARNING, logger="jax"):
-        jax.block_until_ready(scan.run(*inputs[0], key=key))
+        jax.block_until_ready(_run_cis_scan(scan, *inputs[0], key=key)[:2])
         caplog.clear()
         for args in inputs[1:]:
-            jax.block_until_ready(scan.run(*args, key=key))
+            jax.block_until_ready(_run_cis_scan(scan, *args, key=key)[:2])
     assert not [record.getMessage() for record in caplog.records if "Compiling " in record.getMessage()]
 
 
@@ -186,7 +214,7 @@ def test_wald_permutation_maxima_preserve_rng_order_across_blocks_and_batches(te
     inputs = _wald_inputs(counts=counts)
     permutations = BetaPermutation(max_perm_direct=5)
     key = jax.random.key(8)
-    expected = eqx.filter_jit(permutations._run_permutations)(*inputs, test, key)
+    expected = _scan.full_permutation_maxima(*inputs, test, permutations, key)
     scan = _scan.AssociationScan(test, permutations, block_size=4, batch_size=3)
     actual = scan.permutation_maxima(*inputs, key)
     assert actual.shape == (5,)
@@ -218,7 +246,10 @@ def test_wald_permutation_maxima_exclude_an_extreme_padded_snp():
     padded = jnp.column_stack((G, state.resid))
     all_stats = eqx.filter_jit(test.test)(X, padded, state).z
     assert jnp.abs(all_stats[-1]) > 100 * jnp.max(jnp.abs(all_stats[:-1]))
-    actual = _scan._permutation_block_maxima(test, X, padded, states, jnp.asarray(3))
+    aggregation = BetaPermutation()
+    results = _scan._permutation_test_block(test, aggregation, X, padded, states)
+    accumulator = _scan._init_permutation_reductions(aggregation, results, jnp.asarray(3))
+    actual = _scan._update_permutation_reductions(aggregation, accumulator, results, jnp.asarray(3))
     assert jnp.allclose(actual, jnp.max(jnp.abs(all_stats[:-1])), rtol=2e-5, atol=1e-5)
 
 
@@ -228,9 +259,9 @@ def test_wald_beta_calibrated_scan_matches_full_window():
         test = WaldTest(LinearModel())
         permutations = BetaPermutation(max_perm_direct=64)
         key = jax.random.key(12)
-        expected = _scan.full_scan(*inputs, test, permutations, key)
+        expected = map_cis_single(*inputs, test, permutations, key)
         scan = _scan.AssociationScan(test, permutations, block_size=4, batch_size=7)
-        actual = scan.run(*inputs, key)
+        actual = _run_cis_scan(scan, *inputs, key)[:2]
         assert scan.blocked
         assert jnp.all(jnp.isfinite(actual[1][0]))
         for result, reference in zip(jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True):
@@ -242,7 +273,7 @@ def test_spa_permutations_preserve_underlying_score_maxima():
     test = SpaTest(LinearModel(), cgf=GaussianCGF())
     permutations = BetaPermutation(max_perm_direct=5)
     key = jax.random.key(8)
-    expected = eqx.filter_jit(permutations._run_permutations)(X, G, y, offset, test, key)
+    expected = _scan.full_permutation_maxima(X, G, y, offset, test, permutations, key)
     scan = _scan.AssociationScan(test, permutations, block_size=4, batch_size=3)
     actual = scan.permutation_maxima(X, G, y, offset, key)
     assert jnp.allclose(actual, expected, rtol=2e-5, atol=1e-5)
@@ -252,8 +283,8 @@ def test_lead_selection_preserves_finite_filtering_and_cross_block_ties():
     p = jnp.full(2050, jnp.nan).at[2].set(0.01).at[2049].set(0.01).at[100].set(jnp.inf)
     key = jax.random.key(4)
     expected = int(jax.random.choice(key, jnp.array([2, 2049]), replace=False))
-    assert _scan.select_lead_variant(p, key) == expected
-    assert _scan.select_lead_variant(jnp.array([jnp.nan, jnp.inf]), key) is None
+    assert select_lead_variant(p, key) == expected
+    assert select_lead_variant(jnp.array([jnp.nan, jnp.inf]), key) is None
 
 
 @pytest.mark.parametrize("mode", ["cis", "nominal"])
@@ -294,7 +325,7 @@ def test_wald_mapping_uses_fixed_blocks_without_clearing_caches(monkeypatch, mod
         ingress_options.append(kwargs)
         return iter(genes)
 
-    monkeypatch.setattr(_scan, "full_scan", unexpected)
+    monkeypatch.setattr(cis_map, "full_scan", unexpected)
     monkeypatch.setattr(_scan, "_test_block", block)
     monkeypatch.setattr(jax, "clear_caches", lambda: cleared.append(len(widths)))
     data = cast(ReadyDataState, SimpleNamespace(iter_cis=iter_cis))
@@ -308,29 +339,32 @@ def test_wald_mapping_uses_fixed_blocks_without_clearing_caches(monkeypatch, mod
 
 def test_acat_finalize_override_agrees_between_full_and_blocked_execution():
     class AdjustedACAT(ACAT):
-        def finalize(self, state):
-            return 0.5 * super().finalize(state)
+        def finalize(self, state, reference=None):
+            pvalue, aux = super().finalize(state, reference)
+            return 0.5 * pvalue, aux
 
     X, G, y, offset = _inputs()
     test = ScoreTest(LinearModel())
     aggregation = AdjustedACAT()
     key = jax.random.key(1)
-    _, expected = _scan.full_scan(X, G, y, offset, test, aggregation, key)
-    _, actual = _scan.AssociationScan(test, aggregation, block_size=4).run(X, G, y, offset, key)
+    _, expected = map_cis_single(X, G, y, offset, test, aggregation, key)
+    _, actual = _run_cis_scan(_scan.AssociationScan(test, aggregation, block_size=4), X, G, y, offset, key)[:2]
     assert jnp.allclose(actual[0], expected[0], rtol=2e-5, atol=1e-6)
 
 
 def test_acat_update_uses_the_configured_instance_method():
     class ScaledContributions(ACAT):
-        def update(self, state, block):
-            return super().update(state, block._replace(statistic=2.0 * block.statistic))
+        def update(self, state, values, valid):
+            updated = super().update(state, values, valid)
+            return updated._replace(statistic=state.statistic + 2.0 * (updated.statistic - state.statistic))
 
     X, G, y, offset = _inputs()
     aggregation = ScaledContributions()
     scan = _scan.AssociationScan(ScoreTest(LinearModel()), aggregation, block_size=4)
     result, actual = scan.observed(X, G, y, offset, reduction=aggregation)
-    components = aggregation.components(result.p, jnp.ones_like(result.p, dtype=bool), jnp.asarray(1.0 / len(result.p)))
-    expected = aggregation.update(aggregation.init(result.p.dtype), components)
+    expected = aggregation.update(
+        aggregation.init(result.p.dtype, num_variants=len(result.p)), result.p, jnp.ones_like(result.p, dtype=bool)
+    )
     assert jnp.allclose(actual.statistic, expected.statistic, rtol=2e-5, atol=1e-6)
 
 
@@ -347,16 +381,21 @@ def test_permutation_calibration_override_agrees_between_full_and_blocked_execut
     test = ScoreTest(LinearModel())
     aggregation = FixedCalibration(max_perm_direct=64)
     key = jax.random.key(1)
-    _, expected = _scan.full_scan(X, G, y, offset, test, aggregation, key)
-    _, actual = _scan.AssociationScan(test, aggregation, block_size=4, batch_size=32).run(X, G, y, offset, key)
+    expected_result, expected = map_cis_single(X, G, y, offset, test, aggregation, key)
+    _, actual = _run_cis_scan(
+        _scan.AssociationScan(test, aggregation, block_size=4, batch_size=32), X, G, y, offset, key
+    )[:2]
     for observed, reference in zip(jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True):
         assert jnp.allclose(observed, reference, rtol=2e-5, atol=1e-6)
 
 
-def test_permutation_adjustment_override_agrees_between_full_and_blocked_arrays():
+def test_permutation_finalize_uses_adjustment_override():
     class AdjustedPermutation(BetaPermutation):
         def adjust(self, z, calibration):
             return 0.25 + 0.5 * super().adjust(z, calibration)
+
+        def fit_calibration(self, z_stats_perm, dof):
+            return calibration
 
     aggregation = AdjustedPermutation()
     calibration = BetaCalibration(
@@ -365,8 +404,10 @@ def test_permutation_adjustment_override_agrees_between_full_and_blocked_arrays(
         jnp.asarray(True),
     )
     z = jnp.linspace(-3.0, 3.0, 7)
-    expected = eqx.filter_jit(aggregation.adjust)(z, calibration)
-    actual = _scan.AssociationScan(ScoreTest(LinearModel()), aggregation, block_size=4).adjust(z, calibration)
+    from jaxqtl.hypothesis import PermutationReference
+
+    expected = eqx.filter_jit(aggregation.adjust)(z[1], calibration)
+    actual, _ = eqx.filter_jit(aggregation.finalize)(z[1], PermutationReference(z, 10))
     assert jnp.allclose(actual, expected, rtol=2e-5, atol=1e-6)
 
 
@@ -381,6 +422,66 @@ def test_map_cis_single_preserves_public_keyword_arguments():
         assert jnp.array_equal(observed, reference, equal_nan=True)
 
 
+@pytest.mark.parametrize("selection", ["different-z-maximum", "tied-pvalues", "no-finite-pvalues"])
+def test_scalar_permutation_output_preserves_formatter_lead_selection(monkeypatch, selection):
+    from jaxqtl.map import cis as cis_map
+    from jaxqtl.map.cis import _process_cis_result
+
+    class FixedCalibration(BetaPermutation):
+        def fit_calibration(self, z_stats_perm, dof):
+            return BetaCalibration(
+                BetaParams(jnp.array(1.0), jnp.array(1.0), jnp.array(True)), jnp.array(0.0), jnp.array(True)
+            )
+
+    gene = _nominal_gene(2)
+    test = ScoreTest(LinearModel())
+    aggregation = FixedCalibration()
+    result = test(gene.X, gene.G, gene.y, gene.offset)
+    pvalues = {
+        "different-z-maximum": [0.2, 0.01],
+        "tied-pvalues": [0.01, 0.01],
+        "no-finite-pvalues": [jnp.nan, jnp.nan],
+    }[selection]
+    result = result._replace(p=jnp.array(pvalues), z=jnp.array([4.0, 1.0]))
+    state = aggregation.update(aggregation.init(result.z.dtype, num_variants=2), result.z, jnp.array([True, True]))
+    scan = _scan.AssociationScan(test, aggregation)
+
+    def observed(*args, **kwargs):
+        assert kwargs.get("reduction") is None
+        return result, None
+
+    monkeypatch.setattr(scan, "observed", observed)
+    monkeypatch.setattr(scan, "permutation_maxima", lambda *args: jnp.linspace(1.0, 3.0, 64))
+    # Use a tie key that chooses the second SNP, whose z differs from the window maximum.
+    lead_key = next(
+        key for key in (jax.random.key(i) for i in range(20)) if select_lead_variant(jnp.array([0.01, 0.01]), key) == 1
+    )
+    selections = []
+    original_select = cis_map.select_lead_variant
+
+    def select_once(pvalues, key):
+        selections.append(key)
+        return original_select(pvalues, key)
+
+    monkeypatch.setattr(cis_map, "select_lead_variant", select_once)
+    actual_result, actual, lead = cis_map._run_cis_scan(
+        scan, gene.X, gene.G, gene.y, gene.offset, jax.random.key(9), lead_key
+    )
+    assert actual[0].shape == ()
+    record = _process_cis_result(gene, actual_result, actual, lead, gene_test=aggregation)
+    assert len(selections) == 1
+    if selection == "no-finite-pvalues":
+        assert jnp.isnan(actual[0])
+        assert record["result_valid"] is False
+        assert record["pvalue_adj"] is None
+    else:
+        expected = aggregation.adjust(result.z[1], actual[1])
+        assert jnp.allclose(actual[0], expected)
+        assert actual[0] > aggregation.adjust(state, actual[1])
+        assert record["snp"] == "rs1"
+        assert record["pvalue_adj"] == pytest.approx(float(expected))
+
+
 def test_permutation_scoring_finishes_each_block_before_requesting_the_next(monkeypatch):
     X, G, y, offset = _inputs(11)
     scan = _scan.AssociationScan(
@@ -388,7 +489,7 @@ def test_permutation_scoring_finishes_each_block_before_requesting_the_next(monk
     )
     pending, completed = [], []
     original_blocks = _scan._HostBuffers.blocks
-    original_merge = _scan._merge_maxima
+    original_merge = _scan._update_permutation_reductions
     original_ready = jax.block_until_ready
 
     def guarded_blocks(buffers, block_size):
@@ -401,8 +502,8 @@ def test_permutation_scoring_finishes_each_block_before_requesting_the_next(monk
                 return
             yield block
 
-    def track_merge(previous, values):
-        result = original_merge(previous, values)
+    def track_merge(*args):
+        result = original_merge(*args)
         pending.append(result)
         return result
 
@@ -413,7 +514,7 @@ def test_permutation_scoring_finishes_each_block_before_requesting_the_next(monk
         return result
 
     monkeypatch.setattr(_scan._HostBuffers, "blocks", guarded_blocks)
-    monkeypatch.setattr(_scan, "_merge_maxima", track_merge)
+    monkeypatch.setattr(_scan, "_update_permutation_reductions", track_merge)
     monkeypatch.setattr(jax, "block_until_ready", track_ready)
     actual = scan.permutation_maxima(X, G, y, offset, jax.random.key(1))
     assert actual.shape == (5,)

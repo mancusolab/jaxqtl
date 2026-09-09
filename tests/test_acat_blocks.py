@@ -12,10 +12,13 @@ from jaxqtl.distribution import NegativeBinomial
 from jaxqtl.hypothesis import ACAT, ScoreTest
 from jaxqtl.infer import GeneralizedLinearModel, LinearModel
 from jaxqtl.map import _scan, cis as cis_map
+from jaxqtl.map.cis import _run_cis_scan
 
 
 def _acat_scan(X, G, y, offset, test, *, block_size=2048):
-    return _scan.AssociationScan(test, ACAT(), block_size=block_size).run(X, G, y, offset, jax.random.key(1))
+    return _run_cis_scan(
+        _scan.AssociationScan(test, ACAT(), block_size=block_size), X, G, y, offset, jax.random.key(1)
+    )[:2]
 
 
 def _inputs(n=64, m=11):
@@ -198,7 +201,7 @@ def test_map_cis_acat_retains_kernels_and_real_snp_metadata(monkeypatch):
     def unexpected(*args, **kwargs):
         pytest.fail("blocked ACAT must not call the full-window kernel or clear caches")
 
-    monkeypatch.setattr(_scan, "full_scan", unexpected)
+    monkeypatch.setattr(cis_map, "full_scan", unexpected)
     monkeypatch.setattr(cis_map.jax, "clear_caches", unexpected)
     output = pl.concat(list(cis_map.map_cis(cast(ReadyDataState, data), test, ACAT(), verbose=False, seed=1)))
     assert output.height == 51
@@ -207,7 +210,13 @@ def test_map_cis_acat_retains_kernels_and_real_snp_metadata(monkeypatch):
     key = jax.random.key(1)
     for i, gene in enumerate(genes):
         key, _, select_key = jax.random.split(key, 3)
-        expected = cis_map._process_cis_result(gene, expected_test, expected_acat, select_key, gene_test=ACAT())
+        expected = cis_map._process_cis_result(
+            gene,
+            expected_test,
+            expected_acat,
+            cis_map.select_lead_variant(expected_test.p, select_key),
+            gene_test=ACAT(),
+        )
         row = output.row(i, named=True)
         assert row["snp"] == expected["snp"]
         assert row["model_converged"] == expected["model_converged"]
@@ -287,5 +296,7 @@ def test_legacy_result_processing_keeps_genotypes_on_device(monkeypatch):
         return get_snp_info(self, index)
 
     monkeypatch.setattr(CisData, "get_snp_info", check_device_genotypes)
-    output = cis_map._process_cis_result(gene, result, aggregate, jax.random.key(1), gene_test=ACAT())
+    output = cis_map._process_cis_result(
+        gene, result, aggregate, cis_map.select_lead_variant(result.p, jax.random.key(1)), gene_test=ACAT()
+    )
     assert output["result_valid"]

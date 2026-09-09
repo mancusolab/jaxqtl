@@ -1,4 +1,4 @@
-# pattern: Functional Core
+# pattern: Imperative Shell
 """Execute association classes with stable compiled fitting and block kernels.
 
 NumPy is confined to variable-width host buffers: JAX slicing, padding, or
@@ -8,7 +8,7 @@ transferred only at kernel ingress and output assembly, never through JIT.
 """
 
 from dataclasses import dataclass
-from typing import Generic, TypeVar
+from typing import Any, Generic, TypeVar
 
 import numpy as np
 
@@ -18,9 +18,9 @@ import jax.numpy as jnp
 import jax.random as rdm
 
 from jax import lax
-from jaxtyping import Array, PRNGKeyArray
+from jaxtyping import Array, ArrayLike, PRNGKeyArray
 
-from ..hypothesis._aggregate import AbstractAggregateTest, ACAT, BetaCalibration, BetaPermutation
+from ..hypothesis._aggregate import AbstractAggregateTest, BetaPermutation, PermutationReference
 from ..hypothesis._base import AbstractHypothesisTest, TestResult
 
 
@@ -28,10 +28,65 @@ StateT = TypeVar("StateT")
 
 
 @eqx.filter_jit
-def full_scan(X, G, y, offset, snp_test, gene_test, key):
-    """Transformable full-window composition for direct array callers."""
+def full_scan(
+    X: ArrayLike,
+    G: ArrayLike,
+    y: ArrayLike,
+    offset: ArrayLike,
+    snp_test: AbstractHypothesisTest,
+    gene_test: AbstractAggregateTest,
+    key: PRNGKeyArray,
+):
+    """Compute a full window without choosing a lead or finalizing its gene p-value.
+
+    Inputs are covariates `X (n, p)`, genotypes `G (n, m)`, outcome `y (n,)`,
+    and a scalar or length-`n` offset. `snp_test` fits the hypothesis test;
+    `gene_test` supplies the reduction and, for BetaPermutation, the permutation count.
+
+    Returns `(test_result, reduction_state, reference)`. BetaPermutation supplies
+    a reference and no observed reduction; observed-only methods supply a reduction
+    and no reference. These full-window kernels specialize on the input shapes.
+    """
+    X, G, y, offset = map(jnp.asarray, (X, G, y, offset))
     result = snp_test(X, G, y, offset)
-    return result, gene_test(X, G, y, offset, result, snp_test, key)
+    if isinstance(gene_test, BetaPermutation):
+        maxima = full_permutation_maxima(X, G, y, offset, snp_test, gene_test, key)
+        reference = PermutationReference(maxima, X.shape[0] - X.shape[1] - 1)
+        return result, None, reference
+    values = gene_test.statistic(result)
+    state = gene_test.init(values.dtype, num_variants=G.shape[1])
+    state = gene_test.update(state, values, jnp.ones_like(values, dtype=bool))
+    return result, state, None
+
+
+@eqx.filter_jit
+def full_permutation_maxima(
+    X: ArrayLike,
+    G: ArrayLike,
+    y: ArrayLike,
+    offset: ArrayLike,
+    test: AbstractHypothesisTest,
+    aggregation: BetaPermutation,
+    key: PRNGKeyArray,
+) -> Array:
+    """Return one maximum absolute statistic per permutation using full-window kernels.
+
+    Inputs follow `full_scan`; `aggregation.max_perm_direct` sets the number of
+    permutations. Outcome rows and vector offsets are shuffled together, while
+    covariates and genotypes remain fixed. Key splitting matches the blocked path.
+    """
+    X, G, y, offset = map(jnp.asarray, (X, G, y, offset))
+
+    def permute_one(key, _):
+        key, p_key = rdm.split(key)
+        indices = rdm.permutation(p_key, jnp.arange(len(y)))
+        perm_offset = offset[indices] if offset.ndim > 0 else offset
+        result = test(X, G, y[indices], perm_offset)
+        values = aggregation.statistic(result)
+        state = aggregation.init(values.dtype, num_variants=G.shape[1])
+        return key, aggregation.update(state, values, jnp.ones_like(values, dtype=bool))
+
+    return lax.scan(permute_one, key, xs=None, length=aggregation.max_perm_direct)[1]
 
 
 @eqx.filter_jit
@@ -40,13 +95,22 @@ def _initialize(test: AbstractHypothesisTest[StateT], X, y, offset) -> StateT:
 
 
 @eqx.filter_jit
-def _test_block(test, X, G, state, width, total, reduction):
+def _test_block(test, X, G, state, aggregation=None):
     result = test.test(X, G, state)
-    components = None
-    if reduction is not None:
-        valid = jnp.arange(G.shape[1]) < width
-        components = reduction.components(result.p, valid, jnp.asarray(1.0, dtype=result.p.dtype) / total)
-    return result, components
+    return result, None if aggregation is None else aggregation.statistic(result)
+
+
+@eqx.filter_jit
+def _update_reduction(aggregation, state, values, width):
+    if aggregation is None:
+        return state
+    valid = jnp.arange(values.shape[-1]) < width
+    return aggregation.update(state, values, valid)
+
+
+@eqx.filter_jit
+def _init_reduction(aggregation, example, total):
+    return None if aggregation is None else aggregation.init(example.dtype, num_variants=total)
 
 
 @eqx.filter_jit
@@ -61,36 +125,24 @@ def _initialize_permutations(test: AbstractHypothesisTest[StateT], X, y, offset,
 
 
 @eqx.filter_jit
-def _permutation_block_maxima(test, X, G, states, width):
+def _permutation_test_block(test, aggregation, X, G, states):
+    # Selecting statistics inside JIT lets XLA discard unused SPA tail calculations.
     def score_one(_, state):
-        result = test.test(X, G, state)
-        valid = jnp.arange(G.shape[1]) < width
-        return None, jnp.nanmax(jnp.where(valid, jnp.abs(result.z), jnp.nan))
+        return None, aggregation.statistic(test.test(X, G, state))
 
     return lax.scan(score_one, None, states)[1]
 
 
-_merge_maxima = eqx.filter_jit(jnp.fmax)
+@eqx.filter_jit
+def _update_permutation_reductions(aggregation, states, statistics, width):
+    valid = jnp.arange(statistics.shape[-1]) < width
+    return eqx.filter_vmap(aggregation.update, in_axes=(0, 0, None))(states, statistics, valid)
 
 
 @eqx.filter_jit
-def _update_acat(aggregation, state, block):
-    return aggregation.update(state, block)
-
-
-@eqx.filter_jit
-def _finish_acat(aggregation, state):
-    return aggregation.finalize(state)
-
-
-@eqx.filter_jit
-def _fit_calibration(aggregation, maxima, dof):
-    return aggregation.fit_calibration(maxima, dof)
-
-
-@eqx.filter_jit
-def _adjust(aggregation, z, calibration):
-    return aggregation.adjust(z, calibration)
+def _init_permutation_reductions(aggregation, example, total):
+    state = aggregation.init(example.dtype, num_variants=total)
+    return jax.tree.map(lambda value: jnp.broadcast_to(value, (example.shape[0], *value.shape)), state)
 
 
 @eqx.filter_jit
@@ -99,35 +151,6 @@ def _allele_summary_block(G):
     af = counts / (2.0 * G.shape[0])
     ma_counts = jnp.where(af <= 0.5, counts, 2 * G.shape[0] - counts)
     return af, ma_counts
-
-
-@eqx.filter_jit
-def _lead_candidates(pvalues, width):
-    valid = (jnp.arange(pvalues.shape[0]) < width) & jnp.isfinite(pvalues)
-    minimum = jnp.min(jnp.where(valid, pvalues, jnp.inf))
-    return minimum, valid & (pvalues == minimum)
-
-
-def select_lead_variant(pvalues: Array, key: PRNGKeyArray) -> int | None:
-    """Select the minimum finite p-value with the existing random tie policy.
-
-    Reduce fixed blocks in JAX; collect only host indices for output selection.
-    Tie counts can still introduce a small random-choice compilation signature.
-    """
-    minimum = float("inf")
-    indices = []
-    for start, stop, block in _HostBuffers(pvalues).blocks(2048):
-        value, mask = jax.device_get(_lead_candidates(block, jnp.asarray(stop - start)))
-        value = float(value)
-        if value < minimum:
-            minimum, indices = value, []
-        if value == minimum:
-            indices.extend(start + i for i, selected in enumerate(mask.tolist()) if selected)
-    if not indices:
-        return None
-    if len(indices) == 1:
-        return indices[0]
-    return int(rdm.choice(key, jnp.asarray(indices), replace=False))
 
 
 class _HostBuffers:
@@ -143,6 +166,7 @@ class _HostBuffers:
         self._tail = None
 
     def blocks(self, block_size):
+        """Yield (start, stop, device_block), padding only the final block."""
         m = self.values.shape[-1]
         for start in range(0, m, block_size):
             stop = min(start + block_size, m)
@@ -159,40 +183,72 @@ class _HostBuffers:
                     self._tail_size = block_size
                 yield start, stop, self._tail
 
-    @staticmethod
-    def allocate(size, example):
-        return np.empty(size, dtype=example.dtype)
 
-    @staticmethod
-    def append(output, values, start, stop):
-        output[start:stop] = jax.device_get(values)[: stop - start]
+class _ResultBuffer:
+    """Assemble results in owned NumPy columns, preserving shared scalar metadata.
+
+    Each column is allocated once. Appending transfers one result tree to the host;
+    finishing transfers the assembled tree back to JAX for the scan return contract.
+    """
+
+    def __init__(self, num_variants):
+        self.num_variants = num_variants
+        self.values = {}
+
+    def append(self, start, stop, result: TestResult):
+        """Copy real variants into their output slice and discard padded entries."""
+        result = jax.device_get(result)
+        for name, value in result._asdict().items():
+            if np.ndim(value) == 0:
+                self.values[name] = value
+            else:
+                if name not in self.values:
+                    self.values[name] = np.empty(self.num_variants, dtype=value.dtype)
+                self.values[name][start:stop] = value[: stop - start]
+
+    def finish(self) -> TestResult:
+        """Return the completed result as JAX arrays."""
+        return TestResult(**jax.device_put(self.values))
 
 
-def allele_summaries(G) -> tuple[np.ndarray, np.ndarray]:
-    """Return host AF/MAC columns, computing statistics in fixed JAX blocks."""
+def allele_summaries(G: ArrayLike) -> tuple[np.ndarray, np.ndarray]:
+    """Return host allele-frequency and minor-allele-count arrays for `G (n, m)`.
+
+    Genotypes count the a1 allele. Calculations use fixed JAX blocks; assembly
+    preserves the resulting dtypes and returns two empty arrays when `m == 0`.
+    """
     buffers = _HostBuffers(G)
     m = buffers.values.shape[1]
     if m == 0:
         # Preserve JAX's reduction and division dtype promotion for empty windows.
         return jax.device_get(_allele_summary_block(jax.device_put(buffers.values)))
-    af_output, mac_output = None, None
+    af_output: np.ndarray
+    mac_output: np.ndarray
     for start, stop, block in buffers.blocks(2048):
-        af, ma_counts = _allele_summary_block(block)
-        if af_output is None:
-            af_output = buffers.allocate(m, af)
-            mac_output = buffers.allocate(m, ma_counts)
-        buffers.append(af_output, af, start, stop)
-        buffers.append(mac_output, ma_counts, start, stop)
-    assert af_output is not None and mac_output is not None
+        af, ma_counts = jax.device_get(_allele_summary_block(block))
+        if start == 0:
+            af_output = np.empty(m, dtype=af.dtype)
+            mac_output = np.empty(m, dtype=ma_counts.dtype)
+        af_output[start:stop] = af[: stop - start]
+        mac_output[start:stop] = ma_counts[: stop - start]
     return af_output, mac_output
 
 
-@dataclass(frozen=True)
+@dataclass
 class AssociationScan(Generic[StateT]):
-    """One configured execution policy, independent of gene metadata and I/O.
+    """Execute observed tests and permutation reductions in fixed genotype blocks.
 
-    Score, SPA, and Wald share fixed genotype blocks. Aggregators own their
-    statistical workflow; omitting aggregation selects nominal testing only.
+    Cis orchestration owns lead selection and gene-level finalization. This class
+    owns hypothesis fitting, block transfers, and permutation batching.
+
+    **Attributes:**
+
+    - `test`: Score, SPA, or Wald hypothesis test.
+    - `aggregation`: Optional numerical reducer; BetaPermutation enables permutation scans.
+    - `block_size`: Positive genotype-block width. Defaults to the aggregation's
+      preference, or 2048 for nominal scans. A remaining `None` selects full-window
+      execution in cis orchestration rather than this class's block methods.
+    - `batch_size`: Positive number of permutations fitted together; defaults to 32.
     """
 
     test: AbstractHypothesisTest[StateT]
@@ -202,10 +258,8 @@ class AssociationScan(Generic[StateT]):
 
     def __post_init__(self):
         if self.block_size is None:
-            default_size = self.aggregation.block_size if self.aggregation is not None else 2048
-            object.__setattr__(self, "block_size", default_size)
-        for name in ("block_size", "batch_size"):
-            value = getattr(self, name)
+            self.block_size = self.aggregation.block_size if self.aggregation is not None else 2048
+        for name, value in (("block_size", self.block_size), ("batch_size", self.batch_size)):
             if value is None and name == "block_size":
                 continue
             if not isinstance(value, int) or isinstance(value, bool) or value <= 0:
@@ -213,47 +267,62 @@ class AssociationScan(Generic[StateT]):
 
     @property
     def blocked(self) -> bool:
+        """Whether a genotype-block width is configured."""
         return self.block_size is not None
 
-    @property
-    def cache_clear_interval(self) -> int | None:
-        return None if self.blocked else 20
+    def observed(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        offset: ArrayLike,
+        *,
+        reduction: AbstractAggregateTest | None = None,
+    ) -> tuple[TestResult, Any]:
+        """Test observed variants and optionally accumulate an unfinalized reduction.
 
-    def run(self, X, G, y, offset, key: PRNGKeyArray):
-        if self.aggregation is None:
-            raise ValueError("gene-level scans require an aggregation")
-        if not self.blocked:
-            return full_scan(X, G, y, offset, self.test, self.aggregation, key)
-        return self.aggregation.scan(self, X, G, y, offset, key)
+        `X`, `G`, and `y` have shapes `(n, p)`, `(n, m)`, and `(n,)`;
+        `offset` is scalar or length `n`. The hypothesis test is initialized once.
+        `reduction=None` requests variant results only, regardless of the configured
+        aggregation.
 
-    def observed(self, X, G, y, offset, *, reduction: ACAT | None = None):
+        Returns `(TestResult, reduction_state)`, with `None` state when no reduction
+        is requested. Results are assembled on the host and returned as JAX arrays.
+        Requires a configured block width and at least one variant.
+        """
         X, y, offset = jnp.asarray(X), jnp.asarray(y), jnp.asarray(offset)
         buffers = _HostBuffers(G)
         m = buffers.values.shape[1]
         if m == 0:
             raise ValueError("association testing requires at least one variant")
         state = _initialize(self.test, X, y, offset)
-        columns, scalars = {}, {}
+        output = _ResultBuffer(m)
         accumulator = None
         for start, stop, block in buffers.blocks(self.block_size):
-            result, components = _test_block(
-                self.test, X, block, state, jnp.asarray(stop - start), jnp.asarray(m), reduction
-            )
-            if reduction is not None:
-                if accumulator is None:
-                    accumulator = reduction.init(components.statistic.dtype)
-                accumulator = _update_acat(reduction, accumulator, components)
-            result = jax.device_get(result)
-            for name, value in zip(result._fields, result, strict=True):
-                if getattr(value, "ndim", 0) == 0:
-                    scalars[name] = value
-                else:
-                    if name not in columns:
-                        columns[name] = buffers.allocate(m, value)
-                    buffers.append(columns[name], value, start, stop)
-        return TestResult(**jax.device_put(columns | scalars)), accumulator
+            result, values = _test_block(self.test, X, block, state, reduction)
+            if start == 0:
+                accumulator = _init_reduction(reduction, values, jnp.asarray(m))
+            accumulator = _update_reduction(reduction, accumulator, values, jnp.asarray(stop - start))
+            output.append(start, stop, result)
+        return output.finish(), accumulator
 
-    def permutation_maxima(self, X, G, y, offset, key):
+    def permutation_maxima(
+        self,
+        X: ArrayLike,
+        G: ArrayLike,
+        y: ArrayLike,
+        offset: ArrayLike,
+        key: PRNGKeyArray,
+    ) -> Array:
+        """Return a length-`max_perm_direct` array of permutation maxima.
+
+        Inputs follow `observed`; `key` determines permutation order independently
+        of block and batch sizes. Each permuted outcome is initialized once and
+        reused across genotype blocks. Vector offsets follow the outcome shuffle.
+
+        Requires BetaPermutation, a configured block width, a positive permutation
+        count, and at least one variant. Only completed maxima are retained between batches.
+        """
         permutations = self.aggregation
         if not isinstance(permutations, BetaPermutation):
             raise TypeError("permutation maxima require BetaPermutation")
@@ -270,27 +339,17 @@ class AssociationScan(Generic[StateT]):
             key, states = _initialize_permutations(self.test, X, y, offset, key, size)
             batch_maxima = None
             for first, last, block in buffers.blocks(self.block_size):
-                values = _permutation_block_maxima(self.test, X, block, states, jnp.asarray(last - first))
-                batch_maxima = _merge_maxima(values if batch_maxima is None else batch_maxima, values)
+                statistics = _permutation_test_block(self.test, permutations, X, block, states)
+                if first == 0:
+                    batch_maxima = _init_permutation_reductions(
+                        permutations, statistics, jnp.asarray(buffers.values.shape[1])
+                    )
+                batch_maxima = _update_permutation_reductions(
+                    permutations, batch_maxima, statistics, jnp.asarray(last - first)
+                )
                 # Finish this block before transferring the next one; asynchronous
                 # dispatch must not retain a whole window of genotype buffers.
                 batch_maxima = jax.block_until_ready(batch_maxima)
-            assert batch_maxima is not None  # The nonempty window guarantees at least one block.
+            assert batch_maxima is not None  # Nonempty windows always initialize the accumulator.
             maxima.append(batch_maxima)
         return jnp.concatenate(maxima)
-
-    def fit_calibration(self, maxima, dof) -> BetaCalibration:
-        return _fit_calibration(self.aggregation, maxima, dof)
-
-    def adjust(self, z, calibration: BetaCalibration) -> Array:
-        buffers = _HostBuffers(z)
-        adjusted = None
-        for start, stop, block in buffers.blocks(self.block_size):
-            values = _adjust(self.aggregation, block, calibration)
-            if adjusted is None:
-                adjusted = buffers.allocate(len(buffers.values), values)
-            buffers.append(adjusted, values, start, stop)
-        return jax.device_put(adjusted)
-
-    def finish_acat(self, state) -> Array:
-        return _finish_acat(self.aggregation, state)

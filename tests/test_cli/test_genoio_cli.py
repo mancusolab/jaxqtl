@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import genoio
 import polars as pl
@@ -14,7 +15,7 @@ from jax import numpy as jnp
 import jaxqtl.map.cis as cis_map
 
 from jaxqtl import cli
-from jaxqtl.hypothesis import ACAT, BetaPermutation, ScoreTest, TestResult as AssocTestResult
+from jaxqtl.hypothesis import AbstractAggregateTest, ACAT, BetaPermutation, ScoreTest, TestResult as AssocTestResult
 from jaxqtl.infer import LinearModel
 from jaxqtl.map.data import CisData
 
@@ -649,7 +650,7 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
         _cis_data(),
         _test_result([float("nan"), float("inf")]),
         (jnp.array(float("nan")), None),
-        cis_map.rdm.key(0),
+        None,
         gene_test=ACAT(),
     )
 
@@ -677,12 +678,24 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
     }
 
 
+def test_process_cis_result_rejects_unsupported_aggregation() -> None:
+    aggregation = cast(AbstractAggregateTest, SimpleNamespace())
+    with pytest.raises(TypeError, match="unsupported aggregation for cis output"):
+        cis_map._process_cis_result(
+            _cis_data(),
+            _test_result([float("nan"), float("nan")]),
+            (jnp.array(float("nan")), None),
+            None,
+            gene_test=aggregation,
+        )
+
+
 def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
     result = cis_map._process_cis_result(
         _cis_data(),
         _test_result([float("nan"), float("nan")]),
         (jnp.array([float("nan"), float("nan")]), (object(), object(), object())),
-        cis_map.rdm.key(0),
+        None,
         gene_test=BetaPermutation(),
     )
 
@@ -698,12 +711,12 @@ def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
     assert frame.schema["perm_converged"] == pl.Boolean
 
 
-def test_process_cis_result_selects_minimum_finite_pvalue() -> None:
+def test_process_cis_result_uses_selected_lead() -> None:
     result = cis_map._process_cis_result(
         _cis_data(),
         _test_result([float("nan"), 0.02]),
         (jnp.array(0.03), None),
-        cis_map.rdm.key(0),
+        1,
         gene_test=ACAT(),
     )
 
@@ -735,8 +748,8 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     gene_test = ACAT()
     invalid = (_test_result([float("nan"), float("nan")]), (jnp.array(float("nan")), None))
     valid = (_test_result([0.01, 0.02]), (jnp.array(0.03), None))
-    results = iter([invalid, valid] if invalid_first else [valid, invalid])
-    monkeypatch.setattr(cis_map.AssociationScan, "run", lambda *args, **kwargs: next(results))
+    results = iter([(*invalid, None), (*valid, 0)] if invalid_first else [(*valid, 0), (*invalid, None)])
+    monkeypatch.setattr(cis_map, "_run_cis_scan", lambda *args, **kwargs: next(results))
     log = _LoggerStub()
 
     map_cis = getattr(cis_map, "map_cis")

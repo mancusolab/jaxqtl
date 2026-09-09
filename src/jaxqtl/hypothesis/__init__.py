@@ -7,6 +7,8 @@ from ._aggregate import (
     ACAT,
     BetaCalibration,
     BetaPermutation,
+    CauchyState,
+    PermutationReference,
     PermutationResult,
 )
 from ._base import AbstractHypothesisTest, TestResult

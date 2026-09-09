@@ -9,9 +9,10 @@ import jax
 import jax.numpy as jnp
 
 from jaxqtl.distribution import NegativeBinomial
-from jaxqtl.hypothesis import BetaPermutation, ScoreTest
+from jaxqtl.hypothesis import ACAT, BetaPermutation, ScoreTest
 from jaxqtl.infer import GeneralizedLinearModel, LinearModel
 from jaxqtl.map import _scan, cis as cis_map
+from jaxqtl.map.cis import _run_cis_scan, map_cis_single, select_lead_variant
 
 
 def _permutation_maxima(X, G, y, offset, test, permutations, key, **options):
@@ -19,7 +20,7 @@ def _permutation_maxima(X, G, y, offset, test, permutations, key, **options):
 
 
 def _permutation_scan(X, G, y, offset, test, permutations, key, **options):
-    return _scan.AssociationScan(test, permutations, **options).run(X, G, y, offset, key)
+    return _run_cis_scan(_scan.AssociationScan(test, permutations, **options), X, G, y, offset, key)[:2]
 
 
 def _inputs(m=11, scalar_offset=False):
@@ -42,7 +43,7 @@ def test_permutation_maxima_match_legacy_sequence(block_size, batch_size, scalar
     test = ScoreTest(model=LinearModel())
     perms = BetaPermutation(max_perm_direct=7)
     key = jax.random.key(3)
-    expected = eqx.filter_jit(perms._run_permutations)(X, G, y, offset, test, key)
+    expected = _scan.full_permutation_maxima(X, G, y, offset, test, perms, key)
     actual = _permutation_maxima(X, G, y, offset, test, perms, key, block_size=block_size, batch_size=batch_size)
     np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=1e-5)
     assert actual.shape == (7,)
@@ -54,7 +55,7 @@ def test_nb_permutation_maxima_match_legacy():
         test = ScoreTest(model=GeneralizedLinearModel(family=NegativeBinomial(), gtol=1e-6))
         perms = BetaPermutation(max_perm_direct=5)
         key = jax.random.key(8)
-        expected = eqx.filter_jit(perms._run_permutations)(X, G, y, offset, test, key)
+        expected = _scan.full_permutation_maxima(X, G, y, offset, test, perms, key)
         actual = _permutation_maxima(X, G, y, offset, test, perms, key, block_size=3, batch_size=2)
         np.testing.assert_allclose(actual, expected, rtol=1e-7, atol=1e-8)
 
@@ -70,22 +71,31 @@ def test_permutation_maxima_ignore_padding_but_preserve_all_invalid(all_invalid)
     test = ScoreTest(model=LinearModel())
     perms = BetaPermutation(max_perm_direct=5)
     key = jax.random.key(3)
-    expected = eqx.filter_jit(perms._run_permutations)(X, G, y, offset, test, key)
+    expected = _scan.full_permutation_maxima(X, G, y, offset, test, perms, key)
     actual = _permutation_maxima(X, G, y, offset, test, perms, key, block_size=4, batch_size=3)
     np.testing.assert_allclose(actual, expected, rtol=2e-5, atol=1e-5, equal_nan=True)
 
 
 @pytest.mark.parametrize("use_tdist", [False])
-def test_calibration_from_maxima_matches_legacy(use_tdist):
+def test_gene_pvalue_matches_explicit_snp_adjustment_and_reference_finalization(use_tdist):
     with jax.enable_x64(True):
         X, G, y, offset = _inputs()
         test = ScoreTest(model=LinearModel())
         perms = BetaPermutation(max_perm_direct=64, use_tdist=use_tdist)
         key = jax.random.key(12)
         result = eqx.filter_jit(test)(X, G, y, offset)
-        expected = eqx.filter_jit(perms)(X, G, y, offset, result, test, key)
-        maxima = eqx.filter_jit(perms._run_permutations)(X, G, y, offset, test, key)
-        actual = eqx.filter_jit(perms._calibrate)(maxima, result.z, X.shape[0] - X.shape[1] - 1)
+        expected = map_cis_single(X, G, y, offset, test, perms, key)[1]
+        maxima = _scan.full_permutation_maxima(X, G, y, offset, test, perms, key)
+        from jaxqtl.hypothesis import PermutationReference
+
+        lead = select_lead_variant(result.p, key)
+        assert expected[0].shape == ()
+        snp_adjusted = eqx.filter_jit(perms.adjust)(result.z, expected[1])
+        assert snp_adjusted.shape == result.z.shape
+        np.testing.assert_allclose(expected[0], snp_adjusted[lead], rtol=2e-5, atol=1e-7)
+        actual = eqx.filter_jit(perms.finalize)(
+            result.z[lead], PermutationReference(maxima, X.shape[0] - X.shape[1] - 1)
+        )
         for a, b in zip(jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True):
             np.testing.assert_allclose(a, b, rtol=2e-5, atol=1e-7)
 
@@ -128,7 +138,7 @@ def test_blocked_permutation_result_matches_whole_window_and_skips_acat(monkeypa
         def unexpected(*args, **kwargs):
             pytest.fail("permutation tests must not compute ACAT")
 
-        monkeypatch.setattr(_scan, "_finish_acat", unexpected)
+        monkeypatch.setattr(ACAT, "finalize", unexpected)
         actual = _permutation_scan(X, G, y, offset, test, perms, key, block_size=4, batch_size=7)
         for a, b in zip(jax.tree.leaves(actual), jax.tree.leaves(expected), strict=True):
             np.testing.assert_allclose(a, b, rtol=2e-5, atol=1e-7)
@@ -226,7 +236,7 @@ def test_mixed_precision_permutation_scores_preserve_dtype():
         test = ScoreTest(model=LinearModel())
         perms = BetaPermutation(max_perm_direct=7)
         key = jax.random.key(3)
-        expected = eqx.filter_jit(perms._run_permutations)(X, G, y, offset, test, key)
+        expected = _scan.full_permutation_maxima(X, G, y, offset, test, perms, key)
         actual = _permutation_maxima(X, G, y, offset, test, perms, key, block_size=4, batch_size=3)
         assert actual.dtype == expected.dtype
         np.testing.assert_allclose(actual, expected, rtol=1e-6, atol=1e-8)

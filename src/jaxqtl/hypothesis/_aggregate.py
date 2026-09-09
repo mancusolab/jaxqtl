@@ -1,28 +1,35 @@
 # pattern: Functional Core
+"""Numerical reductions and calibration for scalar gene-level association tests."""
 
 from abc import abstractmethod
-from typing import ClassVar, Generic, NamedTuple, Protocol, TypeAlias, TypeVar
+from typing import ClassVar, Generic, NamedTuple, TypeAlias, TypeVar
 
 import equinox as eqx
-import jax.random as rdm
 import jax.scipy.stats as jaxstats
 import optimistix as optx
 
-from jax import lax, numpy as jnp
-from jaxtyping import Array, ArrayLike, PRNGKeyArray
+from jax import numpy as jnp
+from jaxtyping import Array, ArrayLike
 
 from ..distribution import ncx2_sf, t_cdf
 from ..infer import BetaParams, infer_beta_params
-from ._base import AbstractHypothesisTest, TestResult
+from ._base import TestResult
 
 
 Aux = TypeVar("Aux")
-#: Method-specific adjusted p-value output, scalar or variantwise, plus auxiliary diagnostics.
+ReductionStateT = TypeVar("ReductionStateT")
+ReferenceT = TypeVar("ReferenceT")
+#: Scalar gene-level p-value and method-specific diagnostics.
 PermutationResult: TypeAlias = tuple[Array, Aux]
 
 
 class BetaCalibration(NamedTuple):
-    """Fitted Beta parameters, reference estimate, and reference-fit status."""
+    """Reusable gene calibration and its fit diagnostics.
+
+    `reference_estimate` is Student's t degrees of freedom when `use_tdist=True`,
+    otherwise a chi-squared noncentrality parameter. `beta_params` carries its own
+    convergence flag; `reference_converged` describes the reference-distribution fit.
+    """
 
     beta_params: BetaParams
     reference_estimate: Array
@@ -30,132 +37,90 @@ class BetaCalibration(NamedTuple):
 
 
 class CauchyState(NamedTuple):
-    """Weighted Cauchy sum and endpoint flags across real variants."""
+    """Weighted Cauchy sum, exact-zero/one flags, and the whole-window SNP weight.
+
+    Endpoint flags persist across blocks so incompatible exact p-values are detected
+    even when they occur in different blocks.
+    """
 
     statistic: Array
     any_zeros: Array
     any_ones: Array
+    weight: Array
 
 
-class ScanExecution(Protocol):
-    """Operations used by aggregation workflows, supplied by the mapping layer.
+class PermutationReference(NamedTuple):
+    """Finalization inputs: one maximum per permutation and residual degrees of freedom.
 
-    The executor owns block scheduling and compiled calls. Aggregations depend
-    on this contract rather than a concrete mapping implementation.
+    `maxima` has shape `(num_permutations,)`. `dof` initializes the optional
+    Student's t reference fit.
     """
 
-    def observed(
-        self, X, G, y, offset, *, reduction: "ACAT | None" = None
-    ) -> tuple[TestResult, CauchyState | None]: ...
-
-    def permutation_maxima(self, X, G, y, offset, key: PRNGKeyArray) -> Array: ...
-
-    def fit_calibration(self, maxima: Array, dof: int) -> BetaCalibration: ...
-
-    def adjust(self, z: Array, calibration: BetaCalibration) -> Array: ...
-
-    def finish_acat(self, state: CauchyState) -> Array: ...
+    maxima: Array
+    dof: int
 
 
-class AbstractAggregateTest(eqx.Module, Generic[Aux]):
-    r"""Abstract base class for gene-level aggregation in cis mapping."""
+class AbstractAggregateTest(eqx.Module, Generic[ReductionStateT, ReferenceT, Aux]):
+    """Numerical contract for reducing SNP blocks to one gene-level p-value.
+
+    `statistic` selects values from a TestResult; `init` and `update` accumulate
+    blocks; `finalize` returns a scalar p-value and diagnostics. The generic types
+    describe the reduction state, finalization reference, and output diagnostics.
+    Scheduling, hypothesis fitting, and lead selection belong to the mapper.
+    """
 
     block_size: ClassVar[int | None] = None
-    adjustment_method: eqx.AbstractClassVar[str]
-    has_calibration: eqx.AbstractClassVar[bool]
 
     @abstractmethod
-    def scan(self, execution: ScanExecution, X: Array, G: Array, y: Array, offset: Array, key: PRNGKeyArray):
-        """Coordinate this aggregation using the configured scan executor.
+    def statistic(self, result: TestResult) -> Array:
+        """Select the per-variant values used by this aggregation inside the compiled kernel."""
+        ...
 
-        This host entry point composes separately compiled kernels. Use
-        ``aggregate`` for a transformable full-array calculation.
+    @abstractmethod
+    def init(self, dtype, *, num_variants: ArrayLike) -> ReductionStateT:
+        """Initialize fixed-size state in the statistic dtype.
+
+        `num_variants` counts real variants across the entire window, excluding padding.
+        It determines ACAT weights and is unused by maximum-statistic reduction.
         """
         ...
 
     @abstractmethod
-    def aggregate(
-        self,
-        X: ArrayLike,
-        G: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
-        result: TestResult,
-        test: AbstractHypothesisTest,
-        key: PRNGKeyArray,
-    ) -> tuple[Array, Aux]:
-        r"""Aggregate per-variant test results into a gene-level statistic.
+    def update(self, state: ReductionStateT, values: Array, valid: Array) -> ReductionStateT:
+        """Accumulate one block of values with a same-shape Boolean validity mask.
 
-        **Arguments:**
-
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-        - `result`: Per-variant statistics from a single scan.
-        - `test`: Hypothesis test used to generate `result`.
-        - `key`: PRNG key for stochastic aggregation procedures.
-
-        **Returns:**
-
-        A tuple `(pvalue, aux)` where `aux` contains method-specific diagnostics.
+        `valid=False` excludes padding. The state structure, leaf shapes, and dtypes
+        must remain unchanged across updates.
         """
         ...
 
-    def __call__(
-        self,
-        X: ArrayLike,
-        G: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
-        result: TestResult,
-        test: AbstractHypothesisTest,
-        key: PRNGKeyArray,
-    ) -> tuple[Array, Aux]:
-        r"""Alias for [`jaxqtl.hypothesis.AbstractAggregateTest.aggregate`][].
+    @abstractmethod
+    def finalize(self, state: ReductionStateT, reference: ReferenceT) -> tuple[Array, Aux]:
+        """Return one scalar gene-level p-value and diagnostics after all blocks are accumulated.
 
-        **Arguments:**
-
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-        - `result`: Per-variant statistics from a single scan.
-        - `test`: Hypothesis test used to generate `result`.
-        - `key`: PRNG key for stochastic aggregation procedures.
-
-        **Returns:**
-
-        A tuple `(pvalue, aux)` where `aux` contains method-specific diagnostics.
+        For permutation calibration, state is the observed statistic to evaluate.
+        Permutation reductions supply the reference without individually being finalized.
         """
-        return self.aggregate(X, G, y, offset, result, test, key)
+        ...
 
     @property
     @abstractmethod
     def name(self) -> str:
-        r"""Return a short identifier for the aggregation method.
-
-        **Arguments:**
-
-        `None`
-
-        **Returns:**
-
-        A short string name for display and downstream metadata.
-        """
+        """Return the short method identifier used in output filenames."""
         ...
 
 
-class BetaPermutation(AbstractAggregateTest[BetaCalibration]):
+class BetaPermutation(AbstractAggregateTest[Array, PermutationReference, BetaCalibration]):
     r"""Permutation-based gene-level p-values via a Beta approximation.
 
-    This method generates permutation statistics $T_1, \dots, T_B$ (here based on a max score/z statistic across
-    variants), converts them to permutation p-values $p_b$, then fits a Beta approximation
+    This method reduces permutation results to statistics $T_1, \dots, T_B$ (the maximum absolute z statistic
+    across variants), converts them to permutation p-values $p_b$, then fits a Beta approximation
     $p_b \sim \mathrm{Beta}(k, n)$. Observed variant statistics are mapped through
     the same calibration and fitted Beta CDF. Cis mapping reports the adjusted value
     corresponding to the selected lead variant.
 
-    Reusing the same PRNG key with the same inputs produces the same permutations.
+    The mapper generates permutations; this class reduces and calibrates their statistics.
+    Reusing the same PRNG key with the same inputs in the mapper produces the same permutations.
     Floating-point results can still vary across JAX backends.
 
     **Attributes:**
@@ -168,133 +133,78 @@ class BetaPermutation(AbstractAggregateTest[BetaCalibration]):
     """
 
     block_size: ClassVar[int | None] = 512
-    adjustment_method: ClassVar[str] = "BETA"
-    has_calibration: ClassVar[bool] = True
-
-    def scan(self, execution: ScanExecution, X: Array, G: Array, y: Array, offset: Array, key: PRNGKeyArray):
-        result, _ = execution.observed(X, G, y, offset)
-        maxima = execution.permutation_maxima(X, G, y, offset, key)
-        calibration = execution.fit_calibration(maxima, X.shape[0] - X.shape[1] - 1)
-        return result, (execution.adjust(result.z, calibration), calibration)
 
     max_perm_direct: int = 1000
     max_iter_beta: int = 1000
 
     use_tdist: bool = eqx.field(static=True, default=False)
 
-    def _run_permutations(
-        self,
-        X: Array,
-        G: Array,
-        y: Array,
-        offset: Array,
-        test: AbstractHypothesisTest,
-        key: PRNGKeyArray,
-    ):
-        r"""Run direct permutations and return a vector of max statistics.
+    def statistic(self, result: TestResult) -> Array:
+        """Return the per-variant z statistics."""
+        return result.z
 
-        **Arguments:**
+    def init(self, dtype, *, num_variants: ArrayLike) -> Array:
+        """Initialize a scalar NaN maximum in `dtype`; `num_variants` is unused.
 
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)`.
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-        - `test`: Hypothesis test to apply per permutation.
-        - `key`: PRNG key.
-
-        **Returns:**
-
-        A 1D array of permutation max statistics.
+        NaN is retained if every real statistic is NaN.
         """
-        X = jnp.asarray(X)
-        G = jnp.asarray(G)
-        y = jnp.asarray(y)
-        offset = jnp.asarray(offset)
+        return jnp.asarray(jnp.nan, dtype=dtype)
 
-        def _func(key, x):
-            key, p_key = rdm.split(key)
-            perm_idx = rdm.permutation(p_key, jnp.arange(0, len(y)))
-            if offset.ndim > 0:
-                glmstate = test(X, G, y[perm_idx], offset[perm_idx])
-            else:
-                glmstate = test(X, G, y[perm_idx], offset)
+    def update(self, state: Array, values: Array, valid: Array) -> Array:
+        """Accumulate absolute z statistics, ignoring NaNs and padded variants."""
+        maximum = jnp.nanmax(jnp.where(valid, jnp.abs(values), jnp.nan))
+        return jnp.fmax(state, maximum)
 
-            return key, jnp.nanmax(jnp.abs(glmstate.z))
+    def finalize(self, state: Array, reference: PermutationReference) -> tuple[Array, BetaCalibration]:
+        """Calibrate a scalar lead z statistic against complete permutation maxima.
 
-        key, z_stats = lax.scan(_func, key, xs=None, length=self.max_perm_direct)
-
-        return z_stats
-
-    def aggregate(
-        self,
-        X: ArrayLike,
-        G: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
-        result: TestResult,
-        test: AbstractHypothesisTest,
-        key: PRNGKeyArray,
-    ) -> tuple[Array, BetaCalibration]:
-        r"""Compute variantwise adjusted p-values using a Beta approximation.
-
-        **Arguments:**
-
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-        - `result`: Per-variant statistics from a single scan.
-        - `test`: Hypothesis test used to generate `result`.
-        - `key`: PRNG key.
-
-        **Returns:**
-
-        A tuple `(pvalue, aux)`. `pvalue` contains one adjusted value per variant.
-        `aux` is `(beta_params, calibration_estimate, optimizer_converged)`, where
-        `calibration_estimate` is the fitted t degrees of freedom or chi-squared
-        noncentrality parameter according to `use_tdist`.
+        Returns `(gene_pvalue, BetaCalibration)`. Vector input raises ValueError;
+        use `adjust` to apply an existing calibration to additional SNPs.
         """
-        X = jnp.asarray(X)
-        G = jnp.asarray(G)
-        y = jnp.asarray(y)
-        offset = jnp.asarray(offset)
-        z_stats_perm = self._run_permutations(X, G, y, offset, test, key)
-
-        return self._calibrate(z_stats_perm, result.z, X.shape[0] - X.shape[1] - 1)
+        if jnp.ndim(state) != 0:
+            raise ValueError("gene-level finalization requires a scalar lead statistic; use adjust for SNP arrays")
+        calibration = self.fit_calibration(reference.maxima, reference.dof)
+        return self.adjust(state, calibration), calibration
 
     def fit_calibration(self, z_stats_perm: Array, dof: int) -> BetaCalibration:
-        """Fit the reference distribution and Beta parameters to complete permutation maxima."""
-        if self.use_tdist:
-            prep = lambda stat: -jnp.abs(stat)
-            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, prep(z_stats_perm))
-            sf = lambda stat, x: t_cdf(stat, x)
-            solver = optx.NelderMead(rtol=1e-4, atol=1e-4)
-            init = float(dof)
-        else:
-            prep = lambda stat: stat**2
-            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, prep(z_stats_perm))
-            sf = lambda stat, x: ncx2_sf(stat, 1, x)
-            solver = optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4)
-            init = 0.1
+        """Fit a reusable calibration from a complete permutation reference.
 
-        def _df_cost(nc, args):
+        `z_stats_perm` contains one maximum absolute statistic per permutation.
+        `dof` initializes the Student's t fit and is unused for the chi-squared fit.
+        Returns Beta parameters, the fitted reference parameter, and convergence
+        diagnostics. Solver failures retain Optimistix's error behavior.
+        """
+        if self.use_tdist:
+            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, -jnp.abs(z_stats_perm))
+            reference_pvalue = lambda stat, x: t_cdf(stat, x)
+            solver = optx.NelderMead(rtol=1e-4, atol=1e-4)
+            reference_init = float(dof)
+        else:
+            stats = jnp.where(jnp.isnan(z_stats_perm), 0.0, z_stats_perm**2)
+            reference_pvalue = lambda stat, x: ncx2_sf(stat, 1, x)
+            solver = optx.LevenbergMarquardt(rtol=1e-4, atol=1e-4)
+            reference_init = 0.1
+
+        # Choose the reference parameter so the first Beta shape has moment estimate one.
+        def _shape_cost(parameter, args):
             (stats,) = args
-            pval = sf(stats, nc)
+            pval = reference_pvalue(stats, parameter)
             mean = jnp.nanmean(pval)
             var = jnp.nanvar(pval)
             return mean * (mean * (1.0 - mean) / var - 1.0) - 1.0
 
-        res = optx.least_squares(
-            _df_cost,
+        reference_fit = optx.least_squares(
+            _shape_cost,
             solver=solver,
-            y0=init,
+            y0=reference_init,
             args=(stats,),
         )
-        estimate = res.value
-        opt_status = res.result == optx.RESULTS.successful
+        estimate = reference_fit.value
+        reference_converged = reference_fit.result == optx.RESULTS.successful
 
-        p_perm = sf(stats, estimate)
+        p_perm = reference_pvalue(stats, estimate)
 
+        # Beta fitting requires probabilities strictly inside (0, 1).
         tiny = jnp.finfo(float).tiny
         eps = jnp.finfo(float).eps
         p_perm = jnp.clip(p_perm, tiny, 1 - eps)
@@ -303,34 +213,25 @@ class BetaPermutation(AbstractAggregateTest[BetaCalibration]):
         k_init = jnp.nan_to_num(p_mean * (p_mean * (1 - p_mean) / p_var - 1), nan=1.0)
         n_init = jnp.nan_to_num(k_init * (1 / p_mean - 1), nan=1.0)
 
-        init = jnp.array([k_init, n_init])
-        beta_result = infer_beta_params(p_perm, init, max_iter=self.max_iter_beta)
+        beta_init = jnp.array([k_init, n_init])
+        beta_result = infer_beta_params(p_perm, beta_init, max_iter=self.max_iter_beta)
 
-        return BetaCalibration(beta_result, estimate, opt_status)
+        return BetaCalibration(beta_result, estimate, reference_converged)
 
     def adjust(self, z: Array, calibration: BetaCalibration) -> Array:
-        """Apply one gene's calibration to observed statistics (which may be a SNP block)."""
+        """Apply an existing calibration to scalar or array-valued z statistics.
+
+        Returns adjusted p-values with the same shape as `z`, without refitting.
+        They use the gene's permutation-maximum reference for multiple testing
+        adjustment; this is distinct from marginal p-value calibration by SPA.
+        """
         beta_result, estimate, _ = calibration
         adj_obs_p = t_cdf(-jnp.abs(z), estimate) if self.use_tdist else ncx2_sf(z**2, 1, estimate)
         return jaxstats.beta.cdf(adj_obs_p, beta_result.k, beta_result.n)
 
-    def _calibrate(self, z_stats_perm: Array, observed_z: Array, dof: int) -> tuple[Array, BetaCalibration]:
-        """Calibrate existing maxima without generating permutations or fitting the null again."""
-        calibration = self.fit_calibration(z_stats_perm, dof)
-        return self.adjust(observed_z, calibration), calibration
-
     @property
     def name(self) -> str:
-        r"""Return the aggregation name.
-
-        **Arguments:**
-
-        `None`
-
-        **Returns:**
-
-        A short string identifier for the method.
-        """
+        """Return the permutation identifier used in output filenames."""
         return "perm"
 
 
@@ -359,7 +260,7 @@ def _acat_pvalue(cct_stat: Array, any_zeros: Array, any_ones: Array) -> Array:
     )
 
 
-class ACAT(AbstractAggregateTest[None]):
+class ACAT(AbstractAggregateTest[CauchyState, None, None]):
     r"""Aggregate p-values using ACAT.
 
     Given per-variant p-values $p_1, \dots, p_m$ and weights $w_i = 1/m$, the Cauchy combination statistic is
@@ -374,77 +275,34 @@ class ACAT(AbstractAggregateTest[None]):
     """
 
     block_size: ClassVar[int | None] = 2048
-    adjustment_method: ClassVar[str] = "ACAT"
-    has_calibration: ClassVar[bool] = False
 
-    def scan(self, execution: ScanExecution, X: Array, G: Array, y: Array, offset: Array, key: PRNGKeyArray):
-        result, state = execution.observed(X, G, y, offset, reduction=self)
-        assert state is not None
-        return result, (execution.finish_acat(state), None)
+    def statistic(self, result: TestResult) -> Array:
+        """Return the per-variant p-values."""
+        return result.p
 
-    def init(self, dtype) -> CauchyState:
-        """Initialize a fixed-size accumulator in the contribution dtype."""
-        return CauchyState(jnp.zeros((), dtype=dtype), jnp.array(False), jnp.array(False))
+    def init(self, dtype, *, num_variants: ArrayLike) -> CauchyState:
+        """Initialize a Cauchy accumulator in `dtype` with weight `1 / num_variants`.
 
-    def components(self, pvalues: Array, valid: Array, weight: Array) -> CauchyState:
-        """Reduce a masked block with weights defined across the whole window."""
-        return CauchyState(*_acat_components(pvalues, valid, weight))
-
-    def update(self, state: CauchyState, block: CauchyState) -> CauchyState:
-        """Merge one block's contributions without transferring values to the host."""
-        return CauchyState(
-            state.statistic + block.statistic, state.any_zeros | block.any_zeros, state.any_ones | block.any_ones
-        )
-
-    def finalize(self, state: CauchyState) -> Array:
-        """Convert the complete accumulator to a gene-level p-value."""
-        return _acat_pvalue(*state)
-
-    def aggregate(
-        self,
-        X: ArrayLike,
-        G: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
-        result: TestResult,
-        test: AbstractHypothesisTest,
-        key: PRNGKeyArray,
-    ) -> tuple[Array, None]:
-        r"""Compute a gene-level p-value using ACAT.
-
-        **Arguments:**
-
-        - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` for the cis window.
-        - `y`: Outcome vector with shape `(n,)`.
-        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
-        - `result`: Per-variant statistics from a single scan.
-        - `test`: Hypothesis test used to generate `result`.
-        - `key`: PRNG key (unused).
-
-        **Returns:**
-
-        A tuple `(pvalue, None)` containing the ACAT gene-level p-value.
-
-        **Failure Modes:**
-
-        If `result.p` contains both exact zero and exact one values, the method
-        reports an error through `equinox.error_if`.
+        `num_variants` is the positive number of real SNPs in the whole window,
+        including those processed in later blocks.
         """
-        obs_p = result.p
-        components = self.components(obs_p, jnp.ones_like(obs_p, dtype=bool), jnp.asarray(1.0 / len(obs_p)))
-        return self.finalize(components), None
+        weight = jnp.asarray(1.0, dtype=dtype) / num_variants
+        return CauchyState(jnp.zeros((), dtype=dtype), jnp.array(False), jnp.array(False), weight)
+
+    def update(self, state: CauchyState, values: Array, valid: Array) -> CauchyState:
+        """Accumulate masked p-value contributions without transferring values to the host."""
+        statistic, zeros, ones = _acat_components(values, valid, state.weight)
+        return CauchyState(state.statistic + statistic, state.any_zeros | zeros, state.any_ones | ones, state.weight)
+
+    def finalize(self, state: CauchyState, reference: None = None) -> tuple[Array, None]:
+        """Return `(gene_pvalue, None)` from the complete Cauchy accumulator.
+
+        `reference` is unused. A mixture of exact zero and exact one p-values
+        raises through Equinox's transformed-runtime error handling.
+        """
+        return _acat_pvalue(state.statistic, state.any_zeros, state.any_ones), None
 
     @property
     def name(self) -> str:
-        r"""Return the aggregation name.
-
-        **Arguments:**
-
-        `None`
-
-        **Returns:**
-
-        A short string identifier for the method.
-        """
+        """Return the ACAT identifier used in output filenames."""
         return "acat"
