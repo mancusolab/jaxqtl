@@ -16,6 +16,14 @@ jaxqtl compute-pcs \
 The output contains the original covariates followed by `ExprPC0`, `ExprPC1`, and subsequent requested components.
 Pass this table to `--covar` in a mapping command.
 
+Each row represents one individual, with exactly `--num-pcs` component columns. Components are unit-norm sample
+directions ordered by decreasing explained variance within the estimated subspace. The algorithm estimates that
+subspace iteratively, then uses a small projected SVD to resolve its principal directions.
+
+For a scree plot, evaluate explained variance on the same expression matrix used for fitting: apply the selected
+transform, then center and scale each gene to unit variance across samples. Variance explained in unscaled
+expression need not decrease in component order.
+
 For cell-type-specific analyses, compute expression PCs separately from each cell type's pseudobulk matrix.
 
 Expression PCA uses a probabilistic algorithm. Reusing `--seed` with the same inputs makes initialization
