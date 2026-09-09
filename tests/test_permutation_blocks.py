@@ -244,7 +244,8 @@ def test_mixed_precision_permutation_scores_preserve_dtype():
 
 def test_student_t_calibration_blocked_path_matches_legacy():
     with jax.enable_x64(True):
-        rng = np.random.default_rng(9)
+        # This reference has a finite interior df fit; avoid the flat df -> infinity limit.
+        rng = np.random.default_rng(20)
         n = 100
         X = jnp.asarray(np.column_stack([np.ones(n), rng.normal(size=n)]))
         G = jnp.asarray(rng.normal(size=(n, 3)))
@@ -255,27 +256,31 @@ def test_student_t_calibration_blocked_path_matches_legacy():
         key = jax.random.key(1)
         expected = cis_map.map_cis_single(X, G, y, offset, test, perms, key)
         actual = _permutation_scan(X, G, y, offset, test, perms, key, block_size=2, batch_size=13)
+        assert 100 < float(expected[1][1].reference_estimate) < 1000
+        assert 100 < float(actual[1][1].reference_estimate) < 1000
         np.testing.assert_allclose(actual[0].z, expected[0].z, rtol=1e-7, atol=1e-8)
         np.testing.assert_allclose(actual[1][0], expected[1][0], rtol=1e-5, atol=1e-7)
-        assert bool(actual[1][1][2]) == bool(expected[1][1][2])
-        assert bool(actual[1][1][0].converged) == bool(expected[1][1][0].converged)
+        assert bool(actual[1][1].reference_converged) and bool(expected[1][1].reference_converged)
+        assert bool(actual[1][1].beta_params.converged) and bool(expected[1][1].beta_params.converged)
 
 
 def test_student_t_calibration_preserves_existing_failure():
+    # Boundary fits can exhaust iterations or diverge, depending on the backend.
     with jax.enable_x64(True):
         X, G, y, offset = _inputs()
         test = ScoreTest(model=LinearModel())
         perms = BetaPermutation(max_perm_direct=64, use_tdist=True)
         key = jax.random.key(12)
-        with pytest.raises(eqx.EquinoxRuntimeError, match="maximum number of steps"):
+        with pytest.raises(eqx.EquinoxRuntimeError, match="maximum number of steps|Nonlinear solve diverged"):
             cis_map.map_cis_single(X, G, y, offset, test, perms, key)
-        with pytest.raises(eqx.EquinoxRuntimeError, match="maximum number of steps"):
+        with pytest.raises(eqx.EquinoxRuntimeError, match="maximum number of steps|Nonlinear solve diverged"):
             _permutation_scan(X, G, y, offset, test, perms, key, block_size=4, batch_size=7)
 
 
 def test_explicit_float32_inputs_preserve_calibrated_dtype_under_x64():
     with jax.enable_x64(True):
-        rng = np.random.default_rng(9)
+        # This reference has a finite interior df fit; avoid the flat df -> infinity limit.
+        rng = np.random.default_rng(20)
         n = 100
         X = jnp.asarray(np.column_stack([np.ones(n), rng.normal(size=n)]), dtype=jnp.float32)
         G = jnp.asarray(rng.normal(size=(n, 3)), dtype=jnp.float32)
@@ -286,5 +291,7 @@ def test_explicit_float32_inputs_preserve_calibrated_dtype_under_x64():
         key = jax.random.key(1)
         expected = cis_map.map_cis_single(X, G, y, offset, test, perms, key)
         actual = _permutation_scan(X, G, y, offset, test, perms, key, block_size=2, batch_size=13)
+        assert 100 < float(expected[1][1].reference_estimate) < 1000
+        assert 100 < float(actual[1][1].reference_estimate) < 1000
         assert actual[1][0].dtype == expected[1][0].dtype
         np.testing.assert_allclose(actual[1][0], expected[1][0], rtol=2e-4, atol=1e-5)
