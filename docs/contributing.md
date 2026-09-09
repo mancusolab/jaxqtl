@@ -51,21 +51,26 @@ symbol headings identify individual classes and functions rather than repeating 
 
 ## Documentation notices
 
-Choose admonitions by meaning, not color or icon. Use these canonical types consistently:
+Use ordinary prose by default. Add a notice when its consequence or action deserves attention:
 
-| Type | Purpose | Internal structure |
+| Type | Use for | Title and body |
 | --- | --- | --- |
-| `note` | Non-obvious behavior or scope the reader needs to understand | Factual title; behavior, then its implication |
-| `tip` | Recommended action or useful shortcut | Action title; recommendation, then benefit and relevant limitation |
-| `warning` | A choice that can invalidate an analysis or cause an avoidable operational problem | Action title; risky condition, consequence, then prevention |
-| `failure` | An actual error or failed operation in troubleshooting | Symptom title; what failed, then how to diagnose or recover |
-| `danger` | Destructive actions or risk of losing data or work | Preventive action title; destructive consequence, then a safe alternative |
+| `note` | Non-obvious behavior needed to interpret an input or result | Factual title; behavior → implication |
+| `tip` | An optional shortcut or improvement | Action title; action → benefit → tradeoff |
+| `warning` | A choice that risks incorrect inference or an avoidable operational failure | Preventive title; condition → consequence → action |
+| `failure` | An actual failed operation in troubleshooting | Symptom title; cause or diagnosis → recovery |
+| `danger` | Destructive actions that can lose data or work | Preventive title; loss at risk → safe alternative |
 
-Use the canonical type names above rather than selecting blocks by their icons or alternating aliases such as
-`error`, `bug`, or `caution` for visual variety. Performance advice belongs in a `tip` only when it recommends an
-action and explains the tradeoff. `abstract` is reserved for collapsible API contracts, not user notices.
+Use these names, not icon-based aliases such as `fire`, `error`, or `caution`. Reserve `abstract` for collapsible
+API contracts. A strong recommendation needed for inference quality, such as SPA with score-test ACAT, is a
+`warning`, not an optional `tip`.
 
-Use sentence-case titles and short prose bodies. A notice should address one issue. Prefer ordinary prose for
-routine options and background details; do not wrap every caveat in a box. Keep consequential warnings visible
-beside the relevant action, never inside collapsed details. Keep repeated notices consistent across independently
-usable workflows, and link to the detailed explanation rather than repeating it in full.
+Keep titles in sentence case and bodies to one issue in two or three short sentences. Put notices beside the
+relevant action; never collapse consequential warnings. Repeat essential warnings on independently usable
+workflows, but link to the methods page for their full explanation. Routine setup instructions do not need a box.
+
+## Writing for limited attention
+
+Give each page one job: getting started runs an example, workflows guide decisions, reference pages define exact
+contracts, and troubleshooting explains symptoms. Keep complete commands where users run them. Explain a caveat
+once per page, link to deeper detail, and avoid repeating the same checklist in prose, a table, and a notice.

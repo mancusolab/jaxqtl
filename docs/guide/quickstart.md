@@ -15,9 +15,7 @@ cd jaxqtl
 
 ## Run a cis scan
 
-Choose permutation calibration or SPA + ACAT. Both report a lead variant and a gene-level p-value; testing does
-not require permutations.
-
+Both approaches report a lead variant and a gene-level p-value:
 
 | Approach | Why choose it | Main consideration |
 | --- | --- | --- |
@@ -46,15 +44,12 @@ jaxqtl cis \
   --out tutorial/output/quickstart
 ```
 
-The command writes `tutorial/output/quickstart.cis.score.perm.parquet.gz`. Each row reports the lead variant and a
-gene-level adjusted p-value. See [Cis output](../reference/outputs.md#cis-output) for the complete schema and validity
-fields.
+The command writes `tutorial/output/quickstart.cis.score.perm.parquet.gz`.
 
 ### Faster scans with SPA and ACAT
 
-SPA + ACAT is typically substantially faster than permutation scans because it fits each gene's null model once
-and avoids repeatedly fitting and testing shuffled phenotypes. The speed difference depends on the data and the
-number of permutations used for comparison.
+SPA + ACAT avoids permutation refits and is typically much faster. The speedup depends on the data and
+permutation count.
 
 ```bash
 jaxqtl cis \
@@ -72,17 +67,15 @@ jaxqtl cis \
 ```
 
 The command writes `tutorial/output/quickstart_spa_acat.cis.score.spa.acat.parquet.gz`. No permutations are run,
-and `--nperm` does not control this procedure. The offset requirements above apply to both examples.
+and `--nperm` is unused.
 
-!!! tip "Strongly recommended: use SPA with ACAT"
+!!! warning "Use SPA with score-test ACAT"
 
-    ACAT is sensitive to inaccurate variant p-values, so use `--spa` with `--acat` for score tests. SPA improves
-    tail calibration but can fall back to the normal approximation when its numerical correction fails.
+    ACAT can amplify inaccurate variant tail p-values into misleading gene-level results. We strongly recommend
+    `--spa --acat` for score tests. SPA can still fall back to the normal approximation.
 
-ACAT and Beta permutation use different calibration procedures and need not produce the same p-values or
-discoveries. Check convergence and finite adjusted p-values, and apply multiple-testing correction across genes
-with either method. See [Tests and gene-level calibration](tests.md#tail-and-gene-level-calibration) for the tradeoffs
-and [Post-process cis results](postprocessing.md) for output checks.
+The methods can yield different p-values and discoveries. See [Calibration tradeoffs](tests.md#tail-and-gene-level-calibration);
+both require result checks and FDR correction across genes.
 
 ## Inspect the result
 
@@ -100,15 +93,11 @@ if "perm_converged" in results.columns:
 print(results.select("phenotype_id", "pvalue_adj", *checks))
 ```
 
-A completed command can retain failed results. Before identifying discoveries, follow
-[Post-process cis results](postprocessing.md) to filter validity and convergence flags, exclude nonfinite
-adjusted p-values, and control FDR across genes. `pvalue_adj` adjusts within a gene's cis window; it is not an
-across-gene FDR value.
+`pvalue_adj` adjusts within a cis window; it is **not an across-gene FDR value**.
+Follow [Post-process cis results](postprocessing.md) to filter failed/nonfinite results and control FDR.
 
 ## Next steps
 
-- Use the [single-cell cis-eQTL workflow](single-cell-cis.md) to prepare and run your own cell-type-specific data.
-- Use [Cis mapping](cis.md) to choose between permutation calibration and ACAT; SPA is strongly recommended with ACAT.
-- Use [Nominal mapping](nominal.md) to retain every association in each cis window.
-- Use [Post-process cis results](postprocessing.md) to filter failures and apply a study-level FDR procedure.
-- Review [Data preparation](single-cell-cis.md) before substituting your own data.
+- [Single-cell workflow](single-cell-cis.md): prepare and analyze your own data.
+- [Cis mapping](cis.md): choose regions, filters, and fitting settings.
+- [Nominal mapping](nominal.md): retain every variant association.

@@ -1,11 +1,7 @@
 # Gene-level aggregation
 
-For cis mapping, `jaxqtl` supports gene-level calibration and aggregation over the set of variants tested in a cis
-window.
-
-Aggregations reduce per-variant results across a cis window and return a p-value with method-specific diagnostics.
-Blocked cis scans return one adjusted value per gene. Beta permutation evaluates the selected lead's statistic
-against a reference built from permutation maxima; ACAT combines all real variants' p-values.
+Aggregations return one gene-level p-value and diagnostics. ACAT combines real variants' p-values;
+BetaPermutation evaluates the selected lead statistic against a reference built from permutation maxima.
 
 **SPA is strongly recommended when ACAT aggregates score-test p-values.** Use `SpaTest` with `ACAT`
 in Python, or `--spa --acat` in the CLI. ACAT's sensitivity to inaccurate tail probabilities makes variant-level
@@ -60,19 +56,17 @@ pvalue, diagnostics = method.finalize(state, reference)
 ```
 
 `statistic` selects p-values for ACAT or z statistics for Beta permutation inside the compiled kernel.
-Unused SPA tail calculations can therefore be eliminated during permutation testing. `valid_mask` excludes padded variants. Each state has a fixed shape independent of window width. The whole-window
-variant count determines ACAT weights, including when the last block is partial.
+This lets permutation kernels discard unused SPA tail calculations. `valid_mask` excludes padding.
+State shapes do not depend on window width; ACAT weights use the full count of real variants.
 
 | Method | Reduction state | Reference | Finalization |
 | --- | --- | --- | --- |
 | ACAT | `CauchyState`: weighted sum, endpoint flags, and weight | `None` | Convert the complete Cauchy statistic to a p-value |
 | Beta permutation | Scalar array: maximum absolute z statistic | `PermutationReference`: permutation maxima and residual degrees of freedom | Fit calibration and evaluate an observed statistic |
 
-The mapper accumulates one scalar maximum per permutation across genotype blocks. These
-reference reductions are not individually finalized. Cis orchestration selects the lead once and passes
-the same index to the output formatter. It calls `finalize(lead_z, reference)` after collecting the permutation maxima. Selecting the observed statistic by nominal or SPA p-value preserves
-lead selection when the best p-value does not correspond to the maximum absolute z statistic.
-There is no separate observed-maximum accumulator.
+Permutation reductions produce one maximum per shuffle and are not individually finalized. Cis orchestration
+selects the lead once, passes its index to the formatter, and calls `finalize(lead_z, reference)`.
+Selection uses the nominal or SPA p-value, which need not identify the largest absolute z statistic.
 
 ## Result type
 
@@ -98,21 +92,15 @@ This operation does not provide marginal p-value calibration like SPA and does n
 `BetaCalibration` names the auxiliary fields `beta_params`, `reference_estimate`, and `reference_converged`.
 The diagnostics distinguish the fitted Beta parameters from convergence of the reference-distribution estimate.
 
-For cis execution, `AssociationScan` in `jaxqtl.map` runs observed scans and, for Beta permutation,
-additional permutation scans. Cis orchestration owns lead selection and invokes finalization;
-the scan executor owns
-block scheduling, permutation batching, compiled calls, and host transfers through the hypothesis test's
-`init`/`test` interface. Aggregation classes contain the statistical calculations: ACAT contributions, accumulator
-updates, and final conversion; maximum-statistic reduction, Beta calibration, and adjustment of observed statistics. Both execution paths
-reuse the same numerical methods; aggregation classes do not fit hypothesis tests or schedule scans.
+## Execution and extension
 
-Aggregation classes declare a preferred `block_size`; `None` selects full-window execution.
-The cis output formatter includes calibration columns for BetaPermutation.
-A custom observed-only aggregation implements `statistic`, `init`, `update`, `finalize`, and `name`.
-It can use full-window or blocked execution without changes to `AssociationScan`. A different resampling
-workflow requires extending the executor.
-The cis output formatter assigns `"ACAT"` and `"BETA"` labels from the concrete aggregation type. Supporting a
-different aggregation in cis output requires extending the formatter; unsupported types raise `TypeError`.
+`AssociationScan` owns fitting, block transfers, and permutation batching. Cis orchestration owns lead
+selection and finalization; aggregators own statistical calculations.
+
+Custom observed-only aggregators implement `statistic`, `init`, `update`, `finalize`, and `name`.
+Their preferred `block_size` selects blocked execution; `None` selects a full window.
+A different resampling workflow requires extending the executor. Cis output currently supports ACAT and
+BetaPermutation; adding another method also requires extending the formatter.
 
 ## Calibration and failure behavior
 

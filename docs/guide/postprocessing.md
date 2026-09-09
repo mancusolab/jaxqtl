@@ -28,20 +28,11 @@ results = pl.scan_parquet(paths)
 
 ## Select interpretable results
 
-Apply the validity and convergence checks in this order:
-
-1. Keep rows where `result_valid` is true.
-2. Keep rows where `model_converged` is true.
-3. For Beta-permutation results, keep rows where `perm_converged` is true.
-4. Keep rows with a finite `pvalue_adj` between zero and one.
+Require valid, converged fits and finite `pvalue_adj` values in [0, 1]. Beta-permutation results also require
+`perm_converged`:
 
 ```python
-required = {"result_valid", "model_converged", "pvalue_adj"}
 columns = results.collect_schema().names()
-missing = required.difference(columns)
-if missing:
-    raise ValueError(f"missing required cis columns: {sorted(missing)}")
-
 valid = results.filter(
     pl.col("result_valid")
     & pl.col("model_converged")

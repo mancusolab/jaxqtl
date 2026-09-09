@@ -33,46 +33,24 @@ See [Post-process cis results](postprocessing.md) for filtering examples.
 Score and SPA tests fit a covariate-only null model; GLM Wald tests fit each variant's full model. These GLM fits
 share the controls below. Gaussian linear models use a direct least-squares solve.
 
-
 GLM convergence requires both of the following:
 
 1. The absolute change in **total** negative log likelihood is at most `--tol`.
 2. The scaled gradients at the accepted fit satisfy `--gtol`.
 
-The coefficient gradients are divided by the sample count and each design column's root-mean-square magnitude.
-NB2 also checks the per-observation dispersion gradient, accounting for feasible movement at a dispersion bound.
-A small likelihood change alone, or a dispersion estimate at a bound, does not establish convergence.
+The gradient check accounts for sample count, covariate scale, and NB2 dispersion bounds; see the
+[exact criteria](../api/models/glm.md#convergence). A dispersion estimate at a bound does not itself establish convergence.
 
-Both tolerances default to `1e-3`. `--max-iter` defaults to `1000`, and the initial trial `--step-size` is `1.0`.
-These settings also govern the Poisson fit used to initialize NB2. The exact gradient criteria are given in the
-[model API reference](../api/models/glm.md#convergence).
+Both tolerances default to `1e-3`; `--max-iter` defaults to `1000` and `--step-size` to `1.0`.
+These controls also govern the Poisson fit used to initialize NB2.
 
-To examine sensitivity to a tighter gradient criterion, rerun the same inputs with an explicit setting:
-
-```bash
-jaxqtl cis \
-  --bfile tutorial/input/chr22_N100 \
-  --pheno tutorial/input/CD4_NC.N100.bed.gz \
-  --covar tutorial/input/donor_features.tsv \
-  --gene-list tutorial/input/genelist_10 \
-  --model nb \
-  --test score \
-  --set-offset-from-libsize \
-  --acat \
-  --spa \
-  --gtol 1e-6 \
-  --out tutorial/output/cis_tight
-```
-
+To assess sensitivity, rerun the same command with `--gtol 1e-6`.
 A smaller gradient tolerance asks for a more stationary fit and can require more iterations. Compare convergence
 flags, dispersion estimates, and association results as well as runtime. `--tol` and `--gtol` do not set the
 saddlepoint root-solver or permutation-calibration tolerances.
 
-
-!!! warning "Check model adequacy before interpreting discoveries"
-
-    A converged optimizer only indicates that its numerical stopping rule was met. It does not show that the response
-    family, covariates, offset, or asymptotic test is appropriate for the data.
+Convergence does not establish model adequacy. Check the response family, covariates, and offset before
+[interpreting discoveries](postprocessing.md#select-interpretable-results).
 
 ## SPA and aggregation
 
@@ -87,12 +65,9 @@ ACAT propagates nonfinite input p-values. Its Cauchy transform is sensitive to p
 a gene-level p-value near one can occur even when some nominal p-values are small. Inputs containing both exact
 zero and exact one raise an error.
 
-Beta permutation calibrates statistics against the same testing procedure under permutation, so distortions
-shared by observed and permuted tests can enter the reference distribution instead of being passed directly
-to ACAT as nominal p-values. This does not protect against failed fits or failed calibration.
-For Beta permutation, filter on `perm_converged` and a finite adjusted p-value. A failed reference estimate or
-Beta fit can leave `pvalue_adj` nonfinite. Increasing the GLM iteration limit does not change calibration's own
-iteration limits.
+For Beta permutation, require `perm_converged` and a finite `pvalue_adj`. A failed reference or Beta fit can
+produce a nonfinite result; increasing `--max-iter` does not change calibration's own iteration limits.
+See [Calibration tradeoffs](tests.md#permutation-calibration) for its assumptions.
 
 ## Skipped phenotypes
 

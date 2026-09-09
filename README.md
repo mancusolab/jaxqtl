@@ -8,6 +8,10 @@ jaxQTL is a JAX-based command-line tool and Python library for cell-type-specifi
 single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models and also supports Gaussian
 molecular phenotypes.
 
+**For fast gene-level cis testing, we recommend SPA + ACAT (`--spa --acat`).** This combines saddlepoint-adjusted
+score-test p-values with the aggregated Cauchy association test, avoiding permutation refits. It is typically much
+faster than permutation calibration; the speedup depends on the data and permutation count.
+
 >   Zhang, Z., Kim, A., Suboc, N., Mancuso, N., and Gazal, S. (2025). Efficient count-based models improve power and robustness for large-scale single-cell eQTL mapping. medRxiv (https://www.medrxiv.org/content/10.1101/2025.01.18.25320755v2)
 
 [Read the documentation](https://mancusolab.github.io/jaxqtl/)
@@ -23,7 +27,7 @@ jaxqtl --help
 
 ## Quick example
 
-From a repository checkout, run a cis scan over the bundled tutorial data:
+From a repository checkout, run a SPA + ACAT cis scan over ten genes from the bundled tutorial data:
 
 ```bash
 jaxqtl cis \
@@ -35,11 +39,24 @@ jaxqtl cis \
   --test score \
   --set-offset-from-libsize \
   --normalize-covar \
-  --nperm 1000 \
-  --out tutorial/output/quickstart
+  --spa \
+  --acat \
+  --out tutorial/output/quickstart_spa_acat
 ```
 
-The command writes `tutorial/output/quickstart.cis.score.perm.parquet.gz`.
+The command writes `tutorial/output/quickstart_spa_acat.cis.score.spa.acat.parquet.gz`.
+
+> [!WARNING]
+> **Use SPA with score-test ACAT.** ACAT can amplify inaccurate variant tail p-values into misleading gene-level
+> results. We strongly recommend using both flags; SPA can still fall back to the normal approximation.
+
+For your own data, compute library-size offsets from the full gene matrix; see
+[Offsets](https://mancusolab.github.io/jaxqtl/guide/offsets/) before using a restricted input file.
+Check convergence and apply FDR correction across genes with either method.
+
+Beta permutation remains available when a permutation reference is desired: replace `--spa --acat` with
+`--nperm 1000`. The methods can yield different discoveries; see
+[Calibration tradeoffs](https://mancusolab.github.io/jaxqtl/guide/tests/#tail-and-gene-level-calibration).
 
 The documentation covers the [single-cell cis-eQTL workflow](https://mancusolab.github.io/jaxqtl/guide/single-cell-cis/),
 the [tutorial](https://mancusolab.github.io/jaxqtl/guide/quickstart/),

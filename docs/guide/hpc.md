@@ -10,10 +10,8 @@ The repository includes two project-layout templates:
 - [`tutorial/code/run_jaxqtl_cis_all.sh`](https://github.com/mancusolab/jaxqtl/blob/main/tutorial/code/run_jaxqtl_cis_all.sh),
   which demonstrates a Slurm array running one cis scan per parameter row.
 
-!!! warning "Adapt the batch template before submitting jobs"
-
-    They contain site-specific placeholders for the partition, notification address, working directory, and array
-    size. Review every `#SBATCH` directive and path before submitting a job.
+Adapt the templates' partition, notification address, working directory, and array size before submitting.
+Review every `#SBATCH` directive and path.
 
 !!! warning "Do not recompute offsets from a restricted phenotype file"
 
@@ -59,20 +57,13 @@ sbatch tutorial/code/run_jaxqtl_cis_all.sh
 
 ## Compilation and memory
 
-Score, SPA, and Wald cis and nominal scans use fixed-size genotype blocks. The final block is padded internally,
-and padded variants do not contribute to reported associations or gene-level tests. Genes with different numbers
-of cis variants share compiled fitting and testing kernels when their sample dimensions, covariate dimensions,
-dtypes, and test settings match.
+Score, SPA, and Wald scans reuse compiled kernels across gene-window sizes using fixed genotype blocks.
+Padding is excluded from results. Changing sample counts, covariate dimensions, dtypes, or test settings can
+still trigger compilation.
 
-The first initialization and test blocks include JAX compilation time. Permutation scans also compile batched
-initialization and scoring functions. Estimate runtime from several genes with representative window sizes,
-including startup costs. Each scheduler process has its own in-memory compilation cache; starting more jobs
-repeats those startup costs.
+Each process pays its own startup compilation cost; standard cis and nominal scans do not periodically clear
+the cache. Benchmark several representative genes, including startup, before choosing job sizes.
 
-The standard cis and nominal paths reuse compiled kernels without periodic cache clearing. This avoids
-recompiling them during a scan. Compilation can still occur when sample or covariate dimensions, dtypes, or
-settings change; direct Python calls using variable-size arrays have their own compilation behavior.
-
-Fixed blocks bound the size of the numerical test kernels, not total process memory. Input data, host genotype
-windows, assembled results, permutation state batches, and compiled executables also consume memory. Measure
-peak resident memory with the same backend and settings intended for the full analysis.
+Fixed blocks limit kernel size, not total process memory. Inputs, host genotype windows, assembled results,
+permutation batches, and compiled executables also consume memory. Measure peak resident memory with the backend
+and settings intended for production.

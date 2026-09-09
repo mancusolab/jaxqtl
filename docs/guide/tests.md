@@ -1,68 +1,49 @@
 # Tests and gene-level calibration
 
-jaxQTL separates the response model, variant-level test, and gene-level calibration method. These choices answer
-different questions, but tail calibration is particularly important when aggregating variant p-values.
-
-See [Statistical model](model.md) for response families and effect interpretation.
+Choose a [response model](model.md), a variant-level test, and a gene-level calibration method.
 
 ## Variant-level tests
 
-The score test fits one covariate-only model per phenotype and tests each genotype against that null fit. It is the
-default for cis scans because the null-model work is reused across variants.
+The **score test** is the cis default: it fits one covariate-only null model per phenotype and reuses it across
+variants. **Wald tests** fit each variant's effect and are the usual choice for nominal scans requiring full-model
+effect estimates.
 
-The Wald test fits the tested variant coefficient and reports its estimate, standard error, and Wald statistic. It is
-the usual choice for nominal results when effect estimates for every variant are required.
+!!! warning "Use robust standard errors only with Wald tests"
 
-!!! warning "Robust standard errors apply only to Wald tests"
-
-    `--robust-se` selects Huber–White sandwich standard errors for Wald inference. It does not make the implemented
-    score statistic or saddlepoint approximation misspecification-robust.
+    Score and SPA inference do not support Huber–White sandwich errors. Use `--test wald --robust-se` when
+    requesting them; this option does not make score or SPA inference robust to model misspecification.
 
 ## Tail and gene-level calibration
 
-`--spa` attempts a saddlepoint approximation for score statistics with absolute normal z-score above 1.96 that
-pass the CGF's score-support checks. It uses the fitted null model to evaluate the tail and can be useful when
-normal approximations are inaccurate, such as at low minor-allele counts. Smaller statistics use the normal tail.
+`--spa` attempts a saddlepoint correction for score statistics with absolute normal z-score above 1.96 that pass
+the CGF's support checks. Smaller statistics use the normal tail. A failed root solve or invalid correction also
+falls back to the normal approximation.
 
-If the saddlepoint root solve fails or its correction is invalid, the implementation returns the normal
-approximation. A finite p-value or `model_converged = true` does not identify whether SPA succeeded. See
-[Troubleshooting](troubleshooting.md).
-
-Gene-level testing does not require permutations. `jaxqtl cis --spa --acat` combines SPA-calibrated score-test
-p-values with the aggregated Cauchy association test (ACAT). Without `--acat`, the CLI uses permutation
-calibration and a fitted Beta approximation.
+There is no separate SPA-success flag: `model_converged` describes the null fit, not the tail calculation.
 
 ### Faster cis scans with SPA and ACAT
 
-SPA + ACAT is typically substantially faster than permutation scans because it fits each gene's null model once
-and avoids repeatedly fitting and testing shuffled phenotypes. The speed difference depends on the data and the
-number of permutations used for comparison.
+`--spa --acat` combines variant p-values into one gene-level p-value without permutations. It is typically much
+faster than Beta permutation because it avoids permutation refits; the speedup depends on the data and permutation
+count. See the [Quickstart](quickstart.md#run-a-cis-scan) for both commands.
 
-See the [Quickstart examples](quickstart.md#run-a-cis-scan) for complete permutation and SPA + ACAT commands.
+!!! warning "Use SPA with score-test ACAT"
 
-!!! tip "Strongly recommended: use SPA with ACAT"
-
-    For score-test ACAT scans, use `--spa --acat`. ACAT directly transforms the variant p-values and is sensitive
-    to inaccurate tail probabilities: a poorly calibrated variant can disproportionately affect the gene-level
-    result. SPA improves score-tail calibration before aggregation; it does not guarantee that every tail
-    calculation succeeds.
-
-ACAT and Beta permutation use different calibration procedures and need not produce the same p-values or
-discoveries. Both require appropriate models and valid numerical results. An ACAT p-value accounts for aggregation
-within a gene; testing many genes still requires study-level multiple-testing control. See
-[Post-process cis results](postprocessing.md).
+    ACAT can amplify inaccurate variant tail p-values into misleading gene-level results. We strongly recommend
+    `--spa --acat` for score tests. SPA can still fall back to the normal approximation.
 
 ### Permutation calibration
 
-Permutation calibration uses the maximum absolute score or Wald statistic across the window. Selecting `--spa`
-does not replace those permutation statistics with saddlepoint p-values. For ACAT, the returned per-variant
-p-values, including successful SPA corrections, are the inputs to the gene-level test.
+Without `--acat`, cis scans use a Beta approximation fitted to permutation maxima. Each shuffle contributes the
+maximum absolute score or Wald statistic across the window. `--spa` does not replace these statistics with
+saddlepoint p-values.
 
-Beta permutation does not have this same dependence on accurate asymptotic variant p-values. It calibrates the
-observed statistic against statistics computed with the same procedure under permutation. Distortions arising
-from geometry shared by the observed and permuted tests can therefore be reflected in the permutation reference
-distribution. This relies on valid permutations and successful fitting; it does not correct numerical failures
-or guarantee the fitted Beta approximation is accurate.
+Beta permutation does not share ACAT's direct sensitivity to asymptotic variant p-values: it compares statistics
+computed by the same procedure in the observed and permuted data. Geometry shared across those tests can therefore
+be reflected in the reference distribution. This requires valid permutations and successful fitting; it cannot
+repair numerical failures or guarantee an accurate Beta approximation.
 
-See [Hypothesis testing](../api/hypothesis/variant.md) and
-[Gene-level aggregation](../api/hypothesis/gene.md) for the Python interfaces.
+The methods can yield different discoveries. Both need [result checks and FDR correction across genes](postprocessing.md).
+
+For Python interfaces, see [Variant-level tests](../api/hypothesis/variant.md) and
+[Gene-level aggregation](../api/hypothesis/gene.md).

@@ -29,11 +29,10 @@ see [Offsets](offsets.md) when the input file itself has already been restricted
 
 Score and SPA scans reuse one null fit per phenotype; permutation scans fit a null model for each shuffle.
 Compiled kernels are reused across cis-window sizes. See [Run large scans](hpc.md#compilation-and-memory)
-for compilation and memory behavior, and [Tests and gene-level calibration](tests.md) for statistical tradeoffs.
+for compilation and memory behavior.
 
 GLM fitting is controlled by `--tol`, `--gtol`, `--max-iter`, and `--step-size`. See
-[Troubleshooting](troubleshooting.md) for their defaults and stopping rules, and
-[Run large scans](hpc.md) for planning runtime and memory.
+[Troubleshooting](troubleshooting.md#stopping-rules) for defaults and stopping rules.
 
 ## Inspect results
 
