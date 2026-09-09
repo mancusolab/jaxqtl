@@ -10,6 +10,9 @@
   adjusted p-value (e.g. via permutation/Beta approximation or ACAT).
 - **nominal**: per gene, return statistics for all variants in the cis window.
 
+For score-test ACAT mapping, **SPA is strongly recommended**. Pair `SpaTest` with `ACAT`; see
+[Gene-level aggregation](../hypothesis/gene.md) for calibration and execution details.
+
 The Python mapper consumes a `ReadyDataState` whose genotype, expression, covariates, and offsets have already been
 aligned on IID. The CLI constructs this state internally.
 

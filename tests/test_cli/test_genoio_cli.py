@@ -14,7 +14,8 @@ from jax import numpy as jnp
 import jaxqtl.map.cis as cis_map
 
 from jaxqtl import cli
-from jaxqtl.hypothesis import TestResult as AssocTestResult
+from jaxqtl.hypothesis import ACAT, BetaPermutation, ScoreTest, TestResult as AssocTestResult
+from jaxqtl.infer import LinearModel
 from jaxqtl.map.data import CisData
 
 
@@ -498,7 +499,7 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
 
 def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeData:
-        def iter_cis(self, window):
+        def iter_cis(self, window, *, host_genotypes=False):
             for idx in range(3):
                 yield CisData(
                     jnp.ones((2, 1)),
@@ -522,11 +523,9 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                     200,
                 )
 
-    class FakeTest:
-        model = SimpleNamespace(family=object())
-
-        def __call__(self, X, G, y, offset):
-            return AssocTestResult(
+    def observed(execution, X, G, y, offset):
+        return (
+            AssocTestResult(
                 beta=jnp.array([0.1]),
                 se=jnp.array([0.2]),
                 p=jnp.array([0.3]),
@@ -535,14 +534,17 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                 converged=jnp.array([True]),
                 disp=jnp.array(0.0),
                 negloglikelihood=jnp.array(12.5),
-            )
+            ),
+            None,
+        )
 
     # Lower the private flush threshold so the test observes batching without a large fixture.
     monkeypatch.setattr(cis_map, "_MAP_CIS_BATCH_ROWS", 2)
-    monkeypatch.setattr(cis_map.eqx, "filter_jit", lambda fn: fn)
+    monkeypatch.setattr(cis_map.AssociationScan, "observed", observed)
 
     map_cis = getattr(cis_map, "map_cis")
-    chunks = list(map_cis(FakeData(), FakeTest(), None, mode="nominal", verbose=False, log=_LoggerStub()))
+    test = ScoreTest(LinearModel())
+    chunks = list(map_cis(FakeData(), test, None, mode="nominal", verbose=False, log=_LoggerStub()))
 
     assert [chunk.height for chunk in chunks] == [2, 1]
     assert chunks[0]["phenotype_id"].to_list() == ["gene0", "gene1"]
@@ -553,7 +555,7 @@ def test_map_cis_forwards_tss_centered_window_mode() -> None:
     class FakeData:
         requested_window = None
 
-        def iter_cis(self, window, *, tss_centered=False):
+        def iter_cis(self, window, *, tss_centered=False, host_genotypes=False):
             self.requested_window = (window, tss_centered)
             return iter(())
 
@@ -578,7 +580,7 @@ def test_map_cis_forwards_tss_centered_window_mode() -> None:
 
 
 def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None:
-    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(()))
     test = SimpleNamespace(model=SimpleNamespace(family=object()))
 
     map_cis = getattr(cis_map, "map_cis")
@@ -605,9 +607,9 @@ def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None
 
 
 def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
-    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(()))
     test = SimpleNamespace(model=SimpleNamespace(family=object()))
-    gene_test = SimpleNamespace(name="acat")
+    gene_test = ACAT()
 
     map_cis = getattr(cis_map, "map_cis")
     chunks = list(map_cis(data, test, gene_test, mode="cis", verbose=False, log=_LoggerStub()))
@@ -648,6 +650,7 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
         _test_result([float("nan"), float("inf")]),
         (jnp.array(float("nan")), None),
         cis_map.rdm.key(0),
+        gene_test=ACAT(),
     )
 
     assert result == {
@@ -680,6 +683,7 @@ def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
         _test_result([float("nan"), float("nan")]),
         (jnp.array([float("nan"), float("nan")]), (object(), object(), object())),
         cis_map.rdm.key(0),
+        gene_test=BetaPermutation(),
     )
 
     assert result["adj_method"] == "BETA"
@@ -689,7 +693,7 @@ def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
         assert column in result
         assert result[column] is None
 
-    frame = pl.DataFrame([result], schema=cis_map._empty_cis_columns(SimpleNamespace(name="beta")))
+    frame = pl.DataFrame([result], schema=cis_map._empty_cis_columns(BetaPermutation()))
     assert frame.schema["shape1"] == pl.Float64
     assert frame.schema["perm_converged"] == pl.Boolean
 
@@ -700,6 +704,7 @@ def test_process_cis_result_selects_minimum_finite_pvalue() -> None:
         _test_result([float("nan"), 0.02]),
         (jnp.array(0.03), None),
         cis_map.rdm.key(0),
+        gene_test=ACAT(),
     )
 
     assert result["snp"] == "gene1_rs2"
@@ -725,13 +730,13 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     if not invalid_first:
         genes.reverse()
 
-    data = SimpleNamespace(iter_cis=lambda window: iter(genes))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(genes))
     snp_test = SimpleNamespace(model=SimpleNamespace(family=object()))
-    gene_test = SimpleNamespace(name="acat")
+    gene_test = ACAT()
     invalid = (_test_result([float("nan"), float("nan")]), (jnp.array(float("nan")), None))
     valid = (_test_result([0.01, 0.02]), (jnp.array(0.03), None))
     results = iter([invalid, valid] if invalid_first else [valid, invalid])
-    monkeypatch.setattr(cis_map, "map_cis_single", lambda *args, **kwargs: next(results))
+    monkeypatch.setattr(cis_map.AssociationScan, "run", lambda *args, **kwargs: next(results))
     log = _LoggerStub()
 
     map_cis = getattr(cis_map, "map_cis")
@@ -759,7 +764,7 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     args = SimpleNamespace(window=500_000, tss_centered=False, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
     test = SimpleNamespace(name="score")
-    perm_test = SimpleNamespace(name="acat")
+    perm_test = ACAT()
     dat = SimpleNamespace(num_genes=2)
 
     monkeypatch.setattr(cli, "_common_setup", lambda args, log: (dat, None, None, test, perm_test))

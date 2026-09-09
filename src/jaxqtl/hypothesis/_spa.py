@@ -1,7 +1,7 @@
 # pattern: Functional Core
 
 from abc import abstractmethod
-from typing import Generic, Literal, NamedTuple, Protocol, TypeVar
+from typing import cast, Generic, Literal, NamedTuple, Protocol, TypeVar
 
 import equinox as eqx
 import jax
@@ -15,7 +15,7 @@ from jax.scipy import stats
 from jax.scipy.special import logsumexp
 from jaxtyping import Array, ArrayLike, ScalarLike
 
-from ..infer import ModelResult
+from ..infer import AbstractLinearModel, AbstractVarianceEstimator, FisherInfoError, ModelResult
 from ._base import (
     _residualize_genotypes,
     _score_from_residuals,
@@ -23,6 +23,7 @@ from ._base import (
     AbstractHypothesisTest,
     TestResult,
 )
+from ._score import ScoreState
 
 
 class HasPredMean(Protocol):
@@ -308,7 +309,7 @@ class GaussianCGF(CumulantGeneratingFunction[GaussianCGFState]):
 @eqx.filter_jit
 def saddlepoint_pvalue(
     score: ScalarLike,
-    g_resid: Array,
+    g_resid: ArrayLike,
     cgf: CumulantGeneratingFunction[CGFStateT],
     state: CGFStateT,
     scale: ScalarLike = 1.0,
@@ -321,7 +322,7 @@ def saddlepoint_pvalue(
 
     **Arguments:**
 
-    - `score`: Observed score statistic.
+    - `score`: Observed scalar score statistic.
     - `g_resid`: Residualized genotype vector with shape `(n,)`.
     - `cgf`: A [`jaxqtl.hypothesis.CumulantGeneratingFunction`][] implementation.
     - `state`: CGF state created by `cgf.init`.
@@ -431,7 +432,15 @@ def saddlepoint_pvalue(
     return jnp.exp(final_log_p) if not log_p else final_log_p
 
 
-class SpaTest(AbstractHypothesisTest):
+class SpaState(NamedTuple, Generic[CGFStateT]):
+    r"""SPA preparation retaining a compact score fit and CGF-specific state."""
+
+    score: ScoreState
+    link_prime: Array
+    cgf: CGFStateT
+
+
+class SpaTest(AbstractHypothesisTest[SpaState[CGFStateT]], Generic[CGFStateT]):
     r"""Saddlepoint approximation (SPA) score test.
 
     This starts from a score statistic $S$ for each variant under the null model, then computes a
@@ -458,41 +467,67 @@ class SpaTest(AbstractHypothesisTest):
     - `ValueError`: If `std_err` is not [`jaxqtl.infer.FisherInfoError`][].
     """
 
-    cgf: CumulantGeneratingFunction = NegativeBinomialCGF()
+    model: AbstractLinearModel
+    std_err: AbstractVarianceEstimator = FisherInfoError()
+    # Preserve the historical NB default; an explicit CGF determines the generic state type.
+    cgf: CumulantGeneratingFunction[CGFStateT] = cast("CumulantGeneratingFunction[CGFStateT]", NegativeBinomialCGF())
 
     def __check_init__(self) -> None:
         _validate_score_variance_estimator(self.std_err, self.__class__.__name__)
 
-    def test(
+    def init(
         self,
         X: ArrayLike,
-        G: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike,
-    ) -> TestResult:
-        r"""Compute SPA-corrected p-values for each variant in `G`.
+    ) -> SpaState[CGFStateT]:
+        r"""Fit the null model and initialize the CGF for SPA testing.
 
         **Arguments:**
 
         - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
         - `y`: Outcome vector with shape `(n,)`.
         - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant SPA p-values.
+        A `SpaState` with compact score diagnostics, link derivatives, and the
+        selected CGF's state. The fitted model and covariates are not retained.
+        """
+        X = jnp.asarray(X)
+        y = jnp.asarray(y)
+        offset = jnp.asarray(offset)
+        fit = self.model.fit(X, y, offset, self.std_err)
+        score = ScoreState(
+            resid=fit.resid,
+            glm_wt=fit.glm_wt,
+            num_iters=fit.num_iters,
+            converged=fit.converged,
+            disp=fit.disp,
+            negloglikelihood=self.model.family.negloglikelihood(X, y, fit.eta, fit.disp),
+        )
+        return SpaState(score=score, link_prime=fit.link_prime, cgf=self.cgf.init(fit))
+
+    def test(self, X: ArrayLike, G: ArrayLike, state: SpaState[CGFStateT]) -> TestResult:
+        r"""Calculate SPA-corrected p-values using initialized outcome state.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix used by `init`, with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)`.
+        - `state`: State returned by `init(X, y, offset)`.
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.TestResult`][] containing SPA-corrected p-values,
+        underlying score statistics, and scalar null-model diagnostics.
         """
         X = jnp.asarray(X)
         G = jnp.asarray(G)
-        y = jnp.asarray(y)
-        offset = jnp.asarray(offset)
-        glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
-        cgf_state = self.cgf.init(glmstate_cov_only)
 
-        y_resid = glmstate_cov_only.resid
-        wgt = jnp.atleast_1d(glmstate_cov_only.glm_wt)
-        gprime = glmstate_cov_only.link_prime
+        y_resid = state.score.resid
+        wgt = jnp.atleast_1d(state.score.glm_wt)
+        gprime = state.link_prime
 
         g_resid = _residualize_genotypes(X, G, wgt, self.model.solver)
         beta, se, zscore, g_score, _ = _score_from_residuals(y_resid, g_resid, wgt)
@@ -500,7 +535,7 @@ class SpaTest(AbstractHypothesisTest):
         spa_g_resid = g_resid * (wgt * gprime)[:, jnp.newaxis]
 
         def _pval(args, idx):
-            pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, cgf_state, two_sided_mode="abs")
+            pv = saddlepoint_pvalue(g_score[idx], spa_g_resid[:, idx], self.cgf, state.cgf, two_sided_mode="abs")
             return args, pv
 
         _, gupval = lax.scan(_pval, 0.0, jnp.arange(G.shape[1]))
@@ -510,10 +545,10 @@ class SpaTest(AbstractHypothesisTest):
             se=se,
             p=gupval,
             z=zscore,
-            num_iters=glmstate_cov_only.num_iters,
-            converged=glmstate_cov_only.converged,
-            disp=glmstate_cov_only.disp,
-            negloglikelihood=self.model.family.negloglikelihood(X, y, glmstate_cov_only.eta, glmstate_cov_only.disp),
+            num_iters=state.score.num_iters,
+            converged=state.score.converged,
+            disp=state.score.disp,
+            negloglikelihood=state.score.negloglikelihood,
         )
 
     @property

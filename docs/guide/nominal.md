@@ -22,4 +22,7 @@ The `--window` value defaults to 500,000 bases. By default, the interval extends
 `TES + window`. Add `--tss-centered` to instead use `TSS - window` through `TSS + window`. Unlike `cis`, nominal mode
 does not run Beta-permutation calibration or ACAT.
 
+Score and SPA tests share one null fit per phenotype; GLM Wald tests fit each variant's full model.
+See [Troubleshooting](troubleshooting.md) for model controls and [Run large scans](hpc.md) for performance.
+
 See [Nominal output](../reference/outputs.md#nominal-output) for the output columns.

@@ -1,8 +1,10 @@
+# pattern: Functional Core
+
 import jax.numpy as jnp
 
 from jax import lax
 from jax.scipy.special import betainc, gammaincc
-from jaxtyping import Array, ArrayLike
+from jaxtyping import Array, ArrayLike, ScalarLike
 
 
 def t_cdf(value: ArrayLike, df: ArrayLike, loc: ArrayLike = 0.0, scale: ArrayLike = 1.0) -> Array:
@@ -39,8 +41,8 @@ def t_cdf(value: ArrayLike, df: ArrayLike, loc: ArrayLike = 0.0, scale: ArrayLik
 
 def ncx2_sf(
     x: ArrayLike,
-    df: float,
-    nc: float,
+    df: ScalarLike,
+    nc: ScalarLike,
     terms: int = 100,
 ):
     r"""Approximate the survival function of a noncentral chi-squared distribution.

@@ -23,6 +23,7 @@ from ..io._geno_engine import (
     region_filter,
 )
 from ..io._pheno import ExpressionData
+from ._scan import allele_summaries
 
 
 class SNPInfo(eqx.Module):
@@ -42,7 +43,7 @@ class CisData(eqx.Module):
 
     # individual-level info
     X: Array
-    G: Array
+    G: Array | np.ndarray
     y: Array
     offset: Array
 
@@ -89,15 +90,11 @@ class CisData(eqx.Module):
 
     def get_cis_info(self) -> pl.DataFrame:
         """Return cis variant information augmented with AF and minor allele counts."""
-        n, p = self.G.shape
-        counts = jnp.sum(self.G, axis=0)  # genoio returns counts for the a1 allele
-        af = counts / (2.0 * n)
-        flag = af <= 0.5
-        ma_counts = jnp.where(flag, counts, 2 * n - counts)
+        af, ma_counts = allele_summaries(self.G)
         local = self.cis_info.with_columns(
             (pl.col("pos") - pl.lit(self.gene_start + 1)).alias("tss_distance"),
-            pl.Series("af", np.array(af)),
-            pl.Series("ma_count", np.array(ma_counts, dtype=int)),
+            pl.Series("af", af),
+            pl.Series("ma_count", ma_counts).cast(pl.Int64),
         ).select(["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"])
 
         return local
@@ -134,7 +131,7 @@ class ReadyDataState:
         """Number of phenotypes available after alignment."""
         return self.expression.pheno_meta.height
 
-    def iter_cis(self, window: int, *, tss_centered: bool = False) -> Iterator[CisData]:
+    def iter_cis(self, window: int, *, tss_centered: bool = False, host_genotypes: bool = False) -> Iterator[CisData]:
         r"""Yield aligned data for each phenotype's cis window.
 
         Regions are read lazily from the genotype dataset. By default, each region
@@ -145,6 +142,8 @@ class ReadyDataState:
         **Arguments:**
 
         - `window`: Cis window size in base pairs.
+        - `host_genotypes`: Keep the reader's host buffer for fixed-block packing, avoiding a full-window
+          device round trip.
         - `tss_centered`: Center both window bounds on the TSS when true.
 
         **Returns:**
@@ -167,7 +166,7 @@ class ReadyDataState:
         for _, (genotype, variant_info) in region_results:
             gene_window = gene_window_queue.popleft()
             y, gene_name, chrom, gene_start, gene_end, start, end = gene_window
-            G = jnp.asarray(genotype)
+            G = genotype if host_genotypes else jnp.asarray(genotype)
             cis_var_info = normalize_variant_info(variant_info)
 
             yield CisData(

@@ -46,6 +46,12 @@ dispersion, and takes at most one accepted, backtracked dispersion step at those
 update coefficients and dispersion jointly. Each iteration computes one weighted least-squares direction;
 backtracking reuses that direction at successively halved step sizes.
 
+NB2 dispersion uses a Riemannian modified-Newton direction on the variance manifold, holding the trial means
+fixed. If the Riemannian curvature is nonpositive or nonfinite, the update uses the variance metric for a
+natural-gradient direction. If that metric or the score is invalid, dispersion is unchanged. Dispersion
+candidates are bounded to `[1e-9, 1e9]`; the outer IRLS line search accepts only finite, non-increasing joint
+negative log likelihood. See [`NegativeBinomial.update_dispersion`][jaxqtl.distribution.NegativeBinomial.update_dispersion].
+
 ## Convergence
 
 `tol` bounds the absolute change in total negative log likelihood. Once this change is small, IRLS checks the

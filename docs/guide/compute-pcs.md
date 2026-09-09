@@ -1,5 +1,7 @@
 # Compute expression PCs
 
+Expression PCs are optional covariates; choose whether to include them as part of the study design.
+
 `jaxqtl compute-pcs` estimates expression principal components and appends them to an existing covariate table.
 
 ```bash
@@ -16,10 +18,8 @@ Pass this table to `--covar` in a mapping command.
 
 For cell-type-specific analyses, compute expression PCs separately from each cell type's pseudobulk matrix.
 
-!!! note "The seed controls randomized initialization"
-
-    Expression PCA uses a probabilistic algorithm. Reusing `--seed` with the same inputs makes initialization
-    reproducible, although floating-point results can vary across JAX backends.
+Expression PCA uses a probabilistic algorithm. Reusing `--seed` with the same inputs makes initialization
+reproducible, although floating-point results can vary across JAX backends.
 
 `--num-pcs` must be positive and cannot exceed the smaller of the sample and phenotype counts. The optional `log1p`
 transform is available; `tmm` is currently not implemented.

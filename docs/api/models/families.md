@@ -51,6 +51,7 @@
         show_bases: true
         members:
             - __init__
+            - update_dispersion
 
 ---
 

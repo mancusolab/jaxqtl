@@ -33,7 +33,7 @@ def test_gaussian_wald_matches_explicit_full_model(solver, std_err):
     y = X @ np.array([0.5, -0.4, 0.3]) + G[:, 0] * 0.7 + rng.normal(size=n)
 
     model = LinearModel(solver=solver)
-    result = WaldTest(model=model, std_err=std_err).test(X, G, y, 0.0)
+    result = WaldTest(model=model, std_err=std_err)(X, G, y, 0.0)
     expected = [model.fit(jnp.column_stack((X, G[:, index])), y, 0.0, std_err) for index in range(m)]
 
     assert result.beta.shape == (m,)
@@ -62,8 +62,8 @@ def test_gaussian_wald_with_offset_matches_full_model_and_jit(offset_kind, std_e
 
     model = LinearModel()
     test = WaldTest(model=model, std_err=std_err)
-    eager = test.test(X, G, y, offset)
-    jitted = eqx.filter_jit(test.test)(X, G, y, offset)
+    eager = test(X, G, y, offset)
+    jitted = eqx.filter_jit(test)(X, G, y, offset)
     expected = [model.fit(jnp.column_stack((X, G[:, index])), y, offset, std_err) for index in range(m)]
 
     for field in ("beta", "se", "z", "p"):
@@ -92,7 +92,7 @@ def test_gaussian_glm_uses_general_wald_path():
     y = np.exp(eta) + rng.normal(scale=0.05, size=n)
     model = GeneralizedLinearModel(family=Gaussian(glink=LogLink()), max_iter=200)
 
-    result = WaldTest(model=model).test(X, G, y, 0.0)
+    result = WaldTest(model=model)(X, G, y, 0.0)
     expected = [model.fit(jnp.column_stack((X, G[:, index])), y) for index in range(m)]
 
     assert result.beta.shape == (m,)
@@ -109,8 +109,8 @@ def test_gaussian_score_with_offset_matches_closed_form_and_jit():
     y += rng.normal(scale=0.7, size=n)
 
     test = ScoreTest(model=LinearModel(), std_err=FisherInfoError())
-    eager = test.test(X, G, y, offset)
-    jitted = eqx.filter_jit(test.test)(X, G, y, offset)
+    eager = test(X, G, y, offset)
+    jitted = eqx.filter_jit(test)(X, G, y, offset)
 
     # Build the efficient-score oracle independently of the hypothesis-test helpers.
     adjusted_y = y - offset
@@ -172,7 +172,7 @@ def test_negative_binomial_tests_report_fitted_objective(test_type):
     y = rng.negative_binomial(1.0 / alpha, 1.0 / (1.0 + alpha * mu))
 
     model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4)
-    result = test_type(model=model).test(X, G, y, offset)
+    result = test_type(model=model)(X, G, y, offset)
 
     if test_type is ScoreTest:
         fits = [model.fit(X, y, offset)]

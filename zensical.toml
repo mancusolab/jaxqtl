@@ -20,66 +20,45 @@ nav = [
     { "User guide" = [
         { "Getting started" = [
             "guide/installation.md",
-            "guide/single-cell-cis.md",
             "guide/quickstart.md",
-        ] },
-        { "Concepts" = [
-            "guide/model.md",
-            "guide/tests.md",
-            "guide/offsets.md",
+            { "Analyze single-cell pseudobulk data" = "guide/single-cell-cis.md" },
         ] },
         { "Data preparation" = [
             "guide/genotypes.md",
             "guide/phenotypes.md",
             "guide/covariates.md",
-        ] },
-        { "Workflows" = [
             "guide/compute-pcs.md",
+            "guide/offsets.md",
+        ] },
+        { "Run and interpret scans" = [
             "guide/cis.md",
+            "guide/postprocessing.md",
             "guide/nominal.md",
             "guide/trans.md",
-            "guide/postprocessing.md",
             "guide/hpc.md",
         ] },
+        { "Methods and troubleshooting" = [
+            "guide/model.md",
+            "guide/tests.md",
+            "guide/troubleshooting.md",
+        ] },
     ] },
-    { "CLI and file reference" = [
+    { "Command and output reference" = [
         "reference/cli.md",
-        "reference/inputs.md",
         "reference/outputs.md",
-        "reference/diagnostics.md",
     ] },
     { "Python API reference" = [
-        { "Models and distributions" = [
-            "api/models/glm.md",
-            "api/models/families.md",
-            "api/models/links.md",
-        ] },
-        { "Inference and solvers" = [
-            "api/inference/infer.md",
-            "api/inference/solvers.md",
-            "api/inference/stderr.md",
-        ] },
-        { "Hypothesis testing" = [
-            "api/hypothesis/variant.md",
-            "api/hypothesis/gene.md",
-        ] },
-        { "Input/output" = [
-            "api/data/geno.md",
-            "api/data/pheno.md",
-            "api/data/other.md",
-        ] },
-        { "Mapping" = [
-            "api/mapping/cis.md",
-            "api/mapping/trans.md",
-        ] },
+        { "Mapping" = ["api/mapping/cis.md", "api/mapping/trans.md"] },
+        { "Hypothesis testing" = ["api/hypothesis/variant.md", "api/hypothesis/gene.md"] },
+        { "Models and distributions" = ["api/models/glm.md", "api/models/families.md", "api/models/links.md"] },
+        { "Input/output" = ["api/data/geno.md", "api/data/pheno.md", "api/data/other.md"] },
+        { "Advanced numerics" = ["api/inference/infer.md", "api/inference/solvers.md", "api/inference/stderr.md"] },
     ] },
     { "Project" = [
         "contributing.md",
         "cite.md",
-        "authors.md",
+        "project.md",
         "versions.md",
-        "conduct.md",
-        "license.md",
     ] },
 ]
 
@@ -91,7 +70,7 @@ features = [
     "header.autohide",
 ]
 favicon = "_static/favicon.png"
-custom_dir = "docs/_overrides"
+custom_dir = "docs_theme/overrides"
 
 [[project.theme.palette]]
 media = "(prefers-color-scheme: light)"
@@ -135,7 +114,7 @@ separator = '[\\s\\-,:!=\\[\\]()"/]+|(?!\\b)(?=[A-Z][a-z])|\\.(?!\\d)|&[lg]t;'
 [project.plugins.autorefs]
 
 [project.plugins.mkdocstrings]
-custom_templates = "docs/_templates"
+custom_templates = "docs_theme/templates"
 
 [project.plugins.mkdocstrings.handlers.python]
 paths = ["src"]

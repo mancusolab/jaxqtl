@@ -24,9 +24,7 @@ For each cell type:
 Summation preserves the library-size exposure used by the count model. Do not average cells. Fractional abundance
 estimates from a quantifier are valid; the phenotype values do not need to be integers.
 
-!!! note "jaxQTL does not store the cell-type label"
-
-    Put the cell type in the phenotype filename and output prefix. Run a separate command for every cell type.
+Put the cell type in the phenotype filename and output prefix. Run a separate command for every cell type.
 
 ### Add gene coordinates
 
@@ -82,6 +80,17 @@ Never pass raw library sizes as offsets. See [Offsets](offsets.md) for the full 
 
 ## 4. Run one cis scan
 
+Choose permutation calibration or SPA + ACAT. Both report a lead variant and a gene-level p-value; permutations
+are optional.
+
+
+| Approach | Why choose it | Main consideration |
+| --- | --- | --- |
+| SPA + ACAT | Fast gene-level testing without permutations | Sensitive to variant p-value calibration; SPA strongly recommended |
+| Beta permutation | Calibrate statistics against a permutation reference | More computation; requires valid permutations and successful calibration |
+
+### Permutation calibration
+
 This command fits a Negative Binomial model, uses a score test, and calibrates the gene-level p-value by permutation:
 
 ```bash
@@ -104,8 +113,44 @@ jaxqtl cis \
 The `0.05` MAF threshold is an example, not a jaxQTL default. Choose and report the threshold required by the study.
 Use the same analysis specification for every cell type unless the study design requires otherwise.
 
-The command writes `results/CD4_NC.chr1.cis.score.perm.parquet.gz`. See [Cis mapping](cis.md) for ACAT and SPA
-alternatives.
+The command writes `results/CD4_NC.chr1.cis.score.perm.parquet.gz`.
+
+### Faster scans with SPA and ACAT
+
+SPA + ACAT is typically substantially faster because it fits each gene's null model once and avoids repeated
+fitting and testing under permutation. The speed difference depends on the data and the number of permutations
+used for comparison. This command uses the same inputs and filters as the permutation example:
+
+```bash
+mkdir -p results
+
+jaxqtl cis \
+  --bfile genotype/chr1 \
+  --pheno pseudobulk/CD4_NC.bed.gz \
+  --covar covariates.tsv \
+  --model nb \
+  --test score \
+  --set-offset-from-libsize \
+  --one-hot \
+  --normalize-covar \
+  --maf 0.05 \
+  --spa \
+  --acat \
+  --out results/CD4_NC.chr1_spa_acat
+```
+
+The command writes `results/CD4_NC.chr1_spa_acat.cis.score.spa.acat.parquet.gz`. No permutations are run;
+`--nperm` does not control this procedure.
+
+!!! tip "Strongly recommended: use SPA with ACAT"
+
+    ACAT is sensitive to inaccurate variant p-values, so use `--spa` with `--acat` for score tests. SPA improves
+    tail calibration but can fall back to the normal approximation when its numerical correction fails.
+
+ACAT and Beta permutation use different calibration procedures and need not produce the same p-values or
+discoveries. Check convergence and finite adjusted p-values, and apply multiple-testing correction across genes
+with either method. See [Tests and gene-level calibration](tests.md#tail-and-gene-level-calibration) for the tradeoffs
+and [Cis mapping](cis.md) for execution details.
 
 ## 5. Process results
 

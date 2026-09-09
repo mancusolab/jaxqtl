@@ -17,11 +17,13 @@ from pathlib import Path
 
 import polars as pl
 
-paths = sorted(Path("result/cis").glob("**/*.cis.score.perm.parquet.gz"))
+pattern = "**/*.cis.score.spa.acat.parquet.gz"
+# For Beta permutation, use "**/*.cis.score.perm.parquet.gz".
+paths = sorted(Path("result/cis").glob(pattern))
 if not paths:
     raise FileNotFoundError("no cis result files found under result/cis")
 
-results = pl.concat((pl.read_parquet(path) for path in paths), how="vertical")
+results = pl.scan_parquet(paths)
 ```
 
 ## Select interpretable results
@@ -31,27 +33,32 @@ Apply the validity and convergence checks in this order:
 1. Keep rows where `result_valid` is true.
 2. Keep rows where `model_converged` is true.
 3. For Beta-permutation results, keep rows where `perm_converged` is true.
+4. Keep rows with a finite `pvalue_adj` between zero and one.
 
 ```python
 required = {"result_valid", "model_converged", "pvalue_adj"}
-missing = required.difference(results.columns)
+columns = results.collect_schema().names()
+missing = required.difference(columns)
 if missing:
     raise ValueError(f"missing required cis columns: {sorted(missing)}")
 
 valid = results.filter(
     pl.col("result_valid")
     & pl.col("model_converged")
+    & pl.col("pvalue_adj").is_finite()
+    & pl.col("pvalue_adj").is_between(0.0, 1.0)
 )
-if "perm_converged" in valid.columns:
+if "perm_converged" in columns:
     valid = valid.filter(pl.col("perm_converged"))
 
+valid = valid.collect()
 if valid.is_empty():
     raise ValueError("no valid converged cis results remain after filtering")
 
 valid.write_parquet("result/cis/combined.valid.parquet")
 ```
 
-!!! warning "Convergence is a numerical check"
+!!! warning "Check model adequacy before interpreting discoveries"
 
     These filters remove failed fits and calibrations. They do not establish that the response family, covariates,
     offset, or testing procedure is appropriate for the study.
@@ -72,4 +79,4 @@ For analyses with multiple cell types, define the testing family before inspecti
 controlled separately within each cell type or jointly across all tested cell types.
 
 See [Output schemas](../reference/outputs.md) for the available columns and
-[Failures and convergence](../reference/diagnostics.md) for skipped and invalid-result behavior.
+[Troubleshooting](troubleshooting.md) for skipped and invalid-result behavior.

@@ -4,8 +4,8 @@ Each mapping command requires exactly one genotype source:
 
 | Option | Input |
 | --- | --- |
-| `--bfile PREFIX` | PLINK 1 BED/BIM/FAM files |
-| `--pfile PREFIX` | PLINK 2 PGEN/PVAR/PSAM files |
+| `--bfile PREFIX` | `PREFIX.bed`, `PREFIX.bim`, and `PREFIX.fam` |
+| `--pfile PREFIX` | `PREFIX.pgen`, `PREFIX.pvar`, and `PREFIX.psam` |
 | `--vcf PATH` | Indexed VCF or BCF file |
 | `--bgen PATH` | BGEN file |
 
@@ -23,6 +23,5 @@ By default, mapping retains expression phenotypes only on exact chromosome label
 `--chr LABEL` to restrict both expression phenotypes and genotype variants to one chromosome. Labels are matched
 exactly: for example, `chr22` and `22` are different labels. The requested label must occur in both inputs.
 
-The legacy `--geno` option is rejected. Use one of the four format-specific options above.
-
-See [Input formats](../reference/inputs.md#genotypes) for the required companion files and metadata fields.
+Variant metadata must provide chromosome, position, identifier, and `a0`/`a1` alleles through the selected
+`genoio` adapter. jaxQTL computes allele frequency and minor-allele count from the loaded genotype values.

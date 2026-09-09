@@ -3,7 +3,6 @@
 from logging import Logger
 from typing import Any, Literal
 
-import numpy as np
 import polars as pl
 
 import equinox as eqx
@@ -14,8 +13,17 @@ from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
 from ..distribution import NegativeBinomial
-from ..hypothesis import AbstractAggregateTest, AbstractHypothesisTest, PermutationResult, TestResult
+from ..hypothesis import (
+    AbstractAggregateTest,
+    AbstractHypothesisTest,
+    TestResult,
+)
 from ..log import get_log
+from ._scan import (
+    AssociationScan,
+    full_scan as map_cis_single,  # noqa: F401 -- preserve full-window entry point
+    select_lead_variant,
+)
 from .data import CisData, ReadyDataState
 
 
@@ -78,10 +86,16 @@ def map_cis(
     # Only cis mode needs PRNG state: permutations and lead-SNP tie breaking both consume keys.
     key = rdm.key(seed)
     include_nb_alpha = isinstance(snp_test.model.family, NegativeBinomial)
+    execution = AssociationScan(snp_test, gene_test if mode == "cis" else None)
+    blocked = execution.blocked
+    cache_clear_interval = execution.cache_clear_interval
     pending = []
     pending_rows = 0
     yielded = False
-    cis_iterator = data.iter_cis(window, tss_centered=True) if tss_centered else data.iter_cis(window)
+    options = {"tss_centered": True} if tss_centered else {}
+    if blocked:
+        options["host_genotypes"] = True
+    cis_iterator = data.iter_cis(window, **options)
     for i, cis_data in enumerate(cis_iterator):
         gene_name = cis_data.gene_name
         chrom = cis_data.chrom
@@ -97,16 +111,10 @@ def map_cis(
         if mode == "cis":
             # cis mode tests variants, then computes a gene-level calibrated p-value.
             key, p_key, s_key = rdm.split(key, 3)
-            test_result, perm_result = map_cis_single(
-                cis_data.X,
-                cis_data.G,
-                cis_data.y,
-                cis_data.offset,
-                snp_test,
-                gene_test,
-                p_key,
+            test_result, perm_result = execution.run(cis_data.X, cis_data.G, cis_data.y, cis_data.offset, p_key)
+            result_record = _process_cis_result(
+                cis_data, test_result, perm_result, s_key, gene_test=gene_test, host_genotypes=blocked
             )
-            result_record = _process_cis_result(cis_data, test_result, perm_result, s_key)
             if not result_record["result_valid"]:
                 log.warning(
                     f"No finite p-values for {gene_name} over region {chrom}:{lstart}-{rend}; "
@@ -119,7 +127,7 @@ def map_cis(
                 result_schema.pop("nb_alpha")
             result = pl.DataFrame([result_record], schema=result_schema)
         else:
-            test_result = eqx.filter_jit(snp_test)(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
+            test_result, _ = execution.observed(cis_data.X, cis_data.G, cis_data.y, cis_data.offset)
             result = _process_nominal_result(cis_data, test_result)
             # Keep the output schema model-specific. Non-NB tests carry a constant placeholder alpha.
             if not include_nb_alpha:
@@ -132,7 +140,7 @@ def map_cis(
             log.info(f"Finished cis-qtl scan for {gene_name} over region {chrom}:{lstart}-{rend}")
 
         # Repeated per-gene shapes can leave stale compiled functions resident after many genes.
-        if (i + 1) % 50 == 0:
+        if cache_clear_interval is not None and (i + 1) % cache_clear_interval == 0:
             if verbose:
                 log.debug("Clearing JAX JIT-caches")
             jax.clear_caches()
@@ -229,44 +237,11 @@ def _empty_cis_columns(gene_test) -> dict[str, Any]:
         "failure_reason": pl.Utf8,
     }
 
-    if getattr(gene_test, "name", None) == "acat":
+    if not gene_test.has_calibration:
         for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
             columns.pop(beta_perm_col)
 
     return columns
-
-
-@eqx.filter_jit
-def map_cis_single(
-    X: Array,
-    G: Array,
-    y: Array,
-    offset: Array,
-    snp_test: AbstractHypothesisTest,
-    gene_test: AbstractAggregateTest,
-    key: PRNGKeyArray,
-) -> tuple[TestResult, PermutationResult]:
-    r"""Test variants and compute a gene-level adjusted p-value.
-
-    **Arguments:**
-
-    - `X`: Covariate matrix with shape `(n, p)`.
-    - `G`: Genotype matrix with shape `(n, m)`.
-    - `y`: Response vector with shape `(n,)`.
-    - `offset`: Offset vector broadcastable to `y`.
-    - `snp_test`: Hypothesis test producing per-variant statistics.
-    - `gene_test`: Gene-level p-value aggregation method.
-    - `key`: PRNG key for permutation randomness.
-
-    **Returns:**
-
-    A tuple `(test_result, aggregate_result)` containing per-variant statistics and
-    the gene-level p-value with method-specific auxiliary diagnostics.
-    """
-    test_result = snp_test(X, G, y, offset)
-    perm_result = gene_test(X, G, y, offset, test_result, snp_test, key)
-
-    return test_result, perm_result
 
 
 def _process_cis_result(
@@ -274,15 +249,20 @@ def _process_cis_result(
     test_result: TestResult,
     perm_result: tuple[Array, Any],
     key: PRNGKeyArray,
+    *,
+    gene_test: AbstractAggregateTest,
+    host_genotypes: bool = False,
 ):
     """Process the results for a gene under the cis-scan and format for output."""
 
-    pvalues = np.asarray(test_result.p)
-    finite_idx = np.flatnonzero(np.isfinite(pvalues))
+    # Output formatting is a host boundary: indexing device arrays here would
+    # compile a gather for every window length, defeating fixed-block scoring.
+    test_result = jax.device_get(test_result)
+    vdx_int = select_lead_variant(test_result.p, key)
     adj_pvalue, aux = perm_result
 
-    if finite_idx.size == 0:
-        method = "BETA" if aux is not None else "ACAT"
+    if vdx_int is None:
+        method = gene_test.adjustment_method
         result = {
             "phenotype_id": cis_data.gene_name,
             "chrom": cis_data.chrom,
@@ -309,38 +289,34 @@ def _process_cis_result(
             "result_valid": False,
             "failure_reason": _NO_FINITE_PVALUES,
         }
-        if aux is None:
+        if not gene_test.has_calibration:
             for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
                 result.pop(beta_perm_col)
         return result
 
-    finite_pvalues = pvalues[finite_idx]
-    minp = finite_pvalues.min()
-    ties_ind = finite_idx[finite_pvalues == minp]
-    if ties_ind.size > 1:
-        vdx_int = int(rdm.choice(key, jnp.asarray(ties_ind), replace=False))
-    else:
-        vdx_int = int(ties_ind[0])
+    adj_pvalue = jax.device_get(adj_pvalue)
 
-    adj_pvalue = jnp.asarray(adj_pvalue)
-
-    # this is kind of hacky but if aux is not None we did a beta-approximation
-    if aux is not None:
+    if gene_test.has_calibration:
         beta_params, nc_estimate, opt_status = aux
         shape_k = float(beta_params.k)
         shape_n = float(beta_params.n)
         nc_estimate = float(nc_estimate)
         perm_converged = bool(beta_params.converged) and bool(opt_status)
         lead_adj_pvalue = float(adj_pvalue[vdx_int])
-        method = "BETA"
+        method = gene_test.adjustment_method
     else:
         shape_k = float("nan")
         shape_n = float("nan")
         nc_estimate = float("nan")
         perm_converged = True
         lead_adj_pvalue = float(adj_pvalue)
-        method = "ACAT"
+        method = gene_test.adjustment_method
 
+    if host_genotypes:
+        # Blocked tests use host-prepared blocks. Slice the selected
+        # genotype here without specializing JAX on window width. Other paths
+        # keep device slicing, avoiding a new full-window transfer from accelerators.
+        cis_data = eqx.tree_at(lambda data: data.G, cis_data, jax.device_get(cis_data.G))
     snp = cis_data.get_snp_info(vdx_int)
     if jnp.ndim(test_result.disp) > 0:
         nb_alpha = float(test_result.disp[vdx_int])
@@ -383,8 +359,8 @@ def _process_cis_result(
         "result_valid": True,
         "failure_reason": None,
     }
-    # if we did ACAT [we need to make this more robust...], drop the beta-perm related columns to save disk space
-    if aux is None:
+    # Aggregation metadata defines the output schema explicitly.
+    if not gene_test.has_calibration:
         for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
             result.pop(beta_perm_col, None)
 
@@ -394,30 +370,23 @@ def _process_cis_result(
 def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
     region_df = cis_data.get_cis_info()
 
-    if jnp.ndim(test_result.disp) > 0:
-        nb_alpha = np.asarray(test_result.disp)
-    else:
-        nb_alpha = np.full_like(test_result.beta, test_result.disp)
-
-    if jnp.ndim(test_result.converged) > 0:
-        glm_converged = np.asarray(test_result.converged)
-    else:
-        glm_converged = np.full_like(test_result.beta, test_result.converged)
-
-    if jnp.ndim(test_result.negloglikelihood) > 0:
-        negloglikelihood = np.asarray(test_result.negloglikelihood)
-    else:
-        negloglikelihood = np.full_like(test_result.beta, test_result.negloglikelihood)
-
-    region_df = region_df.with_columns(
-        pl.lit(cis_data.gene_name).alias("phenotype_id"),
-        pl.Series("beta", np.asarray(test_result.beta)),
-        pl.Series("se", np.asarray(test_result.se)),
-        pl.Series("pvalue", np.asarray(test_result.p)),
-        pl.Series("nb_alpha", nb_alpha),
-        pl.Series("negloglikelihood", negloglikelihood),
-        pl.Series("model_converged", glm_converged),
-    )
+    # Polars broadcasts scalar fit metadata; host vectors retain their dtype.
+    result = jax.device_get(test_result)
+    columns = []
+    for name, values in (
+        ("beta", result.beta),
+        ("se", result.se),
+        ("pvalue", result.p),
+        ("nb_alpha", result.disp),
+        ("negloglikelihood", result.negloglikelihood),
+        ("model_converged", result.converged),
+    ):
+        if jnp.ndim(values) == 0:
+            scalar = values.item() if hasattr(values, "item") else values
+            columns.append(pl.lit(scalar).alias(name))
+        else:
+            columns.append(pl.Series(name, values))
+    region_df = region_df.with_columns(pl.lit(cis_data.gene_name).alias("phenotype_id"), *columns)
     # put pheno id in front
     region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))
     return region_df
