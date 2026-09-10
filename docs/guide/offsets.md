@@ -23,6 +23,10 @@ The mapping commands accept one of three mutually exclusive offset sources:
 - `--offset-name-from-covar NAME` uses an existing covariate column as the fixed offset.
 - `--set-offset-from-libsize` computes log library size from the loaded phenotype matrix.
 
+For the CLI, an offset file must have one case-insensitive `iid` or `#iid` column and one numeric log-offset
+column. Prepare a two-column file if the source contains additional data columns; the Python reader can select
+an offset column by name.
+
 ## When to compute library size
 
 Compute library size before filtering phenotypes. Removing genes first changes the total exposure. The

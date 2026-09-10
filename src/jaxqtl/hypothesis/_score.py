@@ -1,10 +1,13 @@
 # pattern: Functional Core
 
+from typing import NamedTuple
+
 import jax.numpy as jnp
 
 from jax.scipy.stats import norm
-from jaxtyping import ArrayLike
+from jaxtyping import Array, ArrayLike
 
+from ..infer import AbstractLinearModel, AbstractVarianceEstimator, FisherInfoError
 from ._base import (
     _residualize_genotypes,
     _score_from_residuals,
@@ -14,7 +17,22 @@ from ._base import (
 )
 
 
-class ScoreTest(AbstractHypothesisTest):
+class ScoreState(NamedTuple):
+    r"""Compact null-fit state shared across genotype blocks.
+
+    Only residuals, weights, and scalar fit diagnostics are retained, so batched
+    permutations do not copy covariates or unused fitted-model arrays.
+    """
+
+    resid: Array
+    glm_wt: Array
+    num_iters: Array
+    converged: Array
+    disp: Array
+    negloglikelihood: Array
+
+
+class ScoreTest(AbstractHypothesisTest[ScoreState]):
     r"""Score test for association between a variant and an outcome.
 
     For a null (covariate-only) fit, let $r_y$ be the working residuals and let $g$ be a variant genotype vector.
@@ -30,39 +48,62 @@ class ScoreTest(AbstractHypothesisTest):
     - `ValueError`: If `std_err` is not [`jaxqtl.infer.FisherInfoError`][].
     """
 
+    model: AbstractLinearModel
+    std_err: AbstractVarianceEstimator = FisherInfoError()
+
     def __check_init__(self) -> None:
         _validate_score_variance_estimator(self.std_err, self.__class__.__name__)
 
-    def test(
+    def init(
         self,
         X: ArrayLike,
-        G: ArrayLike,
         y: ArrayLike,
         offset: ArrayLike,
-    ) -> TestResult:
-        r"""Compute score-test statistics for each variant in `G`.
+    ) -> ScoreState:
+        r"""Fit the null model and retain the state needed for score testing.
 
         **Arguments:**
 
         - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
         - `y`: Outcome vector with shape `(n,)`.
         - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
 
         **Returns:**
 
-        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant score-test statistics.
+        A compact `ScoreState` with residuals, weights, and scalar fit diagnostics.
         """
         X = jnp.asarray(X)
-        G = jnp.asarray(G)
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
 
-        glmstate_cov_only = self.model.fit(X, y, offset, self.std_err)
-        y_resid = glmstate_cov_only.resid
+        fit = self.model.fit(X, y, offset, self.std_err)
+        return ScoreState(
+            resid=fit.resid,
+            glm_wt=fit.glm_wt,
+            num_iters=fit.num_iters,
+            converged=fit.converged,
+            disp=fit.disp,
+            negloglikelihood=self.model.family.negloglikelihood(X, y, fit.eta, fit.disp),
+        )
 
-        g_resid = _residualize_genotypes(X, G, glmstate_cov_only.glm_wt, self.model.solver)
-        beta, se, zscore, _, _ = _score_from_residuals(y_resid, g_resid, glmstate_cov_only.glm_wt)
+    def test(self, X: ArrayLike, G: ArrayLike, state: ScoreState) -> TestResult:
+        r"""Score a genotype block using an initialized null model.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix used by `init`, with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)`.
+        - `state`: State returned by `init(X, y, offset)`.
+
+        **Returns:**
+
+        Per-variant statistics and scalar null-model diagnostics in a
+        [`jaxqtl.hypothesis.TestResult`][].
+        """
+        X = jnp.asarray(X)
+        G = jnp.asarray(G)
+        g_resid = _residualize_genotypes(X, G, state.glm_wt, self.model.solver)
+        beta, se, zscore, _, _ = _score_from_residuals(state.resid, g_resid, state.glm_wt)
         pval = 2 * norm.sf(jnp.fabs(zscore))
 
         return TestResult(
@@ -70,9 +111,10 @@ class ScoreTest(AbstractHypothesisTest):
             se=se,
             p=pval,
             z=zscore,
-            num_iters=glmstate_cov_only.num_iters,
-            converged=glmstate_cov_only.converged,
-            disp=glmstate_cov_only.disp,
+            num_iters=state.num_iters,
+            converged=state.converged,
+            disp=state.disp,
+            negloglikelihood=state.negloglikelihood,
         )
 
     @property

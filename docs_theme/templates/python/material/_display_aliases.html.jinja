@@ -1,8 +1,12 @@
 {%- macro normalize(text) -%}
   {{- text|string
     | replace("jax.jaxlib._jax.Array", "jax.Array")
+    | replace("jaxlib._jax.Array", "jax.Array")
+    | replace("typing.Union[jaxtyping.Shaped[jax.Array, ''], jaxtyping.Shaped[ndarray, ''], numpy.bool, numpy.number, bool, int, float, complex]", "ScalarLike")
     | replace("typing.Union[jax.Array, numpy.ndarray, numpy.bool, numpy.number, bool, int, float, complex]", "ArrayLike")
     | replace("typing.Union[jax.Array,numpy.ndarray,numpy.bool,numpy.number,bool,int,float,complex]", "ArrayLike")
     | replace("equinox._module._module.Module", "equinox.Module")
+    | replace("jaxqtl.hypothesis._spa.CumulantGeneratingFunction", "CumulantGeneratingFunction")
+    | replace("~CGFStateT", "CGFStateT")
   -}}
 {%- endmacro -%}

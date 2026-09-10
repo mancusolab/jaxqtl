@@ -1,16 +1,7 @@
 # Single-cell cis-eQTL workflow
 
-jaxQTL runs cell-type-specific eQTL scans from donor-level pseudobulk expression. It starts after cell quality control,
-donor assignment, and cell-type annotation. It does not read cell-level AnnData or Seurat objects, assign cell types,
-or create pseudobulk counts.
-
-The workflow is:
-
-1. Create one donor-by-gene phenotype matrix per cell type.
-2. Prepare donor covariates and genotypes.
-3. Choose an offset for the count model.
-4. Run one cis scan per cell type.
-5. Filter and correct the results for multiple testing.
+Start with cells that have passed quality control, donor assignment, and cell-type annotation.
+jaxQTL takes donor-level pseudobulk matrices; prepare them from AnnData or Seurat before mapping.
 
 ## 1. Create one pseudobulk matrix per cell type
 
@@ -24,9 +15,7 @@ For each cell type:
 Summation preserves the library-size exposure used by the count model. Do not average cells. Fractional abundance
 estimates from a quantifier are valid; the phenotype values do not need to be integers.
 
-!!! note "jaxQTL does not store the cell-type label"
-
-    Put the cell type in the phenotype filename and output prefix. Run a separate command for every cell type.
+Use a separate phenotype file and output prefix for each cell type.
 
 ### Add gene coordinates
 
@@ -82,6 +71,11 @@ Never pass raw library sizes as offsets. See [Offsets](offsets.md) for the full 
 
 ## 4. Run one cis scan
 
+Choose **SPA + ACAT** for fast testing without permutations, or **Beta permutation** for a permutation-based
+reference. Both report one lead variant and a gene-level p-value.
+
+### Permutation calibration
+
 This command fits a Negative Binomial model, uses a score test, and calibrates the gene-level p-value by permutation:
 
 ```bash
@@ -101,11 +95,43 @@ jaxqtl cis \
   --out results/CD4_NC.chr1
 ```
 
-The `0.05` MAF threshold is an example, not a jaxQTL default. Choose and report the threshold required by the study.
-Use the same analysis specification for every cell type unless the study design requires otherwise.
+The `0.05` MAF threshold is an example, not the default; choose it for your study.
 
-The command writes `results/CD4_NC.chr1.cis.score.perm.parquet.gz`. See [Cis mapping](cis.md) for ACAT and SPA
-alternatives.
+The command writes `results/CD4_NC.chr1.cis.score.perm.parquet.gz`.
+
+### Faster scans with SPA and ACAT
+
+SPA + ACAT avoids permutation refits and is typically much faster; the speedup depends on the data and
+permutation count. This example uses the same inputs and filters:
+
+```bash
+mkdir -p results
+
+jaxqtl cis \
+  --bfile genotype/chr1 \
+  --pheno pseudobulk/CD4_NC.bed.gz \
+  --covar covariates.tsv \
+  --model nb \
+  --test score \
+  --set-offset-from-libsize \
+  --one-hot \
+  --normalize-covar \
+  --maf 0.05 \
+  --spa \
+  --acat \
+  --out results/CD4_NC.chr1_spa_acat
+```
+
+The command writes `results/CD4_NC.chr1_spa_acat.cis.score.spa.acat.parquet.gz`. No permutations are run;
+`--nperm` does not control this procedure.
+
+!!! warning "Use SPA with score-test ACAT"
+
+    ACAT can amplify inaccurate variant tail p-values into misleading gene-level results. We strongly recommend
+    `--spa --acat` for score tests. SPA can still fall back to the normal approximation.
+
+The methods can yield different p-values and discoveries. See [Calibration tradeoffs](tests.md#tail-and-gene-level-calibration);
+both require result checks and FDR correction across genes.
 
 ## 5. Process results
 
@@ -118,12 +144,5 @@ combining results across cell types.
 Define the multiple-testing family before looking at results. For example, decide whether FDR is controlled separately
 within each cell type or jointly across all tested cell types, then record that choice with the final results.
 
-## Before running production data
-
-- Each phenotype file represents one cell type.
-- Every retained donor has cells and positive total abundance for that cell type.
-- TSS intervals and chromosome labels match the genotype build and naming convention.
-- Donor IDs match across all inputs.
-- The offset was computed from the full gene set.
-- Covariates and expression filters were chosen before association testing.
-- The MAF threshold, cis window, calibration method, and FDR family are recorded.
+Record the genotype build, expression filters, covariates, MAF threshold, cis window, calibration method, and
+FDR family with the results.

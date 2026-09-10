@@ -22,3 +22,5 @@ The CLI uses the CPU backend by default. Select another installed JAX backend wi
 `--platform gpu` or `--platform tpu` on a mapping command.
 
 For a source checkout and contributor setup, see [Development setup](../contributing.md).
+
+Continue to the [Quickstart](quickstart.md) to run the bundled data and inspect a result.

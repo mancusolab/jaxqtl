@@ -14,6 +14,8 @@ run.sh
 *.pot
 __pycache__/*
 .cache/*
+# Local analysis evidence kept outside disposable build caches.
+.artifacts/
 .*.swp
 */.ipynb_checkpoints/*
 .DS_Store

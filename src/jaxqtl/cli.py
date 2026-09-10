@@ -292,7 +292,13 @@ def _create_common_subp(subp, name, help):
         help="Number of permutations to perform to bootstrap Beta approximation to permutation testing",
     )
     solver.add_argument("--max-iter", type=int, default=1000, help="Maximum number of iterations for GLM inference")
-    solver.add_argument("--tol", type=float, default=1e-3, help="Tolerance for termination during GLM inference")
+    solver.add_argument("--tol", type=float, default=1e-3, help="Absolute GLM likelihood-change tolerance")
+    solver.add_argument(
+        "--gtol",
+        type=float,
+        default=1e-3,
+        help="GLM per-observation gradient tolerance (RMS-scaled coefficients, bound-projected NB2 dispersion)",
+    )
     solver.add_argument("--step-size", type=float, default=1.0, help="Initial step-size during GLM inference")
 
     runtime.add_argument("--seed", type=int, default=0, help="Seed for PRNG initialization")
@@ -570,6 +576,7 @@ def _common_setup(args, log):
             solver=solver,
             max_iter=args.max_iter,
             tol=args.tol,
+            gtol=args.gtol,
             step_size=args.step_size,
         )
 

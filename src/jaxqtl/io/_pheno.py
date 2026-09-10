@@ -164,6 +164,8 @@ class ExpressionData:
 
         Phenotypes are optionally transformed, then standardized across samples
         before fitting. The randomized initialization is determined by `rng_key`.
+        A final projected SVD orders the unit-norm sample directions by decreasing
+        explained variance within the fitted subspace.
 
         **Arguments:**
 
@@ -176,7 +178,9 @@ class ExpressionData:
         **Returns:**
 
         For a supported component count, a Polars frame with `iid` followed by
-        `ExprPC0` through `ExprPC{num_pcs - 1}`.
+        `ExprPC0` through `ExprPC{num_pcs - 1}`, in decreasing variance order.
+        Rows preserve the input sample order. Components have unit norm rather
+        than being scaled by their singular values.
 
         **Raises:**
 
@@ -450,6 +454,7 @@ def _prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3) -> Array:
     initial_carry = 0, W, Z, Z_zero
 
     _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
-    Z, _ = jnp.linalg.qr(Z)
-
-    return Z
+    Q, _ = jnp.linalg.qr(Z)
+    # Rotate the EM subspace into variance-ordered principal directions using a k-by-p SVD.
+    rotation, _, _ = jnp.linalg.svd(Q.T @ X, full_matrices=False)
+    return Q @ rotation

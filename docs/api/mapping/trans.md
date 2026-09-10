@@ -11,7 +11,7 @@ Trans scans can be large (millions of variants times thousands of phenotypes). `
 - compute association statistics for all phenotypes in each block
 - write or post-process block outputs incrementally
 
-## API
+## Mapping and output schemas
 
 ::: jaxqtl.map.map_trans
 

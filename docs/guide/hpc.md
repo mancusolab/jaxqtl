@@ -1,4 +1,4 @@
-# Scale genome-wide scans
+# Run large scans
 
 Large cis scans can be divided by chromosome and gene list, then submitted as independent scheduler jobs. Start with
 small chunks and use observed runtime and memory to choose the final chunk size.
@@ -10,15 +10,14 @@ The repository includes two project-layout templates:
 - [`tutorial/code/run_jaxqtl_cis_all.sh`](https://github.com/mancusolab/jaxqtl/blob/main/tutorial/code/run_jaxqtl_cis_all.sh),
   which demonstrates a Slurm array running one cis scan per parameter row.
 
-!!! warning "The batch files are templates"
+Adapt the templates' partition, notification address, working directory, and array size before submitting.
+Review every `#SBATCH` directive and path.
 
-    They contain site-specific placeholders for the partition, notification address, working directory, and array
-    size. Review every `#SBATCH` directive and path before submitting a job.
+!!! warning "Do not recompute offsets from a restricted phenotype file"
 
-!!! note "Separate compilation time from scan time"
-
-    JAX compiles a new numerical program for new array shapes. The first gene or genotype block can therefore be
-    slower than later work with the same shape. Estimate production runtime from multiple genes, not the first one.
+    Chromosome- or chunk-specific phenotype files do not contain the full library. Supply offsets computed from the
+    original unfiltered count matrix rather than using `--set-offset-from-libsize` in each job. Using `--gene-list`
+    with a full phenotype file is safe because jaxQTL computes library size before selecting genes.
 
 ## Recommended workflow
 
@@ -56,8 +55,15 @@ bash tutorial/code/run_jaxqtl_cis_all.sh 1
 sbatch tutorial/code/run_jaxqtl_cis_all.sh
 ```
 
-!!! warning "Do not recompute offsets from a restricted phenotype file"
+## Compilation and memory
 
-    Chromosome- or chunk-specific phenotype files do not contain the full library. Supply offsets computed from the
-    original unfiltered count matrix rather than using `--set-offset-from-libsize` in each job. Using `--gene-list`
-    with a full phenotype file is safe because jaxQTL computes library size before selecting genes.
+Score, SPA, and Wald scans reuse compiled kernels across gene-window sizes using fixed genotype blocks.
+Padding is excluded from results. Changing sample counts, covariate dimensions, dtypes, or test settings can
+still trigger compilation.
+
+Each process pays its own startup compilation cost; standard cis and nominal scans do not periodically clear
+the cache. Benchmark several representative genes, including startup, before choosing job sizes.
+
+Fixed blocks limit kernel size, not total process memory. Inputs, host genotype windows, assembled results,
+permutation batches, and compiled executables also consume memory. Measure peak resident memory with the backend
+and settings intended for production.

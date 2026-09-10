@@ -4,7 +4,7 @@ jaxQTL is a JAX-based command-line tool and Python library for cell-type-specifi
 single-cell pseudobulk expression. It provides Poisson and Negative Binomial count models, while also supporting
 Gaussian molecular phenotypes.
 
-[Run single-cell cis-eQTL](guide/single-cell-cis.md){ .md-button .md-button--primary }
+[Try the quickstart](guide/quickstart.md){ .md-button .md-button--primary }
 [Install jaxQTL](guide/installation.md){ .md-button }
 [Browse the Python API](api/models/glm.md){ .md-button }
 
@@ -17,25 +17,14 @@ jaxqtl --help
 
 ## Run the tutorial
 
-The bundled example is a donor-by-gene pseudobulk matrix for one cell type. From a repository checkout:
+The [Quickstart](guide/quickstart.md) runs ten genes from the bundled pseudobulk data and shows how to inspect the
+results. Choose **SPA + ACAT** for fast gene-level testing without permutations, or **Beta permutation** for
+permutation calibration. SPA is strongly recommended with score-test ACAT because ACAT is sensitive to variant
+p-value calibration.
 
-```bash
-jaxqtl cis \
-  --bfile tutorial/input/chr22_N100 \
-  --pheno tutorial/input/CD4_NC.N100.bed.gz \
-  --covar tutorial/input/donor_features.tsv \
-  --gene-list tutorial/input/genelist_10 \
-  --model nb \
-  --test score \
-  --set-offset-from-libsize \
-  --nperm 1000 \
-  --out tutorial/output/quickstart
-```
-
-The [single-cell workflow](guide/single-cell-cis.md) explains how to prepare cell-type-specific inputs. The
-[quickstart](guide/quickstart.md) explains the bundled data, offset choice, and output. Use the task guides for
-[cis](guide/cis.md), [nominal](guide/nominal.md), [trans](guide/trans.md), and
-[expression-PC](guide/compute-pcs.md) workflows.
+To analyze your own data, follow the [single-cell workflow](guide/single-cell-cis.md) from pseudobulk preparation
+through multiple-testing correction. The task guides cover [cis](guide/cis.md), [nominal](guide/nominal.md),
+[trans](guide/trans.md), and [expression-PC](guide/compute-pcs.md) workflows.
 
 ## Support and citation
 

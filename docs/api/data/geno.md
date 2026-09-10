@@ -1,13 +1,6 @@
 # Genotype I/O
 
-The CLI supports genotype inputs through:
-
-- `--bfile` (PLINK1 BED/BIM/FAM prefix)
-- `--pfile` (PLINK2 PGEN/PVAR/PSAM prefix)
-- `--vcf` (indexed VCF/BCF)
-- `--bgen` (BGEN)
-
-`--geno` is deprecated and raises an error. Use one of the above flags instead.
+See [Genotype data](../../guide/genotypes.md) for supported sources and file requirements.
 
 Genotype adapters provide:
 
@@ -21,7 +14,7 @@ The mapping layer converts genotype blocks to JAX arrays and preserves `a1` as t
     jaxQTL requests variant metadata with genotype values so output allele and position fields remain aligned with
     matrix columns.
 
-## API
+## Genotype loading
 
 ::: jaxqtl.io.GenotypeReadOptions
 

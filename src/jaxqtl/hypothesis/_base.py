@@ -1,7 +1,7 @@
 # pattern: Functional Core
 
 from abc import abstractmethod
-from typing import NamedTuple
+from typing import Generic, NamedTuple, TypeVar
 
 import equinox as eqx
 import jax
@@ -21,8 +21,8 @@ class TestResult(NamedTuple):
     r"""Container for per-variant association test results.
 
     For a genotype matrix with `m` variants, association fields have shape `(m,)`.
-    Convergence and dispersion may be scalars when a score test reuses one null-model
-    fit, or arrays with shape `(m,)` when models are fitted per variant.
+    Convergence, dispersion, and negative log-likelihood may be scalars when a score test reuses one null-model fit,
+    or arrays with shape `(m,)` when models are fitted per variant.
 
     **Attributes:**
 
@@ -33,6 +33,7 @@ class TestResult(NamedTuple):
     - `num_iters`: Model-fitting iteration counts.
     - `converged`: Model convergence indicators.
     - `disp`: Fitted family dispersion or scale values.
+    - `negloglikelihood`: Negative log-likelihood objective at the fitted model.
     """
 
     beta: Array
@@ -42,13 +43,20 @@ class TestResult(NamedTuple):
     num_iters: Array
     converged: Array
     disp: Array
+    negloglikelihood: Array
 
 
-class AbstractHypothesisTest(eqx.Module):
+StateT = TypeVar("StateT")
+
+
+class AbstractHypothesisTest(eqx.Module, Generic[StateT]):
     r"""Abstract base class for per-variant association tests.
 
-    Instances of this class are expected to take covariates, a genotype matrix, and an outcome vector,
-    and return test statistics and p-values for each variant.
+    Initialize once per outcome with `init(X, y, offset)`, then reuse the resulting
+    state with `test(X, G, state)` for each genotype block. Initialization never
+    depends on the number of variants. States must be fixed-structure PyTrees and
+    should omit the shared covariate matrix. Calling an instance directly composes
+    both operations for a full genotype window.
 
     **Attributes:**
 
@@ -57,8 +65,8 @@ class AbstractHypothesisTest(eqx.Module):
       effects. Defaults to [`jaxqtl.infer.FisherInfoError`][].
     """
 
-    model: AbstractLinearModel
-    std_err: AbstractVarianceEstimator = FisherInfoError()
+    model: eqx.AbstractVar[AbstractLinearModel]
+    std_err: eqx.AbstractVar[AbstractVarianceEstimator]
 
     def __call__(
         self,
@@ -67,25 +75,52 @@ class AbstractHypothesisTest(eqx.Module):
         y: ArrayLike,
         offset: ArrayLike,
     ) -> TestResult:
-        r"""Alias for [`jaxqtl.hypothesis.AbstractHypothesisTest.test`][]."""
-        return self.test(X, G, y, offset)
-
-    @abstractmethod
-    def test(
-        self,
-        X: ArrayLike,
-        G: ArrayLike,
-        y: ArrayLike,
-        offset: ArrayLike,
-    ) -> TestResult:
-        r"""Implement the association test.
+        r"""Initialize the outcome and test all supplied variants.
 
         **Arguments:**
 
         - `X`: Covariate matrix with shape `(n, p)`.
-        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
+        - `G`: Genotype matrix with shape `(n, m)`.
         - `y`: Outcome vector with shape `(n,)`.
         - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+
+        **Returns:**
+
+        A [`jaxqtl.hypothesis.TestResult`][] containing per-variant statistics.
+        """
+        return self.test(X, G, self.init(X, y, offset))
+
+    @abstractmethod
+    def init(
+        self,
+        X: ArrayLike,
+        y: ArrayLike,
+        offset: ArrayLike,
+    ) -> StateT:
+        r"""Prepare an outcome independently of genotype-window shape.
+
+        **Arguments:**
+
+        - `X`: Covariate matrix with shape `(n, p)`.
+        - `y`: Outcome vector with shape `(n,)`.
+        - `offset`: Offset vector with shape `(n,)`, or a scalar offset.
+
+        **Returns:**
+
+        A test-specific PyTree reusable across genotype blocks. The state must not
+        retain `X`, which is shared across outcomes and permutation batches.
+        """
+        pass
+
+    @abstractmethod
+    def test(self, X: ArrayLike, G: ArrayLike, state: StateT) -> TestResult:
+        r"""Test variants using previously initialized outcome state.
+
+        **Arguments:**
+
+        - `X`: The covariate matrix used during initialization, with shape `(n, p)`.
+        - `G`: Genotype matrix with shape `(n, m)` (variants in columns).
+        - `state`: State returned by this test's `init(X, y, offset)`.
 
         **Returns:**
 

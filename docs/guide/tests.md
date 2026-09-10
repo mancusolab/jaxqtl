@@ -1,34 +1,49 @@
-# Models, tests, and calibration
+# Tests and gene-level calibration
 
-jaxQTL separates the response model, variant-level test, and gene-level calibration method. These choices answer
-different questions and should be selected independently.
-
-## Response models
-
-- `gaussian` fits a linear model to a continuous phenotype.
-- `poisson` models counts with variance equal to the mean.
-- `nb` uses the NB2 variance `mu + alpha * mu^2` for overdispersed counts.
+Choose a [response model](model.md), a variant-level test, and a gene-level calibration method.
 
 ## Variant-level tests
 
-The score test fits one covariate-only model per phenotype and tests each genotype against that null fit. It is the
-default for cis scans because the null-model work is reused across variants.
+The **score test** is the cis default: it fits one covariate-only null model per phenotype and reuses it across
+variants. **Wald tests** fit each variant's effect and are the usual choice for nominal scans requiring full-model
+effect estimates.
 
-The Wald test fits the tested variant coefficient and reports its estimate, standard error, and Wald statistic. It is
-the usual choice for nominal results when effect estimates for every variant are required.
+!!! warning "Use robust standard errors only with Wald tests"
 
-!!! warning "Robust standard errors apply only to Wald tests"
-
-    `--robust-se` selects Huber–White sandwich standard errors for Wald inference. It does not make the implemented
-    score statistic or saddlepoint approximation misspecification-robust.
+    Score and SPA inference do not support Huber–White sandwich errors. Use `--test wald --robust-se` when
+    requesting them; this option does not make score or SPA inference robust to model misspecification.
 
 ## Tail and gene-level calibration
 
-`--spa` replaces the normal-tail p-value for a score statistic with a saddlepoint approximation. It is intended for
-settings where asymptotic normal tails can be inaccurate, such as low minor-allele counts.
+`--spa` attempts a saddlepoint correction for score statistics with absolute normal z-score above 1.96 that pass
+the CGF's support checks. Smaller statistics use the normal tail. A failed root solve or invalid correction also
+falls back to the normal approximation.
 
-For `jaxqtl cis`, the default gene-level procedure uses permutations and a fitted Beta approximation. `--acat`
-instead combines the variant p-values with the aggregated Cauchy association test.
+There is no separate SPA-success flag: `model_converged` describes the null fit, not the tail calculation.
 
-See [Hypothesis testing](../api/hypothesis/variant.md) and
-[Gene-level aggregation](../api/hypothesis/gene.md) for the Python interfaces.
+### Faster cis scans with SPA and ACAT
+
+`--spa --acat` combines variant p-values into one gene-level p-value without permutations. It is typically much
+faster than Beta permutation because it avoids permutation refits; the speedup depends on the data and permutation
+count. See the [Quickstart](quickstart.md#run-a-cis-scan) for both commands.
+
+!!! warning "Use SPA with score-test ACAT"
+
+    ACAT can amplify inaccurate variant tail p-values into misleading gene-level results. We strongly recommend
+    `--spa --acat` for score tests. SPA can still fall back to the normal approximation.
+
+### Permutation calibration
+
+Without `--acat`, cis scans use a Beta approximation fitted to permutation maxima. Each shuffle contributes the
+maximum absolute score or Wald statistic across the window. `--spa` does not replace these statistics with
+saddlepoint p-values.
+
+Beta permutation does not share ACAT's direct sensitivity to asymptotic variant p-values: it compares statistics
+computed by the same procedure in the observed and permuted data. Geometry shared across those tests can therefore
+be reflected in the reference distribution. This requires valid permutations and successful fitting; it cannot
+repair numerical failures or guarantee an accurate Beta approximation.
+
+The methods can yield different discoveries. Both need [result checks and FDR correction across genes](postprocessing.md).
+
+For Python interfaces, see [Variant-level tests](../api/hypothesis/variant.md) and
+[Gene-level aggregation](../api/hypothesis/gene.md).

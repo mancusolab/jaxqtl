@@ -11,7 +11,7 @@ provide classical Fisher-information or Huber–White sandwich standard errors.
             members:
                 - __call__
 
-## Implementations
+## Covariance estimators
 
 ::: jaxqtl.infer.FisherInfoError
     options:

@@ -8,7 +8,7 @@ import statsmodels.stats.sandwich_covariance as sw
 import equinox as eqx
 import jax.numpy as jnp
 
-from jax import config
+from jax import config, grad
 
 from jaxqtl.distribution._expfam import Binomial, Gaussian, NegativeBinomial, Poisson
 from jaxqtl.distribution._links import IdentityLink, LogitLink, LogLink, PowerLink
@@ -92,9 +92,10 @@ def test_linear_model_rejects_nonidentity_link():
 
 
 @pytest.mark.parametrize("step_size", (0.0, -1.0, float("nan"), float("inf"), float("-inf")))
-def test_generalized_linear_model_rejects_invalid_step_size_at_construction(step_size):
-    with pytest.raises(ValueError, match="step_size must be finite and greater than 0"):
-        GeneralizedLinearModel(step_size=step_size)
+@pytest.mark.parametrize("parameter", ("step_size", "gtol"))
+def test_generalized_linear_model_rejects_invalid_solver_control_at_construction(step_size, parameter):
+    with pytest.raises(ValueError, match=f"{parameter} must be finite and greater than 0"):
+        GeneralizedLinearModel(**{parameter: step_size})
 
 
 @pytest.mark.parametrize("solver", (CholeskySolve(), QRSolve()))
@@ -186,17 +187,78 @@ def test_negative_binomial_initializer_returns_predictor_without_offset(offset_k
     ).fit(X, y, offset)
 
     poisson_eta = poisson_state.eta
-    moment_inverse_dispersion = n / jnp.sum((y / family.glink.inverse(poisson_eta) - 1) ** 2)
-    expected_dispersion = family.estimate_dispersion(
-        X, y, poisson_eta, disp=1.0 / moment_inverse_dispersion, max_iter=max_iter
-    )
-    expected_dispersion = jnp.nan_to_num(expected_dispersion, nan=0.1)
+    poisson_mu = poisson_state.mu
+    moment_dispersion = jnp.clip(jnp.mean(((y - poisson_mu) ** 2 - poisson_mu) / poisson_mu**2), 1e-9, 1e9)
+    initial_nll = family.negloglikelihood(X, y, poisson_eta, moment_dispersion)
+    refined_nll = family.negloglikelihood(X, y, initializer_eta + offset, initializer_dispersion)
 
-    np.testing.assert_allclose(initializer_dispersion, expected_dispersion)
+    assert float(refined_nll) <= float(initial_nll) + 1e-10
     np.testing.assert_allclose(initializer_eta + offset, poisson_eta)
     np.testing.assert_allclose(jitted_eta, initializer_eta, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(jitted_dispersion, initializer_dispersion, rtol=1e-5, atol=1e-5)
     np.testing.assert_allclose(jitted_eta + offset, poisson_eta)
+
+
+@pytest.mark.parametrize(
+    ("counts", "exposure", "expected_seed"),
+    [
+        ([0.0, 0.0, 2.0, 2.0], [1.0] * 4, 1e-9),
+        ([0.0, 1.0, 1.0, 2.0], [1.0] * 4, 1e-9),
+        ([0.0, 0.0, 0.0, 4.0], [1.0] * 4, 2.0),
+        ([0.0, 0.0, 2.0, 2.0, 0.0, 0.0, 4.0, 4.0], [1.0] * 4 + [2.0] * 4, 0.25),
+    ],
+    ids=("poisson-variance", "underdispersed", "overdispersed", "unequal-exposure"),
+)
+def test_negative_binomial_initializer_seed_removes_poisson_variance(monkeypatch, counts, exposure, expected_seed):
+    # Keep the real Poisson fit; bypass subsequent dispersion optimization so it
+    # cannot hide an incorrect seed by converging to the same final estimate.
+    def keep_seed(self, X, y, eta, disp=1.0, step_size=1.0):
+        return jnp.asarray(disp)
+
+    monkeypatch.setattr(NegativeBinomial, "update_dispersion", keep_seed)
+    y = jnp.asarray(counts)
+    X = jnp.ones((y.size, 1))
+    offset = jnp.log(jnp.asarray(exposure))
+    initializer = _NBInit(NegativeBinomial(), CholeskySolve())
+
+    _, seed = initializer.init(X, y, offset, max_iter=100, tol=1e-12, step_size=1.0)
+
+    assert float(seed) == pytest.approx(expected_seed, rel=1e-8, abs=1e-12)
+
+
+@pytest.mark.parametrize(("step_size", "accepted_step"), [(0.1, 0.1), (1.0, 1.0), (16.0, 2.0)])
+def test_negative_binomial_initializer_takes_one_backtracked_dispersion_step(step_size, accepted_step):
+    y = jnp.tile(jnp.asarray([0.0, 0.0, 0.0, 4.0]), 5)
+    X = jnp.ones((y.size, 1))
+    family = NegativeBinomial()
+    initializer = _NBInit(family, CholeskySolve())
+
+    eta, disp = initializer.init(X, y, jnp.asarray(0.0), max_iter=100, tol=1e-12, step_size=step_size)
+
+    mu = jnp.exp(eta)
+    seed = jnp.mean(((y - mu) ** 2 - mu) / mu**2)
+    seed_nll = family.negloglikelihood(X, y, eta, seed)
+    expected = family.update_dispersion(X, y, eta, seed, accepted_step)
+    np.testing.assert_allclose(disp, expected, rtol=1e-8, atol=1e-10)
+    assert float(family.negloglikelihood(X, y, eta, disp)) < float(seed_nll)
+    if accepted_step < step_size:
+        rejected = family.update_dispersion(X, y, eta, seed, 2.0 * accepted_step)
+        assert float(family.negloglikelihood(X, y, eta, rejected)) > float(seed_nll)
+
+
+@pytest.mark.parametrize("bad_candidate", ("increase", "nan", "inf"))
+def test_negative_binomial_initializer_keeps_seed_when_dispersion_trials_fail(monkeypatch, bad_candidate):
+    def rejected_update(self, X, y, eta, disp, step_size):
+        return disp + 1.0 if bad_candidate == "increase" else jnp.asarray(float(bad_candidate))
+
+    monkeypatch.setattr(NegativeBinomial, "update_dispersion", rejected_update)
+    y = jnp.asarray([0.0, 1.0, 1.0, 2.0])
+    X = jnp.ones((y.size, 1))
+    initializer = _NBInit(NegativeBinomial(), CholeskySolve())
+
+    _, disp = initializer.init(X, y, jnp.asarray(0.0), max_iter=100, tol=1e-12, step_size=0.1)
+
+    assert float(disp) == pytest.approx(1e-9, rel=0.0, abs=1e-15)
 
 
 def test_negative_binomial_fit_with_offset_matches_jit():
@@ -214,9 +276,19 @@ def test_negative_binomial_fit_with_offset_matches_jit():
     y = jnp.asarray(y)
     offset = jnp.asarray(offset)
 
-    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4)
+    model = GeneralizedLinearModel(family=NegativeBinomial(), max_iter=200, tol=1e-4, gtol=1e-6)
     eager = model.fit(X, y, offset)
     jitted = eqx.filter_jit(model.fit)(X, y, offset)
+
+    # Check actual NLL derivatives at the returned joint state, independently
+    # of the optimizer's analytic score and its trial-update derivatives.
+    def objective(beta, alpha):
+        return model.family.negloglikelihood(X, y, X @ beta + offset, alpha)
+
+    beta_gradient, alpha_gradient = grad(objective, argnums=(0, 1))(jitted.beta, jitted.disp)
+    assert 1e-9 < jitted.disp < 1e9
+    assert jnp.max(jnp.abs(beta_gradient) / (n * jnp.sqrt(jnp.mean(X**2, axis=0)))) <= model.gtol
+    assert jnp.abs(alpha_gradient) / n <= model.gtol
 
     numerical_fields = (
         "beta",

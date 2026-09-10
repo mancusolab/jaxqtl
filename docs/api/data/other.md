@@ -1,4 +1,4 @@
-# Tabular input helpers
+# Covariate, offset, and list readers
 
 These readers normalize IID-like columns and prepare covariate, offset, and identifier files for sample alignment.
 

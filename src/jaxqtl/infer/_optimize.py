@@ -13,7 +13,8 @@ from jax.scipy import stats as jaxstats
 from jax.scipy.special import polygamma
 from jaxtyping import Array, ScalarLike
 
-from ..distribution import ExponentialFamily
+from ..distribution import ExponentialFamily, NegativeBinomial
+from ..distribution._expfam import _NB2_DISPERSION_MAX, _NB2_DISPERSION_MIN, _nb2_log_alpha_derivatives
 from ._solve import AbstractLinearSolve
 
 
@@ -48,6 +49,7 @@ def irls(
     tol: float = 1e-3,
     step_size: float = 1.0,
     disp_init: ScalarLike = 0.0,
+    gtol: float = 1e-3,
 ) -> SolveResult:
     r"""Solve a GLM with iteratively reweighted least squares (IRLS).
 
@@ -61,19 +63,29 @@ def irls(
     - `family`: GLM family implementing [`jaxqtl.distribution.ExponentialFamily`][].
     - `solver`: Linear solver implementing [`jaxqtl.infer.AbstractLinearSolve`][].
     - `max_iter`: Maximum IRLS iterations.
-    - `tol`: Convergence tolerance on the change in objective value.
+    - `tol`: Absolute tolerance on the change in total negative log likelihood. A small change triggers the
+      gradient check; it does not establish convergence on its own.
     - `step_size`: Initial step size for each IRLS update. Rejected updates are
       retried with successively halved step sizes.
     - `disp_init`: Initial dispersion estimate.
+    - `gtol`: Tolerance on the per-observation gradient infinity norm. Coefficient gradients are divided by
+      each design column's root-mean-square magnitude. NB2 also requires a small projected alpha-space gradient,
+      respecting its dispersion bounds. Defaults to `1e-3`.
 
     **Returns:**
 
     A [`jaxqtl.infer.SolveResult`][] containing fitted coefficients, dispersion, and convergence metadata.
+
+    **Failure Modes:**
+
+    `converged` is false on exhausted backtracking, an iteration limit, or an unchanged nonstationary state.
     """
     if not math.isfinite(step_size) or step_size <= 0:
         raise ValueError("step_size must be finite and greater than 0")
+    if not math.isfinite(gtol) or gtol <= 0:
+        raise ValueError("gtol must be finite and greater than 0")
 
-    return _irls(X, y, offset, eta, family, solver, max_iter, tol, step_size, disp_init)
+    return _irls(X, y, offset, eta, family, solver, max_iter, tol, step_size, disp_init, gtol)
 
 
 @eqx.filter_jit
@@ -88,18 +100,43 @@ def _irls(
     tol: float,
     step_size: float,
     disp_init: ScalarLike,
+    gtol: float,
 ) -> SolveResult:
     X = jnp.asarray(X)
     y = jnp.asarray(y)
     offset = jnp.asarray(offset)
     eta = jnp.asarray(eta)
     disp_init = jnp.asarray(disp_init)
-    _, p = X.shape
+    n, _ = X.shape
+    column_scale = jnp.sqrt(jnp.mean(X**2, axis=0))
+    gradient_scale = n * jnp.where(column_scale > 0, column_scale, 1.0)
+
+    def stationary(eta, disp):
+        # Evaluate at the accepted (eta, alpha), not at the old alpha used to
+        # construct its dispersion update. No information-matrix solve is needed.
+        mu, link_deriv, weight = family.calc_weight(eta, disp)
+        beta_gradient = -(X.T @ (weight * link_deriv * (y - mu)))
+        beta_error = jnp.max(jnp.abs(beta_gradient) / gradient_scale)
+        converged = jnp.isfinite(beta_error) & (beta_error <= gtol)
+        if isinstance(family, NegativeBinomial):
+            log_alpha_gradient, _, _, _ = _nb2_log_alpha_derivatives(y, family.glink.log_inverse(eta), disp)
+            alpha_gradient = log_alpha_gradient / disp
+            # Log-alpha gradients vanish spuriously near zero. Test the alpha
+            # gradient, retaining only feasible descent directions at a bound.
+            projected = jnp.where(disp <= _NB2_DISPERSION_MIN, jnp.minimum(alpha_gradient, 0.0), alpha_gradient)
+            projected = jnp.where(disp >= _NB2_DISPERSION_MAX, jnp.maximum(projected, 0.0), projected)
+            converged = converged & jnp.isfinite(alpha_gradient) & (jnp.abs(projected) / n <= gtol)
+        return converged
 
     def body_fun(val: tuple):
-        likelihood_o, diff, num_iter, beta_o, eta_o, disp_o, failed_o = val
+        likelihood_o, converged, num_iter, beta_o, eta_o, disp_o, failed_o = val
 
         mu_k, g_deriv_k, weight = family.calc_weight(eta_o, disp_o)
+        working_residual = g_deriv_k * (y - mu_k)
+        # eta_o - offset = X @ beta_o, so solve only for the increment. The
+        # residual, factorization, and predictor direction are shared by trials.
+        beta_direction = solver.wgt_lstsq(X, working_residual, weight)
+        eta_direction = X @ beta_direction
 
         def halving_cond(trial: tuple):
             trial_step, num_trials, accepted, likelihood, beta, eta, disp = trial
@@ -107,9 +144,8 @@ def _irls(
 
         def halving_body(trial: tuple):
             trial_step, num_trials, accepted, likelihood, beta, eta, disp = trial
-            r = eta_o + g_deriv_k * (y - mu_k) * trial_step - offset
-            beta_trial = solver.wgt_lstsq(X, r, weight)
-            eta_trial = X @ beta_trial + offset
+            beta_trial = beta_o + trial_step * beta_direction
+            eta_trial = eta_o + trial_step * eta_direction
             disp_trial = family.update_dispersion(X, y, eta_trial, disp_o, trial_step)
             likelihood_trial = family.negloglikelihood(X, y, eta_trial, disp_trial)
 
@@ -144,21 +180,26 @@ def _irls(
         )
 
         diff = likelihood_n - likelihood_o
-        failed_n = ~accepted
+        converged = lax.cond(
+            accepted & (jnp.abs(diff) <= tol),
+            lambda: stationary(eta_n, disp_n),
+            lambda: jnp.asarray(False),
+        )
+        unchanged = jnp.all(eta_n == eta_o) & jnp.all(disp_n == disp_o)
+        failed_n = ~accepted | (unchanged & ~converged)
 
-        return likelihood_n, diff, num_iter + 1, beta_n, eta_n, disp_n, failed_n
+        return likelihood_n, converged, num_iter + 1, beta_n, eta_n, disp_n, failed_n
 
     def cond_fun(val: tuple):
-        likelihood_o, diff, num_iter, beta, eta, disp, failed = val
-        return (jnp.fabs(diff) > tol) & (num_iter < max_iter) & ~failed
+        likelihood_o, converged, num_iter, beta, eta, disp, failed = val
+        return ~converged & (num_iter < max_iter) & ~failed
 
     init_beta = solver.lstsq(X, eta)
     init_eta = X @ init_beta + offset
     init_likelihood = family.negloglikelihood(X, y, init_eta, disp_init)
-    init_tuple = (init_likelihood, jnp.asarray(jnp.inf), 0, init_beta, init_eta, disp_init, jnp.asarray(False))
+    init_tuple = (init_likelihood, jnp.asarray(False), 0, init_beta, init_eta, disp_init, jnp.asarray(False))
 
-    likelihood_n, diff, num_iters, beta, eta, disp, failed = lax.while_loop(cond_fun, body_fun, init_tuple)
-    converged = ~failed & jnp.isfinite(likelihood_n) & (jnp.fabs(diff) < tol) & (num_iters <= max_iter)
+    likelihood_n, converged, num_iters, beta, eta, disp, failed = lax.while_loop(cond_fun, body_fun, init_tuple)
 
     return SolveResult(beta, num_iters, converged, disp)
 

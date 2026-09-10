@@ -8,6 +8,7 @@ from typing import cast, NamedTuple
 import equinox as eqx
 import jax.numpy as jnp
 
+from jax import lax
 from jax.scipy.stats import norm
 from jaxtyping import Array, ArrayLike
 
@@ -19,7 +20,8 @@ from ..distribution import (
     Poisson,
     t_cdf,
 )
-from ._optimize import irls, lstsq
+from ..distribution._expfam import _NB2_DISPERSION_MAX, _NB2_DISPERSION_MIN
+from ._optimize import _MAX_STEP_TRIALS, irls, lstsq
 from ._solve import AbstractLinearSolve, CholeskySolve
 from ._stderr import AbstractVarianceEstimator, FisherInfoError
 
@@ -81,8 +83,9 @@ class _AbstractInit(eqx.Module):
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
+        gtol: float = 1e-3,
     ):
-        return self.init(X, y, offset, max_iter, tol=tol, step_size=step_size)
+        return self.init(X, y, offset, max_iter, tol=tol, step_size=step_size, gtol=gtol)
 
     @abstractmethod
     def init(
@@ -93,11 +96,14 @@ class _AbstractInit(eqx.Module):
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
+        gtol: float = 1e-3,
     ):
         pass
 
 
 class _NBInit(_AbstractInit):
+    """Fit Poisson means, then refine the NB2 moment seed with one backtracked step."""
+
     family: ExponentialFamily
     solver: AbstractLinearSolve
 
@@ -114,21 +120,40 @@ class _NBInit(_AbstractInit):
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
+        gtol: float = 1e-3,
     ):
         X = jnp.asarray(X)
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
-        n, p = X.shape
 
         jaxqtl_pois = GeneralizedLinearModel(
-            family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size
+            family=Poisson(), solver=self.solver, max_iter=max_iter, tol=tol, step_size=step_size, gtol=gtol
         )
         glm_state_pois = jaxqtl_pois.fit(X, y, offset)
         complete_eta = glm_state_pois.eta
 
-        # fit covariate-only model (null)
-        disp_init = n / jnp.sum((y / self.family.glink.inverse(complete_eta) - 1) ** 2)
-        disp = self.family.estimate_dispersion(X, y, complete_eta, disp=1.0 / disp_init, max_iter=max_iter)
+        # NB2 has E[(Y / mu - 1)^2] = 1 / mu + alpha; remove Poisson variance
+        # from the moment seed and respect the dispersion optimizer's bounds.
+        mu = glm_state_pois.mu
+        disp_init = jnp.clip(jnp.mean((y / mu - 1.0) ** 2 - 1.0 / mu), _NB2_DISPERSION_MIN, _NB2_DISPERSION_MAX)
+        initial_nll = self.family.negloglikelihood(X, y, complete_eta, disp_init)
+
+        def trial_cond(trial):
+            trial_step, num_trials, accepted, disp = trial
+            return ~accepted & (num_trials < _MAX_STEP_TRIALS)
+
+        def trial_body(trial):
+            trial_step, num_trials, accepted, disp = trial
+            candidate = self.family.update_dispersion(X, y, complete_eta, disp_init, trial_step)
+            candidate_nll = self.family.negloglikelihood(X, y, complete_eta, candidate)
+            accepted = jnp.isfinite(candidate) & jnp.isfinite(candidate_nll) & (candidate_nll <= initial_nll)
+            disp = jnp.where(accepted, candidate, disp_init)
+            return trial_step / 2.0, num_trials + 1, accepted, disp
+
+        # Refine alpha once at fixed Poisson means, always retrying from the seed.
+        # Main NB IRLS retains its own joint beta/alpha backtracking loop.
+        trial_init = (jnp.asarray(step_size, dtype=disp_init.dtype), jnp.asarray(0), jnp.asarray(False), disp_init)
+        _, _, _, disp = lax.while_loop(trial_cond, trial_body, trial_init)
 
         # convert disp to 0.1 if bad initialization
         disp = jnp.nan_to_num(disp, nan=0.1)
@@ -149,6 +174,7 @@ class _SimpleInit(_AbstractInit):
         max_iter: int = 100,
         tol: float = 1e-3,
         step_size: float = 1e-2,
+        gtol: float = 1e-3,
     ):
         y = jnp.asarray(y)
         offset = jnp.asarray(offset)
@@ -291,6 +317,10 @@ class GeneralizedLinearModel(AbstractLinearModel):
     This class wraps a family (distribution + link) and a linear solver, and fits coefficients using
     iteratively reweighted least squares (IRLS).
 
+    Negative Binomial fits start from a Poisson fit and a Poisson-corrected moment estimate of dispersion.
+    Initialization takes at most one accepted dispersion update using `step_size` with backtracking at fixed
+    Poisson means; subsequent IRLS iterations backtrack coefficient and dispersion updates jointly.
+
     **Attributes:**
 
     - `family`: Response distribution and link function. Defaults to
@@ -298,9 +328,12 @@ class GeneralizedLinearModel(AbstractLinearModel):
     - `solver`: Linear solver for each IRLS subproblem. Defaults to
       [`jaxqtl.infer.CholeskySolve`][].
     - `max_iter`: Maximum number of IRLS iterations. Defaults to 1000.
-    - `tol`: Convergence tolerance on the change in objective. Defaults to `1e-3`.
+    - `tol`: Absolute tolerance on the change in total negative log likelihood, which triggers a gradient check.
+      Defaults to `1e-3`.
     - `step_size`: Initial trial step for IRLS backtracking. Rejected trials use
       successively halved steps. Defaults to 1.
+    - `gtol`: Per-observation gradient tolerance, with RMS column scaling for coefficients and bound projection
+      for NB2 dispersion. Both the likelihood and gradient checks must pass. Defaults to `1e-3`.
     """
 
     family: ExponentialFamily = Gaussian()
@@ -309,12 +342,15 @@ class GeneralizedLinearModel(AbstractLinearModel):
     max_iter: int = 1000
     tol: float = 1e-3
     step_size: float = 1.0
+    gtol: float = 1e-3
 
     _init: _AbstractInit = eqx.field(init=False)
 
     def __check_init__(self):
         if not math.isfinite(self.step_size) or self.step_size <= 0:
             raise ValueError("step_size must be finite and greater than 0")
+        if not math.isfinite(self.gtol) or self.gtol <= 0:
+            raise ValueError("gtol must be finite and greater than 0")
 
     def __post_init__(self):
         if isinstance(self.family, NegativeBinomial):
@@ -351,9 +387,9 @@ class GeneralizedLinearModel(AbstractLinearModel):
         offset = jnp.asarray(offset)
 
         # initialize eta and alpha
-        init, disp_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size)
+        init, disp_init = self._init(X, y, offset, self.max_iter, self.tol, self.step_size, self.gtol)
         beta, n_iter, converged, disp = irls(
-            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init
+            X, y, offset, init, self.family, self.solver, self.max_iter, self.tol, self.step_size, disp_init, self.gtol
         )
         n_iter = cast(Array, n_iter)
         eta = X @ beta + offset

@@ -18,7 +18,7 @@ Each response family defines its valid links. Constructing a family with an inco
                 - deriv
                 - inverse_deriv
 
-## Concrete links
+## Supported links
 
 ::: jaxqtl.distribution.IdentityLink
     options:

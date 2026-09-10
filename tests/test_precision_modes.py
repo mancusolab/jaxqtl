@@ -19,10 +19,72 @@ def _run_negative_binomial_x32_case() -> None:
     import jax
     import jax.numpy as jnp
 
-    from jaxqtl.distribution._expfam import NegativeBinomial
+    from jaxqtl.distribution._expfam import (
+        _nb2_centered_lgamma_ratio,
+        _nb2_log_alpha_derivatives,
+        NegativeBinomial,
+        Poisson,
+    )
     from jaxqtl.infer._glm import GeneralizedLinearModel
 
     assert not jax.config.read("jax_enable_x64")
+
+    small_alpha_y = jnp.asarray([0.0, 1.5, 10.0, 100.0])
+    small_alpha_mu = jnp.asarray([0.1, 1.0, 10.0, 100.0])
+    small_alpha_eta = jnp.log(small_alpha_mu)
+    empty_design = jnp.empty((small_alpha_y.size, 0))
+    nb_family = NegativeBinomial()
+
+    def small_alpha_objective(alpha):
+        return nb_family.negloglikelihood(empty_design, small_alpha_y, small_alpha_eta, alpha)
+
+    small_alpha = jnp.asarray(1e-6)
+    small_alpha_nll = small_alpha_objective(small_alpha)
+    small_alpha_gradient = jax.grad(small_alpha_objective)(small_alpha)
+    small_alpha_hessian = jax.grad(jax.grad(small_alpha_objective))(small_alpha)
+    poisson_nll = Poisson().negloglikelihood(empty_design, small_alpha_y, small_alpha_eta, 1.0)
+
+    assert np.all(np.isfinite(np.asarray([small_alpha_nll, small_alpha_gradient, small_alpha_hessian])))
+    np.testing.assert_allclose(np.asarray(small_alpha_nll), np.asarray(poisson_nll), rtol=0.0, atol=1e-3)
+
+    integer_y_numpy = np.arange(11, dtype=np.float64)
+    integer_y = jnp.asarray(integer_y_numpy)
+    for alpha in (0.0008, 0.000999, 0.001, 0.001001, 0.0012, 0.002, 0.1, 0.125):
+        expected = np.asarray(
+            [np.sum(np.log1p(alpha * np.arange(int(value), dtype=np.float64))) for value in integer_y_numpy]
+        )
+        actual = _nb2_centered_lgamma_ratio(integer_y, jnp.asarray(alpha))
+        np.testing.assert_allclose(np.asarray(actual), expected, rtol=2e-6, atol=5e-6)
+
+    derivative_y_numpy = np.asarray([0.0, 1.0, 2.0, 5.0, 10.0])
+    derivative_mu_numpy = np.asarray([0.2, 1.0, 3.0, 10.0, 50.0])
+    derivative_alpha = 0.001
+    gamma_score = []
+    gamma_hessian = []
+    for value in derivative_y_numpy.astype(int):
+        z = derivative_alpha * np.arange(value) / (1.0 + derivative_alpha * np.arange(value))
+        gamma_score.append(np.sum(z))
+        gamma_hessian.append(np.sum(z * (1.0 - z)))
+    x = derivative_alpha * derivative_mu_numpy
+    z = x / (1.0 + x)
+    log1p_x = np.log1p(x)
+    mean_score = (log1p_x - z) / derivative_alpha - derivative_y_numpy * z
+    mean_hessian = (
+        -log1p_x / derivative_alpha
+        + 2.0 * z / derivative_alpha
+        - (1.0 / derivative_alpha + derivative_y_numpy) * z * (1.0 - z)
+    )
+    expected_score = -np.sum(np.asarray(gamma_score) + mean_score)
+    expected_hessian = -np.sum(np.asarray(gamma_hessian) + mean_hessian)
+    actual_score, actual_centered_hessian, _, _ = _nb2_log_alpha_derivatives(
+        jnp.asarray(derivative_y_numpy),
+        jnp.log(jnp.asarray(derivative_mu_numpy)),
+        jnp.asarray(derivative_alpha),
+    )
+    np.testing.assert_allclose(np.asarray(actual_score), expected_score, rtol=1e-5, atol=1e-6)
+    np.testing.assert_allclose(
+        np.asarray(actual_centered_hessian), expected_hessian - expected_score, rtol=2e-4, atol=1e-6
+    )
 
     rng = np.random.default_rng(18)
     n = 160
@@ -134,7 +196,7 @@ def _run_negative_binomial_x32_case() -> None:
     # crossed, so convergence is required above without equating iteration counts.
 
 
-def test_negative_binomial_fit_with_offset_in_x32_process() -> None:
+def test_negative_binomial_numerics_in_x32_process() -> None:
     repo_root = Path(__file__).resolve().parents[1]
     env = os.environ.copy()
     env["JAX_ENABLE_X64"] = "0"

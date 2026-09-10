@@ -4,6 +4,7 @@ from contextlib import redirect_stdout
 from io import StringIO
 from pathlib import Path
 from types import SimpleNamespace
+from typing import cast
 
 import genoio
 import polars as pl
@@ -14,7 +15,8 @@ from jax import numpy as jnp
 import jaxqtl.map.cis as cis_map
 
 from jaxqtl import cli
-from jaxqtl.hypothesis import TestResult as AssocTestResult
+from jaxqtl.hypothesis import AbstractAggregateTest, ACAT, BetaPermutation, ScoreTest, TestResult as AssocTestResult
+from jaxqtl.infer import LinearModel
 from jaxqtl.map.data import CisData
 
 
@@ -109,6 +111,7 @@ def _test_result(pvalues: list[float]) -> AssocTestResult:
         num_iters=jnp.array(1),
         converged=jnp.array(True),
         disp=jnp.array(0.4),
+        negloglikelihood=jnp.array(12.5),
     )
 
 
@@ -155,6 +158,7 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         nperm=1000,
         max_iter=1000,
         tol=1e-3,
+        gtol=1e-3,
         step_size=1.0,
         seed=0,
         solver="cholesky",
@@ -170,6 +174,15 @@ def test_common_setup_rejects_robust_score_test() -> None:
 
     with pytest.raises(ValueError, match="--robust-se is only compatible with --test wald"):
         cli._common_setup(args, _LoggerStub())
+
+
+def test_common_setup_forwards_gradient_tolerance() -> None:
+    args = _common_setup_args("cis")
+    args.gtol = 2e-5
+
+    _, _, model, _, _ = cli._common_setup(args, _LoggerStub())
+
+    assert model.gtol == args.gtol
 
 
 def test_bfile_constructs_genoio_dataset(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -454,6 +467,8 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
             "--test",
             "score",
             "--set-offset-from-libsize",
+            "--gtol",
+            "1e-4",
             "--normalize-covar",
             "--platform",
             "cpu",
@@ -478,13 +493,14 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
         "beta",
         "se",
         "pvalue",
+        "negloglikelihood",
         "model_converged",
     ]
 
 
 def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> None:
     class FakeData:
-        def iter_cis(self, window):
+        def iter_cis(self, window, *, host_genotypes=False):
             for idx in range(3):
                 yield CisData(
                     jnp.ones((2, 1)),
@@ -508,11 +524,9 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                     200,
                 )
 
-    class FakeTest:
-        model = SimpleNamespace(family=object())
-
-        def __call__(self, X, G, y, offset):
-            return AssocTestResult(
+    def observed(execution, X, G, y, offset):
+        return (
+            AssocTestResult(
                 beta=jnp.array([0.1]),
                 se=jnp.array([0.2]),
                 p=jnp.array([0.3]),
@@ -520,14 +534,18 @@ def test_map_cis_batches_streamed_frames(monkeypatch: pytest.MonkeyPatch) -> Non
                 num_iters=jnp.array([1]),
                 converged=jnp.array([True]),
                 disp=jnp.array(0.0),
-            )
+                negloglikelihood=jnp.array(12.5),
+            ),
+            None,
+        )
 
     # Lower the private flush threshold so the test observes batching without a large fixture.
     monkeypatch.setattr(cis_map, "_MAP_CIS_BATCH_ROWS", 2)
-    monkeypatch.setattr(cis_map.eqx, "filter_jit", lambda fn: fn)
+    monkeypatch.setattr(cis_map.AssociationScan, "observed", observed)
 
     map_cis = getattr(cis_map, "map_cis")
-    chunks = list(map_cis(FakeData(), FakeTest(), None, mode="nominal", verbose=False, log=_LoggerStub()))
+    test = ScoreTest(LinearModel())
+    chunks = list(map_cis(FakeData(), test, None, mode="nominal", verbose=False, log=_LoggerStub()))
 
     assert [chunk.height for chunk in chunks] == [2, 1]
     assert chunks[0]["phenotype_id"].to_list() == ["gene0", "gene1"]
@@ -538,7 +556,7 @@ def test_map_cis_forwards_tss_centered_window_mode() -> None:
     class FakeData:
         requested_window = None
 
-        def iter_cis(self, window, *, tss_centered=False):
+        def iter_cis(self, window, *, tss_centered=False, host_genotypes=False):
             self.requested_window = (window, tss_centered)
             return iter(())
 
@@ -563,7 +581,7 @@ def test_map_cis_forwards_tss_centered_window_mode() -> None:
 
 
 def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None:
-    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(()))
     test = SimpleNamespace(model=SimpleNamespace(family=object()))
 
     map_cis = getattr(cis_map, "map_cis")
@@ -584,14 +602,15 @@ def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None
         "beta",
         "se",
         "pvalue",
+        "negloglikelihood",
         "model_converged",
     ]
 
 
 def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
-    data = SimpleNamespace(iter_cis=lambda window: iter(()))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(()))
     test = SimpleNamespace(model=SimpleNamespace(family=object()))
-    gene_test = SimpleNamespace(name="acat")
+    gene_test = ACAT()
 
     map_cis = getattr(cis_map, "map_cis")
     chunks = list(map_cis(data, test, gene_test, mode="cis", verbose=False, log=_LoggerStub()))
@@ -614,6 +633,7 @@ def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
         "pvalue",
         "pvalue_adj",
         "adj_method",
+        "negloglikelihood",
         "model_converged",
         "result_valid",
         "failure_reason",
@@ -630,7 +650,8 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
         _cis_data(),
         _test_result([float("nan"), float("inf")]),
         (jnp.array(float("nan")), None),
-        cis_map.rdm.key(0),
+        None,
+        gene_test=ACAT(),
     )
 
     assert result == {
@@ -650,10 +671,23 @@ def test_process_cis_result_reports_no_finite_pvalues_as_nulls(monkeypatch: pyte
         "pvalue_adj": None,
         "adj_method": "ACAT",
         "nb_alpha": None,
+        "negloglikelihood": None,
         "model_converged": None,
         "result_valid": False,
         "failure_reason": "no_finite_pvalues",
     }
+
+
+def test_process_cis_result_rejects_unsupported_aggregation() -> None:
+    aggregation = cast(AbstractAggregateTest, SimpleNamespace())
+    with pytest.raises(TypeError, match="unsupported aggregation for cis output"):
+        cis_map._process_cis_result(
+            _cis_data(),
+            _test_result([float("nan"), float("nan")]),
+            (jnp.array(float("nan")), None),
+            None,
+            gene_test=aggregation,
+        )
 
 
 def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
@@ -661,7 +695,8 @@ def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
         _cis_data(),
         _test_result([float("nan"), float("nan")]),
         (jnp.array([float("nan"), float("nan")]), (object(), object(), object())),
-        cis_map.rdm.key(0),
+        None,
+        gene_test=BetaPermutation(),
     )
 
     assert result["adj_method"] == "BETA"
@@ -671,23 +706,33 @@ def test_process_cis_result_keeps_beta_schema_for_no_finite_pvalues() -> None:
         assert column in result
         assert result[column] is None
 
-    frame = pl.DataFrame([result], schema=cis_map._empty_cis_columns(SimpleNamespace(name="beta")))
+    frame = pl.DataFrame([result], schema=cis_map._empty_cis_columns(BetaPermutation()))
     assert frame.schema["shape1"] == pl.Float64
     assert frame.schema["perm_converged"] == pl.Boolean
 
 
-def test_process_cis_result_selects_minimum_finite_pvalue() -> None:
+def test_process_cis_result_uses_selected_lead() -> None:
     result = cis_map._process_cis_result(
         _cis_data(),
         _test_result([float("nan"), 0.02]),
         (jnp.array(0.03), None),
-        cis_map.rdm.key(0),
+        1,
+        gene_test=ACAT(),
     )
 
     assert result["snp"] == "gene1_rs2"
     assert result["pvalue"] == pytest.approx(0.02)
+    assert result["negloglikelihood"] == pytest.approx(12.5)
     assert result["result_valid"] is True
     assert result["failure_reason"] is None
+
+
+def test_process_nominal_result_records_each_fitted_objective() -> None:
+    test_result = _test_result([0.01, 0.02])._replace(negloglikelihood=jnp.array([10.0, 11.0]))
+
+    result = cis_map._process_nominal_result(_cis_data(), test_result)
+
+    assert result["negloglikelihood"].to_list() == [10.0, 11.0]
 
 
 @pytest.mark.parametrize("invalid_first", [True, False])
@@ -698,13 +743,13 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     if not invalid_first:
         genes.reverse()
 
-    data = SimpleNamespace(iter_cis=lambda window: iter(genes))
+    data = SimpleNamespace(iter_cis=lambda window, **kwargs: iter(genes))
     snp_test = SimpleNamespace(model=SimpleNamespace(family=object()))
-    gene_test = SimpleNamespace(name="acat")
+    gene_test = ACAT()
     invalid = (_test_result([float("nan"), float("nan")]), (jnp.array(float("nan")), None))
     valid = (_test_result([0.01, 0.02]), (jnp.array(0.03), None))
-    results = iter([invalid, valid] if invalid_first else [valid, invalid])
-    monkeypatch.setattr(cis_map, "map_cis_single", lambda *args, **kwargs: next(results))
+    results = iter([(*invalid, None), (*valid, 0)] if invalid_first else [(*valid, 0), (*invalid, None)])
+    monkeypatch.setattr(cis_map, "_run_cis_scan", lambda *args, **kwargs: next(results))
     log = _LoggerStub()
 
     map_cis = getattr(cis_map, "map_cis")
@@ -718,6 +763,7 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     assert output.schema["snp"] == pl.Utf8
     assert output.schema["pos"] == pl.Int64
     assert output.schema["pvalue"] == pl.Float64
+    assert output.schema["negloglikelihood"] == pl.Float64
     assert invalid_row["snp"].item() is None
     assert invalid_row["pos"].item() is None
     assert invalid_row["pvalue"].item() is None
@@ -731,7 +777,7 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
     args = SimpleNamespace(window=500_000, tss_centered=False, verbose=False, seed=0, out=str(tmp_path / "jaxqtl"))
     test = SimpleNamespace(name="score")
-    perm_test = SimpleNamespace(name="acat")
+    perm_test = ACAT()
     dat = SimpleNamespace(num_genes=2)
 
     monkeypatch.setattr(cli, "_common_setup", lambda args, log: (dat, None, None, test, perm_test))
