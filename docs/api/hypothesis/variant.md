@@ -92,10 +92,11 @@ methods must support JAX transformations; file loading, block packing, and outpu
 
 ## Saddlepoint approximation
 
-SPA starts from the score test's null fit. Choose a CGF matching the model family. The implementation attempts
-SPA above the normal-score cutoff and within its score-support checks; otherwise it uses a normal tail.
-An unsuccessful SPA root solve or invalid correction also returns the normal approximation. The returned
-`converged` field describes model fitting, not whether SPA was applied successfully.
+SPA starts from the score test's null fit. Choose a CGF matching the model family. It uses bisection with
+finite, sign-changing brackets constructed inside the CGF domain. The normal approximation is used when SPA
+is not attempted under the score cutoff and support checks. An attempted SPA calculation that does not
+converge or yields an invalid correction returns NaN; ACAT propagates NaN inputs. The returned `converged`
+field describes model fitting, not whether SPA was applied successfully.
 
 ::: jaxqtl.hypothesis.SpaTest
     options:

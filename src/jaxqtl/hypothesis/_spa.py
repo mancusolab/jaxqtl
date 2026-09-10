@@ -335,14 +335,17 @@ def saddlepoint_pvalue(
     **Returns:**
 
     A scalar p-value (or log p-value) for the observed score statistic.
+    Returns NaN when an attempted SPA calculation fails to converge or is invalid.
     """
     is_discrete = isinstance(cgf, PoissonCGF | NegativeBinomialCGF)
 
     g_resid = jnp.asarray(g_resid, dtype=float)
     score = jnp.asarray(score, dtype=float)
 
-    solver = optx.Newton(rtol=1e-8, atol=1e-8)
-    t_bounds = cgf.get_t_bounds(g_resid, state)
+    tolerance = max(1e-8, 8 * float(jnp.finfo(g_resid.dtype).eps))
+    # Bisection supplies its scalar norm as a ClassVar, not an init argument.
+    solver = optx.Bisection(rtol=tolerance, atol=tolerance, flip=False)  # ty: ignore[missing-argument]
+    t_bounds = cgf.get_t_bounds(g_resid * scale, state)
     score_bounds = cgf.get_score_bounds(g_resid, state)
 
     offset = g_resid.T @ state.pred_mean
@@ -355,7 +358,7 @@ def saddlepoint_pvalue(
     def _fn(t, args):
         (current_score,) = args
         _val, deriv = _closure(t)
-        return deriv - current_score
+        return (deriv - current_score) / jnp.maximum(1.0, jnp.abs(current_score))
 
     _, (_, score_var) = jax.jvp(_closure, (0.0,), (1.0,))
     zscore = score / jnp.sqrt(score_var)
@@ -366,11 +369,38 @@ def saddlepoint_pvalue(
     should_attempt_spa = (jnp.fabs(zscore) > cutoff) & is_valid
 
     def _spa(current_score):
-        lower, upper = t_bounds
+        # K' is increasing. Search from zero toward the target, expanding on
+        # unbounded domains and approaching finite domain limits from inside.
+        # Nonfinite evaluations tighten the search limit instead of becoming
+        # bisection endpoints. A bounded loop also handles unreachable targets.
+        direction = jnp.sign(current_score)
+        limit = jnp.where(direction > 0, t_bounds[1], -t_bounds[0])
+        distance = jnp.minimum(1.0, 0.5 * limit)
+        error = direction * _fn(direction * distance, (current_score,))
+
+        def searching(carry):
+            _, _, _, error, steps = carry
+            return (~jnp.isfinite(error) | (error < 0)) & (steps < 64)
+
+        def expand(carry):
+            inner, limit, distance, error, steps = carry
+            finite = jnp.isfinite(error)
+            inner = jnp.where(finite, distance, inner)
+            limit = jnp.where(finite, limit, distance)
+            distance = jnp.minimum(2 * distance, inner + 0.5 * (limit - inner))
+            error = direction * _fn(direction * distance, (current_score,))
+            return inner, limit, distance, error, steps + 1
+
+        _, _, distance, error, _ = lax.while_loop(
+            searching, expand, (jnp.zeros_like(distance), limit, distance, error, jnp.array(0))
+        )
+        bracket_valid = jnp.isfinite(error) & (error >= 0) & (distance > 0)
+        endpoint = lax.stop_gradient(direction * distance)
+        lower, upper = jnp.minimum(0.0, endpoint), jnp.maximum(0.0, endpoint)
         sol = optx.root_find(
             _fn,
             solver,
-            0.0,
+            0.5 * (lower + upper),
             args=(current_score,),
             options={"lower": lower, "upper": upper},
             has_aux=False,
@@ -385,21 +415,22 @@ def saddlepoint_pvalue(
         under_radical = 2 * (t_bar * current_score - K_val)
         w = jnp.sign(t_bar) * jnp.sqrt(under_radical)
 
-        scale_factor = -jnp.expm1(-t_bar) if is_discrete else t_bar
-        v = scale_factor * jnp.sqrt(K_pp)
-
-        ratio = v / w
-        r = w + jnp.log(ratio) / w
-        r = jnp.where(ratio <= 0, jnp.nan, r)
+        # Both v and w have the sign of t. Evaluate log(|v|/|w|)
+        # directly: exp(-t) overflows for valid, large negative roots.
+        abs_t = jnp.abs(t_bar)
+        log_factor = jnp.maximum(-t_bar, 0.0) + jax.nn.log1mexp(abs_t) if is_discrete else jnp.log(abs_t)
+        log_ratio = log_factor + 0.5 * jnp.log(K_pp) - jnp.log(jnp.abs(w))
+        r = w + log_ratio / w
 
         t_result_lower = stats.norm.logcdf(r)
         t_result_upper = stats.norm.logsf(r)
         t_result_symm = jnp.log(2.0) + jnp.where(r <= 0.0, t_result_lower, t_result_upper)
 
-        w_is_valid = ~jnp.isnan(w)
-        r_is_valid = ~jnp.isnan(r)
+        w_is_valid = jnp.isfinite(w)
+        r_is_valid = jnp.isfinite(r)
         solver_success = sol.result == optx.RESULTS.successful
-        is_successful = w_is_valid & r_is_valid & solver_success
+        # Bisection checks both bracket width and residual for convergence.
+        is_successful = bracket_valid & w_is_valid & r_is_valid & solver_success
 
         return t_result_lower, t_result_upper, t_result_symm, is_successful
 
@@ -417,7 +448,7 @@ def saddlepoint_pvalue(
             else:
                 spa_result = jnp.log(2.0) + jnp.min(log_tails)
 
-        return jnp.where(is_successful, spa_result, log_p_normal_two_sided)
+        return jnp.where(is_successful, spa_result, jnp.nan)
 
     def compute_normal_p_value(_):
         return log_p_normal_two_sided
