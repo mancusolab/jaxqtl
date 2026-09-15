@@ -1,9 +1,20 @@
+# pattern: Imperative Shell
+
 import gzip
 import re
 
 from os import PathLike
 
 import polars as pl
+
+
+def validate_sample_ids(df: pl.DataFrame, label: str) -> None:
+    """Require a non-null, unique IID for each row of a sample table."""
+    if "iid" not in df.columns:
+        raise ValueError(f"{label} must contain an iid column")
+    iids = df.get_column("iid")
+    if iids.null_count() or iids.is_duplicated().any():
+        raise ValueError(f"{label} must have non-null, unique sample IDs")
 
 
 def validate_user_columns(user_cols, observed_cols) -> list[str]:
@@ -121,6 +132,7 @@ def read_plink_style_tsvlike(
         separator="\t",
         columns=columns,
         null_values=["NA", "", "NULL", "NaN", "nan"],
+        schema_overrides={iid_col: pl.String},
     )
 
     # internally replace iid-like to `iid`

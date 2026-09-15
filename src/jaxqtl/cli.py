@@ -41,6 +41,7 @@ from .io import (
     read_plink_style_tsvlike,
     read_single_column_file,
 )
+from .io._utils import validate_sample_ids
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
 from .map.data import ReadyDataState
@@ -97,6 +98,57 @@ class _SplitAction(ap.Action):
                 raise ap.ArgumentError(self, f"invalid {self.cast.__name__!r} value: {it!r}")
 
         setattr(namespace, self.dest, final)
+
+
+def _add_expression_filters(filters, phenotypes):
+    """Share expression selection options between mapping and PCA commands."""
+    sample_group = filters.add_mutually_exclusive_group()
+    sample_group.add_argument(
+        "--keep",
+        help="Path to file of iids to analyze. All other iids are discarded during current analysis.",
+    )
+    sample_group.add_argument(
+        "--exclude",
+        help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
+    )
+
+    filters.add_argument(
+        "--min-indiv-expr-pct",
+        type=float,
+        default=None,
+        help=(
+            "Keep samples with a fraction of genes greater than this threshold showing "
+            "positive expression (fraction in [0, 1], e.g., '0.1')."
+        ),
+    )
+    filters.add_argument(
+        "--min-gene-expr-pct",
+        type=float,
+        default=0.0,
+        help="Keep genes expressed in a fraction of samples strictly greater than this threshold (in [0, 1]).",
+    )
+    filters.add_argument(
+        "--chr",
+        help="Restrict analysis to this exact chromosome label.",
+    )
+    gene_group = phenotypes.add_mutually_exclusive_group()
+    gene_group.add_argument(
+        "--gene-list",
+        help="Path to gene list (no header). All other genes will be discarded during analysis",
+    )
+    gene_group.add_argument(
+        "--genes",
+        nargs="+",
+        action=_SplitAction,
+        help="Gene name(s) to analyze (comma/space delimited). All other genes will be discarded during analysis",
+    )
+    gene_group.add_argument(
+        "--rm-genes",
+        nargs="+",
+        action=_SplitAction,
+        help="Gene name(s) to exclude (comma/space delimited). All other genes will be included during analysis",
+    )
+    gene_group.add_argument("--exclude-gene-list", help="Path to gene IDs to exclude (one per line, no header).")
 
 
 def _create_common_subp(subp, name, help):
@@ -208,62 +260,13 @@ def _create_common_subp(subp, name, help):
         ),
     )
 
-    # filtering arguments
-    sample_group = filters.add_mutually_exclusive_group()
-    sample_group.add_argument(
-        "--keep",
-        help="Path to file of iids to analyze. All other iids are discarded during current analysis.",
-    )
-    sample_group.add_argument(
-        "--exclude",
-        help="Path to file of iids to exclude from analysis. All other iids are kept during current analysis.",
-    )
-
-    filters.add_argument(
-        "--min-indiv-expr-pct",
-        type=float,
-        default=None,
-        help=(
-            "Exclude individuals that have fewer than specified percentage of genes with "
-            "non-zero expression (e.g., '0.1')"
-        ),
-    )
-    filters.add_argument(
-        "--min-gene-expr-pct",
-        type=float,
-        default=0.0,
-        help="Exclude genes expressed in fewer than specified percentage of individuals (e.g., '0.1')",
-    )
+    _add_expression_filters(filters, phenotypes)
     filters.add_argument(
         "--maf",
         type=float,
         default=None,
         help="Exclude variants with minor allele frequency below this threshold.",
     )
-    filters.add_argument(
-        "--chr",
-        help="Restrict genotype variants and phenotypes to this exact chromosome label.",
-    )
-    gene_group = phenotypes.add_mutually_exclusive_group()
-    gene_group.add_argument(
-        "--gene-list",
-        help="Path to gene list (no header). All other genes will be discarded during analysis",
-    )
-    gene_group.add_argument(
-        "--genes",
-        nargs="+",
-        action=_SplitAction,
-        help="Gene name(s) to analyze (comma/space delimited). All other genes will be discarded during analysis",
-    )
-    """
-    gene_group.add_argument(
-        "--rm-genes",
-        nargs="+",
-        action=_SplitAction,
-        help="Gene name(s) to exclude (comma/space delimited). All other genes will be included during analysis",
-    )
-    """
-    # common_p.add_argument("--condition", help="Include specified variant as a covariate during analysis")
 
     phenotypes.add_argument(
         "--window",
@@ -327,38 +330,113 @@ def _create_common_subp(subp, name, help):
     return common_p
 
 
-def _compute_expression_pcs(args, log):
-    log.info("Reading phenotype and filtering")
-    expr_data = ExpressionData.from_bedfile(args.pheno)
-    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
+def _expression_selections(args):
+    """Read sample and gene selections shared by mapping and PCA."""
+    keep = read_single_column_file(args.keep) if args.keep is not None else None
+    exclude = read_single_column_file(args.exclude) if args.exclude is not None else None
+    genes = read_single_column_file(args.gene_list) if args.gene_list is not None else args.genes
+    rm_genes = read_single_column_file(args.exclude_gene_list) if args.exclude_gene_list is not None else args.rm_genes
+    return keep, exclude, genes, rm_genes
 
-    # todo: this needs a ton of work; we should allow for include/exclusion of genes/phenotypes and samples/individuals
-    # wondering if we should support this functionality at all, as it could induce a good bit of downstream maintenance
+
+def _prepare_pca_inputs(args, log) -> tuple[ExpressionData, pl.DataFrame | None]:
+    """Load and filter the PCA cohort, preserving library totals from before gene selection."""
     if args.num_pcs < 1:
-        raise ValueError("Number of PCS must be at least 1")
+        raise ValueError("Number of PCs must be at least 1")
+    if (args.libsize or args.libsize_name_from_covar) and args.transform != "lognorm":
+        raise ValueError("Library-size options require --transform lognorm")
+    if args.libsize_name_from_covar and not args.covar:
+        raise ValueError("--libsize-name-from-covar requires --covar")
 
-    """
-    if args.offset:
-        offset = read_offset_tsvlike(args.offset)
-    else:
-        offset = None
-    """
+    log.info("Reading expression and selecting samples")
+    keep, exclude, genes, rm_genes = _expression_selections(args)
+    expr_data = ExpressionData.from_bedfile(args.pheno, keep_individuals=keep, drop_individuals=exclude)
+    validate_sample_ids(expr_data.pheno, "Expression")
+    log.info(f"Loaded {expr_data.pheno.height} samples and {expr_data.pheno.width - 1} genes after sample selection")
+    covar = None
+    if args.covar:
+        covar = read_plink_style_tsvlike(args.covar)
+        validate_sample_ids(covar, "Covariates")
+        collisions = [name for name in covar.columns if name.startswith("ExprPC")]
+        if collisions:
+            raise ValueError(f"Covariate columns conflict with PCA output: {collisions}")
+        pheno = expr_data.pheno.join(covar.select("iid"), on="iid", how="semi", maintain_order="left")
+        log.info(
+            f"Cohort alignment retained {pheno.height} samples; excluded "
+            f"{expr_data.pheno.height - pheno.height} expression samples and "
+            f"{covar.height - pheno.height} covariate samples"
+        )
+        expr_data = ExpressionData(pheno, expr_data.pheno_meta, expr_data.libsize)
+    if expr_data.pheno.height < 2:
+        raise ValueError("PCA requires at least two shared samples")
+    expr_data.validate_values(require_nonnegative=args.transform in {"log1p", "lognorm"})
+
+    if args.min_indiv_expr_pct is not None:
+        before = expr_data.pheno.height
+        expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
+        log.info(f"Sample expression filter removed {before - expr_data.pheno.height} samples")
+    if expr_data.pheno.height < 2:
+        raise ValueError("PCA requires at least two samples after filtering")
+
+    # Gene selection follows sample QC, while the stored library sizes retain all input genes.
+    before = expr_data.pheno.width - 1
+    expr_data = expr_data.filter_genes_by_ids(keep=genes, drop=rm_genes)
+    if args.chr is not None:
+        chromosomes = expr_data.pheno_meta.get_column("chrom").to_list()
+        if args.chr not in chromosomes:
+            raise ValueError(f"No selected genes have chromosome label {args.chr!r}")
+        expr_data = expr_data.filter_genes_by_chromosomes([args.chr])
+    if expr_data.pheno.width == 1:
+        raise ValueError("No genes remain after gene selection")
+    expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
+    log.info(f"Gene filters retained {expr_data.pheno.width - 1} of {before} genes")
+
+    libsize = expr_data.libsize
+    if args.libsize:
+        libsize = read_plink_style_tsvlike(args.libsize)
+        if set(libsize.columns) != {"iid", "libsize"}:
+            raise ValueError("External library sizes must have exactly iid and libsize columns")
+        log.info(f"Using library sizes from {args.libsize}")
+    elif args.libsize_name_from_covar and covar is not None:
+        if args.libsize_name_from_covar == "iid" or args.libsize_name_from_covar not in covar.columns:
+            raise ValueError(f"Library-size column {args.libsize_name_from_covar!r} is missing or invalid in --covar")
+        libsize = covar.select("iid", pl.col(args.libsize_name_from_covar).alias("libsize"))
+        log.info(f"Using library sizes from covariate {args.libsize_name_from_covar}")
+    elif args.transform == "lognorm":
+        log.info("Using library sizes computed across all input genes before gene filtering")
+
+    return ExpressionData(expr_data.pheno, expr_data.pheno_meta, libsize), covar
+
+
+def _compute_expression_pcs(args, log):
     import jax.random as rdm
 
+    expr_data, covar = _prepare_pca_inputs(args, log)
     key = rdm.key(args.seed)
-    log.info(f"Computing {args.num_pcs} gene expression principal components")
+    log.info(f"Computing {args.num_pcs} gene expression principal components for {expr_data.pheno.height} samples")
     df_pcs, explained_variance_ratio = expr_data.compute_pcs(args.num_pcs, key, args.transform)
     log.info(f"Finished computing {args.num_pcs} gene expression principal components")
     for i, ratio in enumerate(explained_variance_ratio, start=1):
         log.info(f"ExprPC{i} proportion of variance explained: {ratio:.9g}")
 
-    if args.covar:
-        log.info("Reading covariate data and appending principal components")
-        covar = read_plink_style_tsvlike(args.covar)
-        df_pcs = covar.join(df_pcs, on="iid", how="left")
+    if covar is not None:
+        log.info("Appending principal components to aligned covariates")
+        covariate_columns = [name for name in covar.columns if name != "iid"]
+        df_pcs = df_pcs.join(covar, on="iid", how="left", validate="1:1", maintain_order="left").select(
+            "iid", *covariate_columns, *df_pcs.columns[1:]
+        )
 
     log.info("Writing results.")
     df_pcs.write_csv(args.out, separator="\t")
+    variance_path = f"{args.out}.variance.tsv"
+    pl.DataFrame(
+        {
+            "component": [f"ExprPC{i}" for i in range(1, args.num_pcs + 1)],
+            "explained_variance_ratio": explained_variance_ratio,
+            "cumulative_explained_variance_ratio": explained_variance_ratio.cumsum(),
+        }
+    ).write_csv(variance_path, separator="\t")
+    log.info(f"Wrote explained variance to {variance_path}")
 
     return 0
 
@@ -615,31 +693,10 @@ def _common_setup(args, log):
         use_tdist = isinstance(family, Gaussian)
         perm_test = BetaPermutation(max_perm_direct=args.nperm, use_tdist=use_tdist)
 
-    if args.keep is not None:
-        log.info("Reading list of samples to keep for analyses.")
-        inds_to_keep = read_single_column_file(args.keep)
-        log.info(f"Found {len(inds_to_keep)} samples to keep.")
-    else:
-        inds_to_keep = None
-
-    if args.exclude is not None:
-        log.info("Reading list of samples to exclude from analyses.")
-        inds_to_exclude = read_single_column_file(args.exclude)
-        log.info(f"Found {len(inds_to_exclude)} samples to exclude.")
-    else:
-        inds_to_exclude = None
-
+    inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list = _expression_selections(args)
     log.info("Reading genotype, phenotype, and covariate data")
     geno_data = _load_genotype_data(args, log)
 
-    if args.gene_list is not None:
-        gene_keep_list = read_single_column_file(args.gene_list)
-    elif args.genes is not None:
-        gene_keep_list = args.genes
-    else:
-        gene_keep_list = None
-
-    gene_exclude_list = None
     expr_data = ExpressionData.from_bedfile(
         args.pheno, inds_to_keep, inds_to_exclude, gene_keep_list, gene_exclude_list
     )
@@ -756,19 +813,23 @@ def main(args):
         formatter_class=_HelpFormatter,
     )
     inputs = gepcs_p.add_argument_group("Inputs")
+    filters = gepcs_p.add_argument_group("Filters")
+    normalization = gepcs_p.add_argument_group("Normalization")
     pca_options = gepcs_p.add_argument_group("PCA options")
     runtime = gepcs_p.add_argument_group("Runtime and output")
 
-    inputs.add_argument("--pheno", help="Path to phenotypes", required=True)
+    inputs.add_argument("--pheno", help="Path to expression BED-like or Parquet data", required=True)
+    inputs.add_argument("--covar", help="Optional covariate table; intersect samples before PCA and append PCs.")
+    _add_expression_filters(filters, filters)
     pca_options.add_argument(
         "--num-pcs",
         type=int,
-        help="Number of principal components to compute",
+        required=True,
+        help="Number of PCs; at most min(retained samples - 1, variable genes).",
     )
-    inputs.add_argument("--covar", help="Path to covariate data", required=True)
-    pca_options.add_argument(
+    normalization.add_argument(
         "--transform",
-        choices=["tmm", "log1p", "lognorm"],
+        choices=["log1p", "lognorm"],
         default=None,
         help=(
             "Transformation before computing PCs: log1p applies log(1 + y); "
@@ -776,11 +837,14 @@ def main(args):
             "(recommended for raw counts)."
         ),
     )
-    pca_options.add_argument(
-        "--min-gene-expr-pct",
-        type=float,
-        default=0.0,
-        help="Keep genes with expression levels above specified value",
+    library = normalization.add_mutually_exclusive_group()
+    library.add_argument(
+        "--libsize",
+        help="Two-column iid/libsize TSV of raw positive library sizes; requires --transform lognorm.",
+    )
+    library.add_argument(
+        "--libsize-name-from-covar",
+        help="Column of raw positive library sizes in --covar; requires --transform lognorm.",
     )
     runtime.add_argument(
         "-p",

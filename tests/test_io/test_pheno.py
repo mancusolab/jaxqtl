@@ -21,6 +21,48 @@ def _write_bed(tmp_path: Path, body: str) -> Path:
     return path
 
 
+@pytest.mark.parametrize("chrom_header", ["chrom", "Chr", "#Chr"])
+@pytest.mark.parametrize("selection", [{"keep_individuals": ["s3", "s1"]}, {"drop_individuals": ["s2"]}])
+def test_sample_filters_preserve_file_order_and_full_library_sizes(tmp_path, chrom_header, selection):
+    path = _write_bed(
+        tmp_path,
+        f"{chrom_header}\tstart\tend\tgene\ts1\ts2\ts3\n1\t10\t11\tg1\t1\t2\t3\n2\t20\t21\tg2\t10\t20\t30\n",
+    )
+    data = ExpressionData.from_bedfile(path, keep_pheno=["g1"], **selection)
+    assert data.pheno.to_dict(as_series=False) == {"iid": ["s1", "s3"], "g1": [1, 3]}
+    assert data.libsize.to_dict(as_series=False) == {"iid": ["s1", "s3"], "libsize": [11, 33]}
+    assert data.pheno_meta.columns == ["chrom", "start", "end", "phenotype_id"]
+
+
+def test_loader_rejects_duplicate_gene_ids(tmp_path):
+    path = _write_bed(
+        tmp_path,
+        "chrom\tstart\tend\tgene\ts1\ts2\n1\t1\t2\tg1\t1\t2\n1\t2\t3\tg1\t2\t3\n",
+    )
+    with pytest.raises(ValueError, match="phenotype IDs"):
+        ExpressionData.from_bedfile(path)
+
+
+def test_loader_rejects_duplicate_sample_ids_in_bed_header(tmp_path):
+    path = _write_bed(tmp_path, "chrom\tstart\tend\tgene\ts1\ts1\n1\t1\t2\tg1\t1\t2\n")
+    with pytest.raises(ValueError, match="sample IDs"):
+        ExpressionData.from_bedfile(path)
+
+
+@pytest.mark.parametrize("selection", [{"keep": ["g3", "g1"]}, {"drop": ["g2"]}])
+def test_gene_id_filter_preserves_metadata_order_and_library_sizes(tmp_path, selection):
+    path = _write_bed(
+        tmp_path,
+        "chrom\tstart\tend\tgene\ts1\ts2\n1\t1\t2\tg1\t1\t2\n1\t2\t3\tg2\t3\t4\n2\t3\t4\tg3\t5\t6\n",
+    )
+    original = ExpressionData.from_bedfile(path)
+    filtered = original.filter_genes_by_ids(**selection)
+    assert filtered.pheno.columns == ["iid", "g1", "g3"]
+    assert filtered.pheno_meta["phenotype_id"].to_list() == ["g1", "g3"]
+    assert filtered.libsize.equals(original.libsize)
+    assert original.pheno.columns == ["iid", "g1", "g2", "g3"]
+
+
 def test_expression_data_filters_genes_by_chromosome_and_preserves_libsize() -> None:
     expression = ExpressionData(
         pheno=pl.DataFrame(

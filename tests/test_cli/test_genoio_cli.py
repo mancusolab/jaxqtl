@@ -152,6 +152,8 @@ def _common_setup_args(cmd: str) -> SimpleNamespace:
         min_gene_expr_pct=0.0,
         gene_list="tutorial/input/genelist_5",
         genes=None,
+        exclude_gene_list=None,
+        rm_genes=None,
         tss_centered=False,
         window=500_000,
         acat=False,
@@ -386,6 +388,16 @@ def test_compute_pcs_logs_explained_variance(tmp_path) -> None:
         transform="lognorm",
         covar=None,
         out=str(tmp_path / "pcs.tsv"),
+        keep=None,
+        exclude=None,
+        genes=None,
+        gene_list=None,
+        exclude_gene_list=None,
+        rm_genes=None,
+        chr=None,
+        min_indiv_expr_pct=None,
+        libsize=None,
+        libsize_name_from_covar=None,
     )
     log = _LoggerStub()
 
@@ -410,7 +422,7 @@ def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
 
     assert exc_info.value.code == 0
     help_text = stdout.getvalue()
-    headings = ["Inputs:", "PCA options:", "Runtime and output:"]
+    headings = ["Inputs:", "Filters:", "Normalization:", "PCA options:", "Runtime and output:"]
     heading_positions = [help_text.index(heading) for heading in headings]
     assert heading_positions == sorted(heading_positions)
     sections = {
@@ -419,7 +431,7 @@ def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
     }
     assert "--pheno" in sections["Inputs:"]
     assert "--num-pcs" in sections["PCA options:"]
-    assert "lognorm" in sections["PCA options:"]
+    assert "lognorm" in sections["Normalization:"]
     assert "--platform" in sections["Runtime and output:"]
     assert "(default: cpu)" in help_text
 

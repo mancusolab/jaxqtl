@@ -86,3 +86,66 @@ def test_lognorm_rejects_missing_library_size():
     )
     with pytest.raises(ValueError, match="library sizes"):
         data.compute_pcs(1, jr.key(1), transform="lognorm")
+
+
+def _small_data(values, iids=None):
+    values = jnp.asarray(values)
+    pheno = pl.DataFrame(
+        {
+            "iid": iids if iids is not None else [f"s{i}" for i in range(values.shape[0])],
+            **{f"g{i}": col.tolist() for i, col in enumerate(values.T)},
+        }
+    )
+    return ExpressionData(pheno, pl.DataFrame(), pl.DataFrame())
+
+
+def test_compute_pcs_removes_constant_genes_before_standardizing():
+    data = _small_data([[1.0, 2.0, 7.0], [4.0, 1.0, 7.0], [2.0, 5.0, 7.0], [8.0, 3.0, 7.0]])
+    pcs, ratios = data.compute_pcs(2, jr.key(1))
+    assert jnp.all(jnp.isfinite(pcs.select(pl.exclude("iid")).to_jax()))
+    assert ratios.sum() == pytest.approx(1.0, abs=1e-5)
+
+
+def test_compute_pcs_filters_genes_constant_after_library_normalization():
+    data = _small_data([[2.0, 2.0], [4.0, 3.0], [8.0, 4.0], [16.0, 3.0]])
+    data.libsize = pl.DataFrame({"iid": ["s0", "s1", "s2", "s3"], "libsize": [1.0, 2.0, 4.0, 8.0]})
+    with pytest.raises(ValueError, match="variable genes"):
+        data.compute_pcs(2, jr.key(1), transform="lognorm")
+
+
+@pytest.mark.parametrize("n", [3, 7, 30])
+def test_log_transform_of_constant_expression_is_rejected(n):
+    with pytest.raises(ValueError, match="variable genes"):
+        _small_data([[7.0]] * n).compute_pcs(1, jr.key(1), transform="log1p")
+
+
+@pytest.mark.parametrize(
+    "values,k",
+    [
+        ([[1.0, 2.0]], 1),
+        ([[1.0, 2.0], [2.0, 3.0]], 2),
+        ([[1.0, 2.0], [2.0, 2.0], [3.0, 2.0]], 2),
+        ([[1.0, 2.0], [1.0, 2.0], [1.0, 2.0]], 1),
+    ],
+)
+def test_compute_pcs_rejects_unusable_dimensions(values, k):
+    with pytest.raises(ValueError, match="samples|variable genes|num_pcs"):
+        _small_data(values).compute_pcs(k, jr.key(1))
+
+
+@pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
+def test_compute_pcs_rejects_nonfinite_expression(value):
+    with pytest.raises(ValueError, match="finite"):
+        _small_data([[1.0], [value], [3.0]]).compute_pcs(1, jr.key(1))
+
+
+@pytest.mark.parametrize("transform", ["log1p", "lognorm"])
+def test_compute_pcs_rejects_negative_counts_for_log_transforms(transform):
+    with pytest.raises(ValueError, match="nonnegative"):
+        _small_data([[1.0], [-0.5], [3.0]]).compute_pcs(1, jr.key(1), transform=transform)
+
+
+@pytest.mark.parametrize("iids", [["a", "a", "b"], ["a", None, "b"]])
+def test_compute_pcs_rejects_invalid_sample_ids(iids):
+    with pytest.raises(ValueError, match="sample IDs"):
+        _small_data([[1.0], [2.0], [3.0]], iids).compute_pcs(1, jr.key(1))

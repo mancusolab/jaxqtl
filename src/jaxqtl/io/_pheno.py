@@ -1,5 +1,8 @@
 # pattern: Imperative Shell
 
+import csv
+import gzip
+
 from collections.abc import Collection
 from dataclasses import dataclass
 from functools import partial
@@ -16,7 +19,7 @@ from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
 from ._normalization import edger_cpm, inverse_normal_transform
-from ._utils import validate_user_columns
+from ._utils import validate_sample_ids, validate_user_columns
 
 
 @dataclass
@@ -58,6 +61,34 @@ class ExpressionData:
         phenotypes. The `iid` column is excluded.
         """
         return self.pheno.select(pl.all().exclude("iid")).to_jax().astype(float)  # ug i dont like this casting
+
+    def validate_values(self, *, require_nonnegative: bool = False) -> None:
+        """Reject nonnumeric, missing, or nonfinite expression; optionally require counts >= 0."""
+        values = self.pheno.select(pl.exclude("iid"))
+        if not all(dtype.is_numeric() for dtype in values.dtypes):
+            raise ValueError("Expression values must be numeric and finite")
+        if not values.select(pl.all().is_finite().fill_null(False).all()).to_numpy().all():
+            raise ValueError("Expression values must be finite")
+        if require_nonnegative and not values.select((pl.all() >= 0).all()).to_numpy().all():
+            raise ValueError("Log transforms require nonnegative expression values")
+
+    def filter_genes_by_ids(self, *, keep: list[str] | None = None, drop: list[str] | None = None) -> "ExpressionData":
+        """Select gene IDs in metadata order, preserving samples and original library sizes.
+
+        `keep` and `drop` are mutually exclusive. Unknown IDs raise `ValueError`.
+        With neither selection supplied, return this expression container unchanged.
+        """
+        if keep is not None and drop is not None:
+            raise ValueError("Cannot specify both `keep` and `drop` gene IDs")
+        if keep is None and drop is None:
+            return self
+
+        observed = self.pheno_meta.get_column("phenotype_id").to_list()
+        selected = validate_user_columns(keep if keep is not None else drop, observed)
+        matches = pl.col("phenotype_id").is_in(selected)
+        meta = self.pheno_meta.filter(matches if keep is not None else ~matches)
+        pheno = self.pheno.select(["iid", *meta.get_column("phenotype_id").to_list()])
+        return ExpressionData(pheno, meta, self.libsize)
 
     def filter_genes_by_chromosomes(self, chromosomes: Collection[str]) -> "ExpressionData":
         r"""Keep phenotypes whose chromosome label is in `chromosomes`.
@@ -162,15 +193,16 @@ class ExpressionData:
     ) -> tuple[pl.DataFrame, np.ndarray]:
         r"""Compute probabilistic-PCA scores from the expression matrix.
 
-        Phenotypes are optionally transformed, then standardized across samples
-        before fitting. The randomized initialization is determined by `rng_key`.
+        Phenotypes are optionally transformed, constant genes are removed, and
+        remaining genes are standardized across samples before fitting.
+        The randomized initialization is determined by `rng_key`.
         A final projected SVD orders the unit-norm sample directions by decreasing
         explained variance within the fitted subspace.
 
         **Arguments:**
 
         - `num_pcs`: Number of expression principal components to return. It must
-          not exceed the smaller of the sample and phenotype counts.
+          not exceed `min(n_samples - 1, n_variable_genes)` after transformation.
         - `rng_key`: JAX PRNG key controlling the probabilistic-PCA initialization.
         - `transform`: Optional expression transform. `"log1p"` applies
           `log(1 + y)`. `"lognorm"` applies `log(1 + y / (l / median(l)))`,
@@ -191,38 +223,60 @@ class ExpressionData:
 
         **Raises:**
 
-        - `ValueError`: If `num_pcs` is less than 1, or `"lognorm"` library
-          sizes are missing, nonfinite, or nonpositive.
+        - `ValueError`: If there are fewer than two samples, no variable genes,
+          invalid sample IDs, nonnumeric or nonfinite expression, an unsupported
+          transform, negative expression for a log transform, or an invalid
+          component count. Also raised if `"lognorm"` library sizes are missing,
+          nonnumeric, nonfinite, or nonpositive.
         - `NotImplementedError`: If `transform="tmm"`.
-
-        **Failure Modes:**
-
-        Component counts larger than the smaller matrix dimension are not validated
-        before fitting and can fail in the underlying JAX linear solve.
         """
         if num_pcs < 1:
             raise ValueError("`num_pcs` must be greater than 0")
 
-        num = pl.all().exclude("iid")
-        pheno = self.pheno.select(num).to_jax()
+        validate_sample_ids(self.pheno, "Expression")
+        values = self.pheno.select(pl.exclude("iid"))
+        if self.pheno.height < 2:
+            raise ValueError("PCA requires at least two samples")
+        if not values.width:
+            raise ValueError("PCA requires variable genes after filtering")
+        self.validate_values(require_nonnegative=transform in {"log1p", "lognorm"})
+        pheno = values.to_jax(dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32)
 
         if transform == "tmm":
             raise NotImplementedError("'tmm' transform not implemented yet.")
         elif transform == "log1p":
             pheno = jnp.log1p(pheno)  # prevent log(0)
         elif transform == "lognorm":
+            validate_sample_ids(self.libsize, "Library sizes")
+            if "libsize" not in self.libsize.columns:
+                raise ValueError("'lognorm' requires numeric library sizes")
             libsize = (
                 self.pheno.select("iid")
                 .join(self.libsize, on="iid", how="left", validate="1:1", maintain_order="left")
                 .get_column("libsize")
+                .cast(pl.Float64, strict=False)
                 .to_numpy()
             )
             if not np.all(np.isfinite(libsize) & (libsize > 0)):
                 raise ValueError("'lognorm' requires finite, positive library sizes for every sample")
             size_factors = jnp.asarray(libsize / np.median(libsize))
             pheno = jnp.log1p(pheno / size_factors[:, None])
+        elif transform is not None:
+            raise ValueError(f"Unknown PCA transform: {transform!r}")
 
-        pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
+        if not bool(jnp.all(jnp.isfinite(pheno))):
+            raise ValueError("PCA transformed expression values must be finite")
+        std = pheno.std(axis=0)
+        variable = np.asarray(pheno.max(axis=0) != pheno.min(axis=0))
+        pheno = pheno[:, variable]
+        if not pheno.shape[1]:
+            raise ValueError("PCA requires variable genes after transformation")
+        max_pcs = min(pheno.shape[0] - 1, pheno.shape[1])
+        if num_pcs > max_pcs:
+            raise ValueError(f"`num_pcs` must not exceed {max_pcs} for the retained samples and variable genes")
+        pheno = (pheno - pheno.mean(axis=0)) / std[variable]  # standardize genes
+        if not bool(jnp.all(jnp.isfinite(pheno))):
+            raise ValueError("PCA standardized expression values must be finite; check the expression scale")
         U, singular_values = _prob_pca(rng_key, pheno, num_pcs)
         explained_variance_ratio = singular_values**2 / jnp.sum(pheno**2)
         data = {"iid": self.pheno.get_column("iid").to_numpy()}
@@ -267,9 +321,9 @@ class ExpressionData:
           axis, requested names are missing, required metadata columns are invalid,
           or the file suffix is unsupported.
         """
-        if keep_individuals and drop_individuals:
+        if keep_individuals is not None and drop_individuals is not None:
             raise ValueError("Cannot specify both `keep_individuals` and `drop_individuals`")
-        if keep_pheno and drop_pheno:
+        if keep_pheno is not None and drop_pheno is not None:
             raise ValueError("Cannot specify both `keep_pheno` and `drop_pheno`")
         if not isinstance(path_or_filename, str | PathLike):
             raise ValueError(f"`path_or_filename` must be `str` or `PathLike`, not {type(path_or_filename)}")
@@ -277,6 +331,11 @@ class ExpressionData:
         # load using a lazy frame to speed things up in Rust-based parsing before moving into Python space
         name = str(path_or_filename)
         if name.endswith((".bed", ".bed.gz")):
+            open_file = gzip.open if name.endswith(".gz") else open
+            with open_file(name, "rt") as stream:
+                sample_ids = next(csv.reader(stream, delimiter="\t"), [])[4:]
+            if any(not iid for iid in sample_ids) or len(set(sample_ids)) != len(sample_ids):
+                raise ValueError("Expression must have nonempty, unique sample IDs")
             phenotype_lf = pl.scan_csv(name, separator="\t", has_header=True)
         elif name.endswith((".parquet", ".parquet.gz")):
             phenotype_lf = pl.scan_parquet(name)
@@ -304,26 +363,22 @@ class ExpressionData:
                 raise ValueError(f"Column {i} expected to be one of `{opts_str}`, got `{name!r}`")
             resolved.append(name)
 
+        samples = colnames[4:]
         if keep_individuals is not None:
-            keep_individuals = validate_user_columns(keep_individuals, colnames)
-            # make sure for some weird reason individual ids passed in don't also have the 4 required column names
-            keep_individuals = list(set(keep_individuals) - set(resolved))
-
-            # restrict to the 4 required + individuals specified
-            columns = resolved + keep_individuals
+            selected = set(validate_user_columns(keep_individuals, samples))
+            samples = [sample for sample in samples if sample in selected]
         elif drop_individuals is not None:
-            drop_individuals = validate_user_columns(drop_individuals, colnames)
-            # restrict to the required columns - individuals specified; ensure that the 4 required columns stay if for
-            # some weird reason the user specified them as individuals to drop
-            columns = list(set(colnames) - (set(drop_individuals) - set(resolved)))
-        else:
-            columns = colnames
+            excluded = set(validate_user_columns(drop_individuals, samples))
+            samples = [sample for sample in samples if sample not in excluded]
+        if not samples:
+            raise ValueError("No samples remain after sample selection")
+        columns = resolved + samples
 
         phenotype_lf = phenotype_lf.select(columns)
 
-        # compute library size from entire counts, before filting out genes
+        # Compute library sizes before filtering genes.
         libsize = (
-            phenotype_lf.select(columns[4:])
+            phenotype_lf.select(samples)
             .sum()
             .collect()
             .transpose(include_header=True, header_name="iid", column_names=["libsize"])
@@ -332,46 +387,27 @@ class ExpressionData:
         # recast chrom col to str
         meta_lf = phenotype_lf.select(resolved).with_columns(pl.col(resolved[0]).cast(pl.Utf8))
 
-        # drop '#' from col-name if its there
+        # Canonicalize all accepted metadata aliases.
         normalized_chrom = "chrom"
         normalized_pheno = "phenotype_id"
-        if colnames[0][0] == "#":
-            meta_lf = meta_lf.rename({colnames[0]: normalized_chrom, colnames[3]: normalized_pheno})
-        else:
-            meta_lf = meta_lf.rename({colnames[3]: normalized_pheno})
+        meta_lf = meta_lf.rename(dict(zip(resolved, [normalized_chrom, "start", "end", normalized_pheno], strict=True)))
 
-        # go eager to pull out pheno names
-        meta_lf = meta_lf.collect()
-        genes = meta_lf.get_column(normalized_pheno).to_list()
-        if keep_pheno is not None:
-            keep_pheno = validate_user_columns(keep_pheno, genes)
-            keep_genes = pl.Series("genes", keep_pheno)
-            meta_lf = meta_lf.filter(pl.col(normalized_pheno).is_in(keep_genes))
-        elif drop_pheno is not None:
-            drop_pheno = validate_user_columns(drop_pheno, genes)
-            keep_genes = pl.Series("genes", list(set(genes) - set(drop_pheno)))
-            meta_lf = meta_lf.filter(pl.col(normalized_pheno).is_in(keep_genes))
-        else:
-            keep_genes = pl.Series("genes", genes)
+        meta = meta_lf.collect()
+        ids = meta.get_column(normalized_pheno)
+        if ids.null_count() or ids.is_duplicated().any():
+            raise ValueError("Expression phenotype IDs must be non-null and unique")
+        genes = ids.to_list()
 
-        # everything after 4th col is expression data
-        # go eager mode, then transpose and relabel everything
-        # then restrict to either all genes, or user-specified genes
-        phenotype_lf = (
-            phenotype_lf.select(columns[4:])
+        pheno = (
+            phenotype_lf.select(samples)
             .collect()
             .transpose(
                 include_header=True,
                 header_name="iid",
                 column_names=genes,
             )
-            .select(["iid"] + keep_genes.to_list())
         )
-
-        # join libsize based on final filtered samples
-        libsize = libsize.join(phenotype_lf, on="iid", how="semi", maintain_order="right")
-
-        return cls(phenotype_lf, meta_lf, libsize)
+        return cls(pheno, meta, libsize).filter_genes_by_ids(keep=keep_pheno, drop=drop_pheno)
 
 
 def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
