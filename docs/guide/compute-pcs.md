@@ -20,9 +20,16 @@ Each row represents one individual, with exactly `--num-pcs` component columns. 
 directions ordered by decreasing explained variance within the estimated subspace. The algorithm estimates that
 subspace iteratively, then uses a small projected SVD to resolve its principal directions.
 
-For a scree plot, evaluate explained variance on the same expression matrix used for fitting: apply the selected
-transform, then center and scale each gene to unit variance across samples. Variance explained in unscaled
-expression need not decrease in component order.
+The CLI logs the proportion of variance explained by each component, labeled `ExprPC1`, `ExprPC2`, and so on.
+Save these values to construct a scree plot without reloading the expression matrix. They describe the transformed,
+gene-standardized matrix used for fitting, with total variance across all components as the denominator. The
+reported proportions need not sum to one when only some components are requested.
+
+The Python method returns both the component table and a NumPy array of proportions in matching component order:
+
+```python
+pcs, explained_variance_ratio = expression_data.compute_pcs(10, rng_key, transform="lognorm")
+```
 
 For cell-type-specific analyses, compute expression PCs separately from each cell type's pseudobulk matrix.
 

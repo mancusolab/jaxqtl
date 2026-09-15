@@ -21,7 +21,7 @@ def _expression(n, p):
 @pytest.mark.parametrize("seed", [0, 1])
 def test_prob_pca_returns_ordered_sample_principal_directions(shape, seed):
     values = _expression(*shape)
-    pcs = _prob_pca(jr.key(seed), values, 3)
+    pcs, fitted_singular_values = _prob_pca(jr.key(seed), values, 3)
     expected, singular_values, _ = jnp.linalg.svd(values, full_matrices=False)
 
     assert pcs.shape == (shape[0], 3)
@@ -29,6 +29,7 @@ def test_prob_pca_returns_ordered_sample_principal_directions(shape, seed):
     energy = jnp.sum((pcs.T @ values) ** 2, axis=1)
     assert jnp.all(jnp.diff(energy) <= 0)
     assert jnp.allclose(energy, singular_values[:3] ** 2, rtol=2e-4)
+    assert jnp.allclose(fitted_singular_values, singular_values[:3], rtol=2e-4)
     # Singular-vector signs are arbitrary; each ordered direction must still agree.
     assert jnp.allclose(jnp.abs(expected[:, :3].T @ pcs), jnp.eye(3), atol=2e-3)
 
@@ -45,7 +46,7 @@ def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, t
     libsize = pl.DataFrame({"iid": iids, "libsize": library_sizes.tolist()}).reverse()
     data = ExpressionData(pheno, pl.DataFrame(), libsize)
 
-    result = data.compute_pcs(k, jr.key(1), transform=transform)
+    result, explained_variance_ratio = data.compute_pcs(k, jr.key(1), transform=transform)
 
     assert result.shape == (30, k + 1)
     assert result["iid"].to_list() == iids
@@ -57,9 +58,13 @@ def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, t
     else:
         transformed = expression
     standardized = (transformed - transformed.mean(axis=0)) / transformed.std(axis=0)
-    expected, _, _ = jnp.linalg.svd(standardized, full_matrices=False)
+    expected, singular_values, _ = jnp.linalg.svd(standardized, full_matrices=False)
     assert jnp.allclose(jnp.abs(expected[:, :k].T @ pcs), jnp.eye(k), atol=2e-3)
     assert result.columns == ["iid", *(f"ExprPC{i}" for i in range(1, k + 1))]
+    assert explained_variance_ratio.shape == (k,)
+    assert jnp.allclose(explained_variance_ratio, singular_values[:k] ** 2 / jnp.sum(singular_values**2), rtol=2e-4)
+    assert jnp.all(jnp.diff(explained_variance_ratio) <= 0)
+    assert 0 < explained_variance_ratio.sum() < 1
 
 
 @pytest.mark.parametrize("size", [0.0, -1.0, float("nan"), float("inf"), None])

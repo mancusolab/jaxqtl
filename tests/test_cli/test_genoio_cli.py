@@ -366,6 +366,43 @@ def test_mapping_help_organizes_options_and_displays_defaults() -> None:
     assert "(default: 500000)" in help_text
 
 
+def test_compute_pcs_logs_explained_variance(tmp_path) -> None:
+    pheno_path = tmp_path / "expression.bed"
+    values = jnp.array([[1.0, 8.0, 3.0], [3.0, 5.0, 2.0], [8.0, 1.0, 4.0], [2.0, 4.0, 9.0], [6.0, 3.0, 1.0]])
+    pl.DataFrame(
+        {
+            "chrom": ["1"] * 3,
+            "start": [1, 2, 3],
+            "end": [2, 3, 4],
+            "gene_id": ["g1", "g2", "g3"],
+            **{f"sample_{i}": row.tolist() for i, row in enumerate(values)},
+        }
+    ).write_csv(pheno_path, separator="\t")
+    args = SimpleNamespace(
+        pheno=str(pheno_path),
+        min_gene_expr_pct=0.0,
+        num_pcs=2,
+        seed=1,
+        transform="lognorm",
+        covar=None,
+        out=str(tmp_path / "pcs.tsv"),
+    )
+    log = _LoggerStub()
+
+    assert cli._compute_expression_pcs(args, log) == 0
+
+    transformed = jnp.log1p(values * jnp.median(values.sum(axis=1)) / values.sum(axis=1)[:, None])
+    standardized = (transformed - transformed.mean(axis=0)) / transformed.std(axis=0)
+    singular_values = jnp.linalg.svd(standardized, compute_uv=False)
+    expected = singular_values[:2] ** 2 / jnp.sum(singular_values**2)
+    messages = [message for message in log.infos if "proportion of variance explained:" in message]
+    assert len(messages) == 2
+    for i, (message, ratio) in enumerate(zip(messages, expected, strict=True), start=1):
+        assert message.startswith(f"ExprPC{i} proportion of variance explained:")
+        assert float(message.rsplit(":", 1)[1]) == pytest.approx(float(ratio), rel=2e-4)
+    assert pl.read_csv(args.out, separator="\t").columns == ["iid", "ExprPC1", "ExprPC2"]
+
+
 def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
     stdout = StringIO()
     with redirect_stdout(stdout), pytest.raises(SystemExit) as exc_info:

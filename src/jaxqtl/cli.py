@@ -347,8 +347,10 @@ def _compute_expression_pcs(args, log):
 
     key = rdm.key(args.seed)
     log.info(f"Computing {args.num_pcs} gene expression principal components")
-    df_pcs = expr_data.compute_pcs(args.num_pcs, key, args.transform)
+    df_pcs, explained_variance_ratio = expr_data.compute_pcs(args.num_pcs, key, args.transform)
     log.info(f"Finished computing {args.num_pcs} gene expression principal components")
+    for i, ratio in enumerate(explained_variance_ratio, start=1):
+        log.info(f"ExprPC{i} proportion of variance explained: {ratio:.9g}")
 
     if args.covar:
         log.info("Reading covariate data and appending principal components")

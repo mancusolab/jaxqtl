@@ -159,7 +159,7 @@ class ExpressionData:
         num_pcs: int,
         rng_key: PRNGKeyArray,
         transform: Literal["log1p", "lognorm", "tmm"] | None = None,
-    ) -> pl.DataFrame:
+    ) -> tuple[pl.DataFrame, np.ndarray]:
         r"""Compute probabilistic-PCA scores from the expression matrix.
 
         Phenotypes are optionally transformed, then standardized across samples
@@ -180,10 +180,14 @@ class ExpressionData:
 
         **Returns:**
 
-        For a supported component count, a Polars frame with `iid` followed by
+        A tuple `(pcs, explained_variance_ratio)`. `pcs` is a Polars frame with `iid` followed by
         `ExprPC1` through `ExprPC{num_pcs}`, in decreasing variance order.
         Rows preserve the input sample order. Components have unit norm rather
         than being scaled by their singular values.
+        `explained_variance_ratio` is a NumPy array of shape `(num_pcs,)` in
+        the same component order. Each value is the squared projected singular
+        value divided by the total sum of squares of the transformed,
+        standardized matrix, including variance outside the fitted subspace.
 
         **Raises:**
 
@@ -219,15 +223,15 @@ class ExpressionData:
             pheno = jnp.log1p(pheno / size_factors[:, None])
 
         pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
-        n, _ = pheno.shape
-        U = _prob_pca(rng_key, pheno, num_pcs)
+        U, singular_values = _prob_pca(rng_key, pheno, num_pcs)
+        explained_variance_ratio = singular_values**2 / jnp.sum(pheno**2)
         data = {"iid": self.pheno.get_column("iid").to_numpy()}
         for i, eigvec in enumerate(U.T, start=1):
             data[f"ExprPC{i}"] = np.asarray(eigvec)
 
         df_pcs = pl.DataFrame(data=data)
 
-        return df_pcs
+        return df_pcs, np.asarray(explained_variance_ratio)
 
     @classmethod
     def from_bedfile(
@@ -426,7 +430,7 @@ def bed_transform_y(pheno_path: str | PathLike[str], method: str = "log1p"):
 
 
 @partial(jax.jit, static_argnums=(2, 3, 4))
-def _prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3) -> Array:
+def _prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3) -> tuple[Array, Array]:
     import jax.lax as lax
     import jax.random as rdm
     import lineax as lx
@@ -471,5 +475,5 @@ def _prob_pca(rng_key, X, k, max_iter=1000, tol=1e-3) -> Array:
     _, W, Z, _ = lax.while_loop(_condition, _step, initial_carry)
     Q, _ = jnp.linalg.qr(Z)
     # Rotate the EM subspace into variance-ordered principal directions using a k-by-p SVD.
-    rotation, _, _ = jnp.linalg.svd(Q.T @ X, full_matrices=False)
-    return Q @ rotation
+    rotation, singular_values, _ = jnp.linalg.svd(Q.T @ X, full_matrices=False)
+    return Q @ rotation, singular_values
