@@ -34,20 +34,50 @@ def test_prob_pca_returns_ordered_sample_principal_directions(shape, seed):
 
 
 @pytest.mark.parametrize("k", [1, 3])
-def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k):
+@pytest.mark.parametrize("transform", [None, "log1p", "lognorm"])
+def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, transform):
     expression = jnp.exp(_expression(30, 12) / 4.0 + 2.0) - 1.0
     iids = [f"donor_{i}" for i in reversed(range(30))]
     genes = [f"gene_{i}" for i in range(12)]
     pheno = pl.DataFrame({"iid": iids, **dict(zip(genes, expression.T.tolist(), strict=True))})
-    data = ExpressionData(pheno, pl.DataFrame(), pl.DataFrame())
+    # Stored totals can include genes excluded from PCA, and arrive in a different order.
+    library_sizes = jnp.linspace(100.0, 10000.0, 30)
+    libsize = pl.DataFrame({"iid": iids, "libsize": library_sizes.tolist()}).reverse()
+    data = ExpressionData(pheno, pl.DataFrame(), libsize)
 
-    result = data.compute_pcs(k, jr.key(1), transform="log1p")
+    result = data.compute_pcs(k, jr.key(1), transform=transform)
 
     assert result.shape == (30, k + 1)
-    assert result.columns == ["iid", *(f"ExprPC{i}" for i in range(k))]
     assert result["iid"].to_list() == iids
     pcs = result.select(pl.exclude("iid")).to_jax()
-    transformed = jnp.log1p(expression)
+    if transform == "lognorm":
+        transformed = jnp.log1p(expression * jnp.median(library_sizes) / library_sizes[:, None])
+    elif transform == "log1p":
+        transformed = jnp.log1p(expression)
+    else:
+        transformed = expression
     standardized = (transformed - transformed.mean(axis=0)) / transformed.std(axis=0)
     expected, _, _ = jnp.linalg.svd(standardized, full_matrices=False)
     assert jnp.allclose(jnp.abs(expected[:, :k].T @ pcs), jnp.eye(k), atol=2e-3)
+    assert result.columns == ["iid", *(f"ExprPC{i}" for i in range(1, k + 1))]
+
+
+@pytest.mark.parametrize("size", [0.0, -1.0, float("nan"), float("inf"), None])
+def test_lognorm_rejects_invalid_library_sizes(size):
+    data = ExpressionData(
+        pl.DataFrame({"iid": ["a", "b", "c"], "gene": [1.0, 2.0, 3.0]}),
+        pl.DataFrame(),
+        pl.DataFrame({"iid": ["a", "b", "c"], "libsize": [size, 10.0, 20.0]}),
+    )
+    with pytest.raises(ValueError, match="library sizes"):
+        data.compute_pcs(1, jr.key(1), transform="lognorm")
+
+
+def test_lognorm_rejects_missing_library_size():
+    data = ExpressionData(
+        pl.DataFrame({"iid": ["a", "b", "c"], "gene": [1.0, 2.0, 3.0]}),
+        pl.DataFrame(),
+        pl.DataFrame({"iid": ["b", "c"], "libsize": [10.0, 20.0]}),
+    )
+    with pytest.raises(ValueError, match="library sizes"):
+        data.compute_pcs(1, jr.key(1), transform="lognorm")

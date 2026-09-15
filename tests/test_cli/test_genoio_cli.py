@@ -382,6 +382,7 @@ def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
     }
     assert "--pheno" in sections["Inputs:"]
     assert "--num-pcs" in sections["PCA options:"]
+    assert "lognorm" in sections["PCA options:"]
     assert "--platform" in sections["Runtime and output:"]
     assert "(default: cpu)" in help_text
 

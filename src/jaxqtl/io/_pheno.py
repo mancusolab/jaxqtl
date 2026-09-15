@@ -158,7 +158,7 @@ class ExpressionData:
         self,
         num_pcs: int,
         rng_key: PRNGKeyArray,
-        transform: Literal["log1p", "tmm"] | None = None,
+        transform: Literal["log1p", "lognorm", "tmm"] | None = None,
     ) -> pl.DataFrame:
         r"""Compute probabilistic-PCA scores from the expression matrix.
 
@@ -172,19 +172,23 @@ class ExpressionData:
         - `num_pcs`: Number of expression principal components to return. It must
           not exceed the smaller of the sample and phenotype counts.
         - `rng_key`: JAX PRNG key controlling the probabilistic-PCA initialization.
-        - `transform`: Optional expression transform. `"log1p"` is implemented;
-          `"tmm"` is currently unavailable.
+        - `transform`: Optional expression transform. `"log1p"` applies
+          `log(1 + y)`. `"lognorm"` applies `log(1 + y / (l / median(l)))`,
+          using stored library sizes aligned by `iid` and the median across
+          the samples in `pheno`. Recommended for raw counts. `"tmm"` is
+          currently unavailable.
 
         **Returns:**
 
         For a supported component count, a Polars frame with `iid` followed by
-        `ExprPC0` through `ExprPC{num_pcs - 1}`, in decreasing variance order.
+        `ExprPC1` through `ExprPC{num_pcs}`, in decreasing variance order.
         Rows preserve the input sample order. Components have unit norm rather
         than being scaled by their singular values.
 
         **Raises:**
 
-        - `ValueError`: If `num_pcs` is less than 1.
+        - `ValueError`: If `num_pcs` is less than 1, or `"lognorm"` library
+          sizes are missing, nonfinite, or nonpositive.
         - `NotImplementedError`: If `transform="tmm"`.
 
         **Failure Modes:**
@@ -202,12 +206,23 @@ class ExpressionData:
             raise NotImplementedError("'tmm' transform not implemented yet.")
         elif transform == "log1p":
             pheno = jnp.log1p(pheno)  # prevent log(0)
+        elif transform == "lognorm":
+            libsize = (
+                self.pheno.select("iid")
+                .join(self.libsize, on="iid", how="left", validate="1:1", maintain_order="left")
+                .get_column("libsize")
+                .to_numpy()
+            )
+            if not np.all(np.isfinite(libsize) & (libsize > 0)):
+                raise ValueError("'lognorm' requires finite, positive library sizes for every sample")
+            size_factors = jnp.asarray(libsize / np.median(libsize))
+            pheno = jnp.log1p(pheno / size_factors[:, None])
 
         pheno = (pheno - pheno.mean(axis=0)) / pheno.std(axis=0)  # standardize genes
         n, _ = pheno.shape
         U = _prob_pca(rng_key, pheno, num_pcs)
         data = {"iid": self.pheno.get_column("iid").to_numpy()}
-        for i, eigvec in enumerate(U.T):
+        for i, eigvec in enumerate(U.T, start=1):
             data[f"ExprPC{i}"] = np.asarray(eigvec)
 
         df_pcs = pl.DataFrame(data=data)

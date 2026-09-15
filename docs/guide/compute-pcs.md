@@ -9,11 +9,11 @@ jaxqtl compute-pcs \
   --pheno tutorial/input/CD4_NC.N100.bed.gz \
   --covar tutorial/input/donor_features.tsv \
   --num-pcs 2 \
-  --transform log1p \
+  --transform lognorm \
   --out tutorial/output/CD4_NC.N100.covar_with_expr_pcs.tsv
 ```
 
-The output contains the original covariates followed by `ExprPC0`, `ExprPC1`, and subsequent requested components.
+The output contains the original covariates followed by `ExprPC1`, `ExprPC2`, and subsequent requested components.
 Pass this table to `--covar` in a mapping command.
 
 Each row represents one individual, with exactly `--num-pcs` component columns. Components are unit-norm sample
@@ -29,5 +29,12 @@ For cell-type-specific analyses, compute expression PCs separately from each cel
 Expression PCA uses a probabilistic algorithm. Reusing `--seed` with the same inputs makes initialization
 reproducible, although floating-point results can vary across JAX backends.
 
-`--num-pcs` must be positive and cannot exceed the smaller of the sample and phenotype counts. The optional `log1p`
-transform is available; `tmm` is currently not implemented.
+`--num-pcs` must be positive and cannot exceed the smaller of the sample and phenotype counts.
+
+For raw counts, use `--transform lognorm`. This divides each sample's counts by its library size relative to the
+median library size, then applies `log1p`: `log(1 + y / (l / median(l)))`. Library sizes are stored totals from
+before gene filtering, aligned by sample ID; the median is computed across samples included in PCA. Each sample
+must have a finite, positive library size.
+
+`--transform log1p` applies only `log(1 + y)` and remains available for already-normalized expression. Omitting
+`--transform` leaves expression untransformed before gene standardization. `tmm` is currently not implemented.

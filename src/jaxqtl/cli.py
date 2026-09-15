@@ -766,9 +766,13 @@ def main(args):
     inputs.add_argument("--covar", help="Path to covariate data", required=True)
     pca_options.add_argument(
         "--transform",
-        choices=["tmm", "log1p"],
+        choices=["tmm", "log1p", "lognorm"],
         default=None,
-        help="Transformation to perform on observed gene expression before computing PCs.",
+        help=(
+            "Transformation before computing PCs: log1p applies log(1 + y); "
+            "lognorm normalizes to the median library size then applies log1p "
+            "(recommended for raw counts)."
+        ),
     )
     pca_options.add_argument(
         "--min-gene-expr-pct",
