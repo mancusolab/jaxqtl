@@ -66,12 +66,68 @@ def test_pca_sample_filters_and_standalone_output(tmp_path, expression_files, se
     bed, _, values, samples = expression_files
     ids = tmp_path / "samples.txt"
     ids.write_text("006\n004\n003\n002\n005\n" if selection == "--keep" else "001\n")
-    pcs, variance = _run(tmp_path, bed, selection, str(ids), "--transform", "lognorm")
+    pcs, variance = _run(tmp_path, bed, selection, str(ids), "--normalization", "library-size")
     assert pcs["iid"].to_list() == samples[1:]
     assert pcs.columns == ["iid", "ExprPC1", "ExprPC2"]
     counts = values[1:]
     sizes = counts.sum(axis=1)
     _check_svd(pcs, variance, np.log1p(counts * np.median(sizes) / sizes[:, None]))
+
+
+def test_pca_defaults_to_library_size_then_log1p(tmp_path, expression_files):
+    bed, _, values, _ = expression_files
+    pcs, variance = _run(tmp_path, bed)
+    sizes = values.sum(axis=1)
+    _check_svd(pcs, variance, np.log1p(values * np.median(sizes) / sizes[:, None]))
+
+
+@pytest.mark.parametrize("transform", ["none", "log1p"])
+def test_pca_tmm_estimates_factors_before_gene_selection(tmp_path, expression_files, transform):
+    import pandas as pd
+    import qtl.norm
+
+    bed, covar, values, samples = expression_files
+    pcs, variance = _run(
+        tmp_path,
+        bed,
+        "--covar",
+        str(covar),
+        "--normalization",
+        "tmm",
+        "--transform",
+        transform,
+        "--genes",
+        "g1,g2,g4",
+    )
+    counts = values[1:]
+    effective = counts.sum(axis=1) * qtl.norm.edger_calcnormfactors(pd.DataFrame(counts.T))
+    normalized = counts[:, [0, 1, 3]] * np.median(effective) / effective[:, None]
+    _check_svd(pcs, variance, np.log1p(normalized) if transform == "log1p" else normalized)
+    assert pcs["iid"].to_list() == samples[1:]
+
+
+@pytest.mark.parametrize("source", ["file", "covar"])
+def test_pca_tmm_uses_external_library_sizes(tmp_path, expression_files, source):
+    bed, covar, values, samples = expression_files
+    # Avoid roundoff-sensitive ties at the TMM trimming boundary in the reference fixture.
+    values = values.copy()
+    values[4, 3] = 7.0
+    frame = pl.read_csv(bed, separator="\t")
+    frame.with_columns(pl.when(pl.col("gene_id") == "g4").then(7.0).otherwise(pl.col("005")).alias("005")).write_csv(
+        bed, separator="\t"
+    )
+    sizes = np.array([120.0, 140.0, 160.0, 190.0, 170.0])
+    options = ["--libsize-name-from-covar", "total"]
+    if source == "file":
+        path = tmp_path / "sizes.tsv"
+        pl.DataFrame({"iid": samples[1:], "libsize": sizes}).reverse().write_csv(path, separator="\t")
+        options = ["--libsize", str(path)]
+    pcs, variance = _run(tmp_path, bed, "--covar", str(covar), "--normalization", "tmm", "--chr", "1", *options)
+    # edgeR calcNormFactors.default reference; source/hash recorded in test_io/test_pheno.py.
+    factors = np.array([1.01401123115754, 1.03364524845977, 1.04053417015144, 0.926153881350336, 0.990025143517939])
+    effective = sizes * factors
+    normalized = values[1:, [0, 1, 3]] * np.median(effective) / effective[:, None]
+    _check_svd(pcs, variance, np.log1p(normalized))
 
 
 @pytest.mark.parametrize("size_source", ["automatic", "file", "covar"])
@@ -81,7 +137,7 @@ def test_pca_aligns_cohort_before_filtering_and_normalizes_with_full_library_siz
     size_source,
 ):
     bed, covar, values, samples = expression_files
-    options = ["--covar", str(covar), "--transform", "lognorm", "--chr", "1", "--min-indiv-expr-pct", "0.4"]
+    options = ["--covar", str(covar), "--normalization", "library-size", "--chr", "1", "--min-indiv-expr-pct", "0.4"]
     sizes = values[1:].sum(axis=1)
     if size_source == "file":
         sizes = np.array([120.0, 140.0, 160.0, 190.0, 170.0])
@@ -110,13 +166,24 @@ def test_pca_gene_selections(tmp_path, expression_files, selection):
         argument = str(gene_file)
     else:
         argument = names
-    pcs, variance = _run(tmp_path, bed, selection, argument)
+    pcs, variance = _run(tmp_path, bed, selection, argument, "--normalization", "none", "--transform", "none")
     _check_svd(pcs, variance, values[:, [0, 1, 3]])
 
 
 def test_pca_gene_prevalence_uses_selected_cohort(tmp_path, expression_files):
     bed, covar, values, _ = expression_files
-    pcs, variance = _run(tmp_path, bed, "--covar", str(covar), "--min-gene-expr-pct", "0.2")
+    pcs, variance = _run(
+        tmp_path,
+        bed,
+        "--covar",
+        str(covar),
+        "--min-gene-expr-pct",
+        "0.2",
+        "--normalization",
+        "none",
+        "--transform",
+        "none",
+    )
     # g5 is expressed in exactly 1/5 retained samples and is excluded by the strict threshold.
     _check_svd(pcs, variance, values[1:, :4])
 
@@ -131,7 +198,9 @@ def test_pca_output_keeps_iid_first_when_covariate_iid_is_not_first(tmp_path, ex
     assert pcs["iid"].to_list() == samples[1:]
 
 
-@pytest.mark.parametrize("extra", [[], ["--transform", "tmm"], ["--keep", "a", "--exclude", "b"]])
+@pytest.mark.parametrize(
+    "extra", [[], ["--transform", "tmm"], ["--transform", "lognorm"], ["--keep", "a", "--exclude", "b"]]
+)
 def test_pca_parser_rejects_missing_component_count_or_unsupported_options(extra):
     args = ["compute-pcs", "--pheno", "unused.bed"]
     if extra:
@@ -164,7 +233,7 @@ def test_pca_ignores_nonnumeric_library_sizes_for_extra_samples(tmp_path, expres
     pl.DataFrame({"iid": [*samples, "999"], "libsize": [*map(str, sizes), "unavailable"]}).reverse().write_csv(
         path, separator="\t"
     )
-    pcs, variance = _run(tmp_path, bed, "--transform", "lognorm", "--libsize", str(path))
+    pcs, variance = _run(tmp_path, bed, "--normalization", "library-size", "--libsize", str(path))
     assert pcs["iid"].to_list() == samples
     _check_svd(pcs, variance, np.log1p(values * np.median(sizes) / sizes[:, None]))
 
@@ -186,14 +255,18 @@ def test_pca_rejects_invalid_external_library_sizes(tmp_path, expression_files, 
     path = tmp_path / "library.tsv"
     pl.DataFrame({"iid": samples, "libsize": sizes}).write_csv(path, separator="\t")
     with pytest.raises(ValueError, match="library sizes|sample IDs"):
-        _run(tmp_path, bed, "--transform", "lognorm", "--libsize", str(path))
+        _run(tmp_path, bed, "--normalization", "library-size", "--libsize", str(path))
 
 
 @pytest.mark.parametrize(
-    "extra", [["--libsize", "unused.tsv"], ["--transform", "lognorm", "--libsize-name-from-covar", "total"]]
+    "extra",
+    [
+        ["--normalization", "none", "--libsize", "unused.tsv"],
+        ["--normalization", "library-size", "--libsize-name-from-covar", "total"],
+    ],
 )
 def test_pca_rejects_library_options_without_required_context(tmp_path, expression_files, extra):
-    with pytest.raises(ValueError, match="lognorm|covar"):
+    with pytest.raises(ValueError, match="normalization|covar"):
         _run(tmp_path, expression_files[0], *extra)
 
 

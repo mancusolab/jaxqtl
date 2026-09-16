@@ -343,8 +343,8 @@ def _prepare_pca_inputs(args, log) -> tuple[ExpressionData, pl.DataFrame | None]
     """Load and filter the PCA cohort, preserving library totals from before gene selection."""
     if args.num_pcs < 1:
         raise ValueError("Number of PCs must be at least 1")
-    if (args.libsize or args.libsize_name_from_covar) and args.transform != "lognorm":
-        raise ValueError("Library-size options require --transform lognorm")
+    if (args.libsize or args.libsize_name_from_covar) and args.normalization == "none":
+        raise ValueError("Library-size options require --normalization library-size or tmm")
     if args.libsize_name_from_covar and not args.covar:
         raise ValueError("--libsize-name-from-covar requires --covar")
 
@@ -369,7 +369,7 @@ def _prepare_pca_inputs(args, log) -> tuple[ExpressionData, pl.DataFrame | None]
         expr_data = ExpressionData(pheno, expr_data.pheno_meta, expr_data.libsize)
     if expr_data.pheno.height < 2:
         raise ValueError("PCA requires at least two shared samples")
-    expr_data.validate_values(require_nonnegative=args.transform in {"log1p", "lognorm"})
+    expr_data.validate_values(require_nonnegative=args.normalization != "none" or args.transform == "log1p")
 
     if args.min_indiv_expr_pct is not None:
         before = expr_data.pheno.height
@@ -377,6 +377,24 @@ def _prepare_pca_inputs(args, log) -> tuple[ExpressionData, pl.DataFrame | None]
         log.info(f"Sample expression filter removed {before - expr_data.pheno.height} samples")
     if expr_data.pheno.height < 2:
         raise ValueError("PCA requires at least two samples after filtering")
+
+    libsize = expr_data.libsize
+    if args.libsize:
+        libsize = read_plink_style_tsvlike(args.libsize)
+        if set(libsize.columns) != {"iid", "libsize"}:
+            raise ValueError("External library sizes must have exactly iid and libsize columns")
+        log.info(f"Using library sizes from {args.libsize}")
+    elif args.libsize_name_from_covar and covar is not None:
+        if args.libsize_name_from_covar == "iid" or args.libsize_name_from_covar not in covar.columns:
+            raise ValueError(f"Library-size column {args.libsize_name_from_covar!r} is missing or invalid in --covar")
+        libsize = covar.select("iid", pl.col(args.libsize_name_from_covar).alias("libsize"))
+        log.info(f"Using library sizes from covariate {args.libsize_name_from_covar}")
+    elif args.normalization != "none":
+        log.info("Using library sizes computed across all input genes before gene filtering")
+
+    expr_data = ExpressionData(expr_data.pheno, expr_data.pheno_meta, libsize)
+    log.info(f"Normalizing expression with {args.normalization}")
+    expr_data = expr_data.normalize(args.normalization)
 
     # Gene selection follows sample QC, while the stored library sizes retain all input genes.
     before = expr_data.pheno.width - 1
@@ -391,21 +409,7 @@ def _prepare_pca_inputs(args, log) -> tuple[ExpressionData, pl.DataFrame | None]
     expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
     log.info(f"Gene filters retained {expr_data.pheno.width - 1} of {before} genes")
 
-    libsize = expr_data.libsize
-    if args.libsize:
-        libsize = read_plink_style_tsvlike(args.libsize)
-        if set(libsize.columns) != {"iid", "libsize"}:
-            raise ValueError("External library sizes must have exactly iid and libsize columns")
-        log.info(f"Using library sizes from {args.libsize}")
-    elif args.libsize_name_from_covar and covar is not None:
-        if args.libsize_name_from_covar == "iid" or args.libsize_name_from_covar not in covar.columns:
-            raise ValueError(f"Library-size column {args.libsize_name_from_covar!r} is missing or invalid in --covar")
-        libsize = covar.select("iid", pl.col(args.libsize_name_from_covar).alias("libsize"))
-        log.info(f"Using library sizes from covariate {args.libsize_name_from_covar}")
-    elif args.transform == "lognorm":
-        log.info("Using library sizes computed across all input genes before gene filtering")
-
-    return ExpressionData(expr_data.pheno, expr_data.pheno_meta, libsize), covar
+    return expr_data, covar
 
 
 def _compute_expression_pcs(args, log):
@@ -414,7 +418,9 @@ def _compute_expression_pcs(args, log):
     expr_data, covar = _prepare_pca_inputs(args, log)
     key = rdm.key(args.seed)
     log.info(f"Computing {args.num_pcs} gene expression principal components for {expr_data.pheno.height} samples")
-    df_pcs, explained_variance_ratio = expr_data.compute_pcs(args.num_pcs, key, args.transform)
+    df_pcs, explained_variance_ratio = expr_data.compute_pcs(
+        args.num_pcs, key, normalization="none", transform=args.transform
+    )
     log.info(f"Finished computing {args.num_pcs} gene expression principal components")
     for i, ratio in enumerate(explained_variance_ratio, start=1):
         log.info(f"ExprPC{i} proportion of variance explained: {ratio:.9g}")
@@ -828,23 +834,25 @@ def main(args):
         help="Number of PCs; at most min(retained samples - 1, variable genes).",
     )
     normalization.add_argument(
+        "--normalization",
+        choices=["none", "library-size", "tmm"],
+        default="library-size",
+        help="Scale counts to the median library size, optionally with TMM composition adjustment; none skips scaling.",
+    )
+    normalization.add_argument(
         "--transform",
-        choices=["log1p", "lognorm"],
-        default=None,
-        help=(
-            "Transformation before computing PCs: log1p applies log(1 + y); "
-            "lognorm normalizes to the median library size then applies log1p "
-            "(recommended for raw counts)."
-        ),
+        choices=["none", "log1p"],
+        default="log1p",
+        help="Apply log(1 + y) after normalization, or none to skip the log transform.",
     )
     library = normalization.add_mutually_exclusive_group()
     library.add_argument(
         "--libsize",
-        help="Two-column iid/libsize TSV of raw positive library sizes; requires --transform lognorm.",
+        help="Two-column iid/libsize TSV of raw positive library sizes; requires library-size or tmm normalization.",
     )
     library.add_argument(
         "--libsize-name-from-covar",
-        help="Column of raw positive library sizes in --covar; requires --transform lognorm.",
+        help="Column of raw positive library sizes in --covar; requires library-size or tmm normalization.",
     )
     runtime.add_argument(
         "-p",

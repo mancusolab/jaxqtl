@@ -385,7 +385,8 @@ def test_compute_pcs_logs_explained_variance(tmp_path) -> None:
         min_gene_expr_pct=0.0,
         num_pcs=2,
         seed=1,
-        transform="lognorm",
+        normalization="library-size",
+        transform="log1p",
         covar=None,
         out=str(tmp_path / "pcs.tsv"),
         keep=None,
@@ -431,7 +432,8 @@ def test_compute_pcs_help_organizes_options_and_displays_defaults() -> None:
     }
     assert "--pheno" in sections["Inputs:"]
     assert "--num-pcs" in sections["PCA options:"]
-    assert "lognorm" in sections["Normalization:"]
+    assert "--normalization" in sections["Normalization:"]
+    assert "library-size" in sections["Normalization:"]
     assert "--platform" in sections["Runtime and output:"]
     assert "(default: cpu)" in help_text
 

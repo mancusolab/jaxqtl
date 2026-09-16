@@ -16,6 +16,7 @@ See [Phenotype data](../../guide/phenotypes.md) for file formats and coordinates
         members:
             - from_bedfile
             - to_jax
+            - normalize
             - validate_values
             - filter_genes_by_ids
             - offset_from_libsize

@@ -35,8 +35,9 @@ def test_prob_pca_returns_ordered_sample_principal_directions(shape, seed):
 
 
 @pytest.mark.parametrize("k", [1, 3])
-@pytest.mark.parametrize("transform", [None, "log1p", "lognorm"])
-def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, transform):
+@pytest.mark.parametrize("normalization", ["none", "library-size"])
+@pytest.mark.parametrize("transform", ["none", "log1p"])
+def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, normalization, transform):
     expression = jnp.exp(_expression(30, 12) / 4.0 + 2.0) - 1.0
     iids = [f"donor_{i}" for i in reversed(range(30))]
     genes = [f"gene_{i}" for i in range(12)]
@@ -46,17 +47,16 @@ def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, t
     libsize = pl.DataFrame({"iid": iids, "libsize": library_sizes.tolist()}).reverse()
     data = ExpressionData(pheno, pl.DataFrame(), libsize)
 
-    result, explained_variance_ratio = data.compute_pcs(k, jr.key(1), transform=transform)
+    result, explained_variance_ratio = data.compute_pcs(k, jr.key(1), normalization=normalization, transform=transform)
 
     assert result.shape == (30, k + 1)
     assert result["iid"].to_list() == iids
     pcs = result.select(pl.exclude("iid")).to_jax()
-    if transform == "lognorm":
-        transformed = jnp.log1p(expression * jnp.median(library_sizes) / library_sizes[:, None])
-    elif transform == "log1p":
-        transformed = jnp.log1p(expression)
-    else:
-        transformed = expression
+    transformed = expression
+    if normalization == "library-size":
+        transformed = transformed * jnp.median(library_sizes) / library_sizes[:, None]
+    if transform == "log1p":
+        transformed = jnp.log1p(transformed)
     standardized = (transformed - transformed.mean(axis=0)) / transformed.std(axis=0)
     expected, singular_values, _ = jnp.linalg.svd(standardized, full_matrices=False)
     assert jnp.allclose(jnp.abs(expected[:, :k].T @ pcs), jnp.eye(k), atol=2e-3)
@@ -68,24 +68,24 @@ def test_compute_pcs_preserves_individuals_and_exports_k_ordered_components(k, t
 
 
 @pytest.mark.parametrize("size", [0.0, -1.0, float("nan"), float("inf"), None])
-def test_lognorm_rejects_invalid_library_sizes(size):
+def test_library_normalization_rejects_invalid_library_sizes(size):
     data = ExpressionData(
         pl.DataFrame({"iid": ["a", "b", "c"], "gene": [1.0, 2.0, 3.0]}),
         pl.DataFrame(),
         pl.DataFrame({"iid": ["a", "b", "c"], "libsize": [size, 10.0, 20.0]}),
     )
     with pytest.raises(ValueError, match="library sizes"):
-        data.compute_pcs(1, jr.key(1), transform="lognorm")
+        data.compute_pcs(1, jr.key(1), normalization="library-size")
 
 
-def test_lognorm_rejects_missing_library_size():
+def test_library_normalization_rejects_missing_library_size():
     data = ExpressionData(
         pl.DataFrame({"iid": ["a", "b", "c"], "gene": [1.0, 2.0, 3.0]}),
         pl.DataFrame(),
         pl.DataFrame({"iid": ["b", "c"], "libsize": [10.0, 20.0]}),
     )
     with pytest.raises(ValueError, match="library sizes"):
-        data.compute_pcs(1, jr.key(1), transform="lognorm")
+        data.compute_pcs(1, jr.key(1), normalization="library-size")
 
 
 def _small_data(values, iids=None):
@@ -101,7 +101,7 @@ def _small_data(values, iids=None):
 
 def test_compute_pcs_removes_constant_genes_before_standardizing():
     data = _small_data([[1.0, 2.0, 7.0], [4.0, 1.0, 7.0], [2.0, 5.0, 7.0], [8.0, 3.0, 7.0]])
-    pcs, ratios = data.compute_pcs(2, jr.key(1))
+    pcs, ratios = data.compute_pcs(2, jr.key(1), normalization="none", transform="none")
     assert jnp.all(jnp.isfinite(pcs.select(pl.exclude("iid")).to_jax()))
     assert ratios.sum() == pytest.approx(1.0, abs=1e-5)
 
@@ -110,13 +110,13 @@ def test_compute_pcs_filters_genes_constant_after_library_normalization():
     data = _small_data([[2.0, 2.0], [4.0, 3.0], [8.0, 4.0], [16.0, 3.0]])
     data.libsize = pl.DataFrame({"iid": ["s0", "s1", "s2", "s3"], "libsize": [1.0, 2.0, 4.0, 8.0]})
     with pytest.raises(ValueError, match="variable genes"):
-        data.compute_pcs(2, jr.key(1), transform="lognorm")
+        data.compute_pcs(2, jr.key(1), normalization="library-size")
 
 
 @pytest.mark.parametrize("n", [3, 7, 30])
 def test_log_transform_of_constant_expression_is_rejected(n):
     with pytest.raises(ValueError, match="variable genes"):
-        _small_data([[7.0]] * n).compute_pcs(1, jr.key(1), transform="log1p")
+        _small_data([[7.0]] * n).compute_pcs(1, jr.key(1), normalization="none", transform="log1p")
 
 
 @pytest.mark.parametrize(
@@ -130,7 +130,7 @@ def test_log_transform_of_constant_expression_is_rejected(n):
 )
 def test_compute_pcs_rejects_unusable_dimensions(values, k):
     with pytest.raises(ValueError, match="samples|variable genes|num_pcs"):
-        _small_data(values).compute_pcs(k, jr.key(1))
+        _small_data(values).compute_pcs(k, jr.key(1), normalization="none", transform="none")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), -float("inf")])
@@ -139,13 +139,40 @@ def test_compute_pcs_rejects_nonfinite_expression(value):
         _small_data([[1.0], [value], [3.0]]).compute_pcs(1, jr.key(1))
 
 
-@pytest.mark.parametrize("transform", ["log1p", "lognorm"])
-def test_compute_pcs_rejects_negative_counts_for_log_transforms(transform):
+@pytest.mark.parametrize("normalization,transform", [("none", "log1p"), ("library-size", "none"), ("tmm", "none")])
+def test_compute_pcs_rejects_negative_counts_for_log_transforms(normalization, transform):
     with pytest.raises(ValueError, match="nonnegative"):
-        _small_data([[1.0], [-0.5], [3.0]]).compute_pcs(1, jr.key(1), transform=transform)
+        _small_data([[1.0], [-0.5], [3.0]]).compute_pcs(1, jr.key(1), normalization=normalization, transform=transform)
 
 
 @pytest.mark.parametrize("iids", [["a", "a", "b"], ["a", None, "b"]])
 def test_compute_pcs_rejects_invalid_sample_ids(iids):
     with pytest.raises(ValueError, match="sample IDs"):
         _small_data([[1.0], [2.0], [3.0]], iids).compute_pcs(1, jr.key(1))
+
+
+def test_compute_pcs_defaults_match_explicit_library_size_and_log1p():
+    data = _small_data([[1.0, 8.0], [3.0, 5.0], [8.0, 1.0], [2.0, 4.0]])
+    data.libsize = pl.DataFrame({"iid": ["s0", "s1", "s2", "s3"], "libsize": [12.0, 13.0, 16.0, 21.0]})
+    pcs, ratios = data.compute_pcs(1, jr.key(1))
+    expected, expected_ratios = data.compute_pcs(1, jr.key(1), normalization="library-size", transform="log1p")
+    assert pcs.equals(expected)
+    assert jnp.allclose(ratios, expected_ratios)
+
+
+@pytest.mark.parametrize("options", [{"transform": "lognorm"}, {"transform": None}, {"normalization": "lognorm"}])
+def test_compute_pcs_rejects_removed_or_unknown_options(options):
+    with pytest.raises(ValueError, match="Unknown PCA"):
+        _small_data([[1.0], [2.0], [3.0]]).compute_pcs(1, jr.key(1), **options)
+
+
+def test_tmm_ignores_all_zero_genes_and_preserves_input():
+    data = _small_data([[10.0, 30.0, 5.0, 0.0], [20.0, 10.0, 15.0, 0.0], [30.0, 50.0, 25.0, 0.0]])
+    data.libsize = pl.DataFrame({"iid": ["s0", "s1", "s2"], "libsize": [100.0, 120.0, 200.0]})
+    original = data.pheno.clone()
+    actual = data.normalize("tmm")
+    without_zero = ExpressionData(data.pheno.drop("g3"), data.pheno_meta, data.libsize).normalize("tmm")
+    assert actual.pheno.drop("g3").equals(without_zero.pheno)
+    assert actual.pheno["g3"].to_list() == [0.0, 0.0, 0.0]
+    assert data.pheno.equals(original)
+    assert actual.libsize.equals(data.libsize)

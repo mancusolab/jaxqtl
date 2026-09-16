@@ -11,7 +11,7 @@ import qtl.norm
 import jax
 import jax.numpy as jnp
 
-from jaxqtl.io._normalization import edger_cpm, inverse_normal_transform
+from jaxqtl.io._normalization import edger_calcnormfactors, edger_cpm, inverse_normal_transform
 from jaxqtl.io._pheno import bed_transform_y, ExpressionData
 
 
@@ -128,6 +128,49 @@ def test_jax_normalization_matches_qtl_norm_under_jit() -> None:
     actual = jax.jit(inverse_normal_transform)(actual_cpm)
 
     np.testing.assert_allclose(actual, expected, rtol=1e-5, atol=1e-5)
+
+
+@pytest.mark.parametrize("external", [False, True])
+def test_tmm_with_explicit_library_sizes_matches_edger_reference(external):
+    # Generated with R using bioc/edgeR devel R/calcNormFactors.R on 2026-09-16.
+    # Source SHA256: ca1027ed9385d5c8f7f044e2826e2a4d9f46ddf2bfcf4971db67fae562f3016c
+    counts = np.array(
+        [
+            [10.0, 20.0, 30.0, 40.0],
+            [30.0, 10.0, 50.0, 20.0],
+            [1000.0, 100.0, 200.0, 300.0],
+            [20.0, 40.0, 10.0, 30.0],
+            [5.0, 15.0, 25.0, 35.0],
+            [80.0, 20.0, 40.0, 60.0],
+            [11.0, 31.0, 21.0, 41.0],
+            [13.0, 7.0, 19.0, 23.0],
+        ]
+    )
+    sizes = counts.sum(axis=0)
+    if external:
+        sizes *= [1.1, 1.5, 1.2, 2.0]
+        expected = [0.660966483426323, 1.15988036382428, 1.42844165173932, 0.913155755991092]
+    else:
+        expected = [0.518468850674472, 1.23125544627319, 1.21107740030008, 1.29347269781151]
+    actual = jax.jit(edger_calcnormfactors)(counts, library_sizes=sizes)
+    np.testing.assert_allclose(actual, expected, rtol=2e-5)
+
+
+def test_tmm_sparse_counts_match_edger_reference():
+    # Same edgeR source as the explicit-library-size reference above.
+    counts = np.zeros((20, 4))
+    counts[:3] = [[1, 2, 4, 8], [2, 4, 8, 16], [3, 6, 12, 24]]
+    for i in range(4, 21):
+        counts[i - 1, i % 4] = i * 3
+    actual = jax.jit(edger_calcnormfactors)(counts)
+    expected = [0.330861156650307, 0.85472465467996, 1.46524226516565, 2.4133402014493]
+    np.testing.assert_allclose(actual, expected, rtol=2e-5)
+
+
+@pytest.mark.parametrize("counts", [[[1.0, 2.0, 3.0]], [[1.0, 2.0, 0.0], [0.0, 0.0, 3.0]]])
+def test_tmm_degenerate_profiles_return_unity_factors(counts):
+    # edgeR returns unity for identical normalized profiles or no shared positive genes.
+    np.testing.assert_allclose(jax.jit(edger_calcnormfactors)(jnp.asarray(counts)), np.ones(3))
 
 
 def test_bed_transform_y_tmm_matches_qtl_norm(tmp_path: Path) -> None:

@@ -9,7 +9,8 @@ Expression PCs are optional covariates; choose whether to include them as part o
 jaxqtl compute-pcs \
   --pheno tutorial/input/CD4_NC.N100.bed.gz \
   --num-pcs 2 \
-  --transform lognorm \
+  --normalization library-size \
+  --transform log1p \
   --out tutorial/output/CD4_NC.N100.expr_pcs.tsv
 ```
 
@@ -44,9 +45,10 @@ For PCA, preprocessing follows this order:
 1. Select samples and intersect optional covariate IDs, preserving expression-file order.
 2. Use library-size totals across all genes in the loaded file, or an external source.
 3. Apply sample expression QC using the full input gene set.
-4. Select genes/chromosomes and apply gene expression QC using the retained samples.
-5. Transform expression, remove genes constant across samples, and standardize remaining genes.
-6. Validate the requested component count and fit PCA.
+4. Normalize expression, estimating TMM factors from nonzero genes when requested.
+5. Select genes/chromosomes and apply gene expression QC using the retained samples.
+6. Apply the log transform if requested, remove constant genes, and standardize remaining genes.
+7. Validate the requested component count and fit PCA.
 
 For example:
 
@@ -59,15 +61,48 @@ jaxqtl compute-pcs \
   --min-indiv-expr-pct 0.1 \
   --min-gene-expr-pct 0.1 \
   --num-pcs 10 \
-  --transform lognorm \
+  --normalization library-size \
+  --transform log1p \
   --out covariates_with_pcs.tsv
 ```
 
 ## Normalization and library sizes
 
-For raw counts, use `--transform lognorm`. It divides each sample's counts by its library size relative to the
-median, then applies `log1p`: `log(1 + y / (l / median(l)))`. The median is computed across samples retained for PCA.
+The defaults are `--normalization library-size --transform log1p`, intended for raw counts. Normalization and
+transformation are separate stages:
+
+| Normalization | Relative size factor applied before transformation |
+| --- | --- |
+| `library-size` (default) | `l / median(l)` using each sample's library size `l` |
+| `tmm` | `e / median(e)` where `e = l * TMM_factor` is the effective library size |
+| `none` | No scaling; library sizes are not required |
+
+`--transform log1p` (default) applies `log(1 + y)` to the normalized values. `--transform none` skips this step.
+All modes subsequently center and scale variable genes for PCA. Counts must be nonnegative when normalization or
+`log1p` is enabled. The old combined `lognorm` option is not supported.
+
+Examples:
+
+```bash
+# Library-size normalization followed by log1p (the defaults)
+--normalization library-size --transform log1p
+
+# TMM composition adjustment followed by log1p
+--normalization tmm --transform log1p
+
+# Already normalized expression that still needs a log transform
+--normalization none --transform log1p
+
+# Expression already normalized and log-transformed
+--normalization none --transform none
+```
+
 Automatic library sizes include all genes in the loaded file, even genes later removed by selection or QC.
+TMM factors are estimated after sample selection and sample QC, using all remaining nonzero input genes before
+PCA gene/chromosome selection. The median reference size is calculated across the samples retained for PCA.
+TMM followed by `log1p` uses the same median-based scale as library-size normalization; it is not edgeR log-CPM.
+TMM trimming uses ranked log-ratios. Values tied within floating-point roundoff can fall on different sides of
+a trimming boundary in JAX and edgeR, so exact cross-implementation agreement is not guaranteed for such inputs.
 
 If the input file was already restricted to a subset of genes or chromosomes, supply library sizes computed
 from the original count matrix. Choose one of:
@@ -75,13 +110,10 @@ from the original count matrix. Choose one of:
 - `--libsize PATH`: a TSV with exactly `iid` and `libsize` columns (the usual `IID`/`#IID` aliases are accepted).
 - `--libsize-name-from-covar NAME`: a column from the table supplied with `--covar`. This column remains in output.
 
-Both options require `--transform lognorm`. These are **raw positive library sizes**, not log-scale model offsets.
-Sizes are aligned by sample ID. Every retained sample needs one finite, positive size; extra samples are ignored.
-Duplicate or missing sample IDs are rejected.
-
-`--transform log1p` applies only `log(1 + y)` and is available for already-normalized expression. Omitting
-`--transform` leaves expression untransformed before gene standardization. Both log transforms require nonnegative
-expression. TMM is not available as a PCA CLI transform.
+Both options require `library-size` or `tmm` normalization. These are **raw positive library sizes**, not log-scale
+model offsets. Sizes are aligned by sample ID. Every retained sample needs one finite, positive size; extra samples
+are ignored. Duplicate or missing sample IDs are rejected. External library sizes cannot restore missing genes for
+TMM factor estimation: provide the full expression input and use the CLI gene filters when possible.
 
 ## Outputs and scree plots
 
@@ -98,7 +130,16 @@ are requested. The PC columns themselves have unit norm; their column variances 
 The Python method returns both the component table and a NumPy array of proportions in matching component order:
 
 ```python
-pcs, explained_variance_ratio = expression_data.compute_pcs(10, rng_key, transform="lognorm")
+pcs, explained_variance_ratio = expression_data.compute_pcs(10, rng_key, normalization="library-size", transform="log1p")
+```
+
+For TMM with a restricted PCA gene set in Python, normalize before selecting genes, then disable normalization
+in `compute_pcs` to avoid applying it twice:
+
+```python
+normalized = expression_data.normalize("tmm")
+selected = normalized.filter_genes_by_ids(keep=pca_genes)
+pcs, explained_variance_ratio = selected.compute_pcs(10, rng_key, normalization="none", transform="log1p")
 ```
 
 ## Component counts and reproducibility

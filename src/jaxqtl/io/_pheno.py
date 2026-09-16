@@ -18,7 +18,7 @@ import jax
 from jax import numpy as jnp
 from jaxtyping import Array, PRNGKeyArray
 
-from ._normalization import edger_cpm, inverse_normal_transform
+from ._normalization import edger_calcnormfactors, edger_cpm, inverse_normal_transform
 from ._utils import validate_sample_ids, validate_user_columns
 
 
@@ -185,15 +185,60 @@ class ExpressionData:
         libsize = self.libsize.join(pheno, on="iid", how="semi", maintain_order="right")
         return ExpressionData(pheno=pheno, pheno_meta=self.pheno_meta, libsize=libsize)
 
+    def normalize(self, normalization: Literal["none", "library-size", "tmm"] = "library-size") -> "ExpressionData":
+        """Scale expression to the median library size, without a log transform.
+
+        `library-size` uses stored totals. `tmm` multiplies totals by TMM factors
+        estimated from this container's current samples and nonzero genes.
+        Estimate normalization before selecting PCA genes. `none` returns this
+        container unchanged. Original library sizes and metadata are preserved.
+        Invalid counts, sample IDs, or retained library sizes raise `ValueError`.
+        """
+        if normalization not in {"none", "library-size", "tmm"}:
+            raise ValueError(f"Unknown PCA normalization: {normalization!r}")
+        if normalization == "none":
+            return self
+        validate_sample_ids(self.pheno, "Expression")
+        self.validate_values(require_nonnegative=True)
+        validate_sample_ids(self.libsize, "Library sizes")
+        if "libsize" not in self.libsize.columns:
+            raise ValueError("Normalization requires library sizes")
+        library_sizes = (
+            self.pheno.select("iid")
+            .join(self.libsize, on="iid", how="left", validate="1:1", maintain_order="left")
+            .get_column("libsize")
+            .cast(pl.Float64, strict=False)
+            .to_numpy()
+        )
+        if library_sizes.size == 0 or not np.all(np.isfinite(library_sizes) & (library_sizes > 0)):
+            raise ValueError("Normalization requires finite, positive library sizes for every sample")
+        effective_sizes = library_sizes
+        if normalization == "tmm":
+            values = self.pheno.select(pl.exclude("iid"))
+            nonzero = values.select((pl.all() > 0).any()).to_numpy().ravel()
+            genes = [name for name, keep in zip(values.columns, nonzero, strict=True) if keep]
+            if not genes:
+                raise ValueError("TMM requires genes with positive counts")
+            counts = values.select(genes).to_jax(dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32)
+            factors = np.asarray(edger_calcnormfactors(counts.T, library_sizes=jnp.asarray(library_sizes)))
+            if not np.all(np.isfinite(factors) & (factors > 0)):
+                raise ValueError("TMM produced invalid normalization factors")
+            effective_sizes = library_sizes * factors
+        size_factors = effective_sizes / np.median(effective_sizes)
+        pheno = self.pheno.with_columns(pl.exclude("iid") / pl.Series("size_factor", size_factors))
+        return ExpressionData(pheno, self.pheno_meta, self.libsize)
+
     def compute_pcs(
         self,
         num_pcs: int,
         rng_key: PRNGKeyArray,
-        transform: Literal["log1p", "lognorm", "tmm"] | None = None,
+        *,
+        normalization: Literal["none", "library-size", "tmm"] = "library-size",
+        transform: Literal["none", "log1p"] = "log1p",
     ) -> tuple[pl.DataFrame, np.ndarray]:
         r"""Compute probabilistic-PCA scores from the expression matrix.
 
-        Phenotypes are optionally transformed, constant genes are removed, and
+        Phenotypes are normalized and optionally log-transformed, constant genes are removed, and
         remaining genes are standardized across samples before fitting.
         The randomized initialization is determined by `rng_key`.
         A final projected SVD orders the unit-norm sample directions by decreasing
@@ -204,11 +249,12 @@ class ExpressionData:
         - `num_pcs`: Number of expression principal components to return. It must
           not exceed `min(n_samples - 1, n_variable_genes)` after transformation.
         - `rng_key`: JAX PRNG key controlling the probabilistic-PCA initialization.
-        - `transform`: Optional expression transform. `"log1p"` applies
-          `log(1 + y)`. `"lognorm"` applies `log(1 + y / (l / median(l)))`,
-          using stored library sizes aligned by `iid` and the median across
-          the samples in `pheno`. Recommended for raw counts. `"tmm"` is
-          currently unavailable.
+        - `normalization`: `"library-size"` (default) divides counts by library
+          sizes relative to their median. `"tmm"` first adjusts sizes using TMM
+          factors estimated from current genes. `"none"` skips normalization.
+        - `transform`: `"log1p"` (default) applies `log(1 + y)` after normalization;
+          `"none"` skips the log transform. For previously normalized/log-transformed
+          inputs, explicitly disable the stages already applied.
 
         **Returns:**
 
@@ -226,9 +272,8 @@ class ExpressionData:
         - `ValueError`: If there are fewer than two samples, no variable genes,
           invalid sample IDs, nonnumeric or nonfinite expression, an unsupported
           transform, negative expression for a log transform, or an invalid
-          component count. Also raised if `"lognorm"` library sizes are missing,
+          component count. Also raised if normalization library sizes are missing,
           nonnumeric, nonfinite, or nonpositive.
-        - `NotImplementedError`: If `transform="tmm"`.
         """
         if num_pcs < 1:
             raise ValueError("`num_pcs` must be greater than 0")
@@ -239,30 +284,14 @@ class ExpressionData:
             raise ValueError("PCA requires at least two samples")
         if not values.width:
             raise ValueError("PCA requires variable genes after filtering")
-        self.validate_values(require_nonnegative=transform in {"log1p", "lognorm"})
-        pheno = values.to_jax(dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32)
-
-        if transform == "tmm":
-            raise NotImplementedError("'tmm' transform not implemented yet.")
-        elif transform == "log1p":
-            pheno = jnp.log1p(pheno)  # prevent log(0)
-        elif transform == "lognorm":
-            validate_sample_ids(self.libsize, "Library sizes")
-            if "libsize" not in self.libsize.columns:
-                raise ValueError("'lognorm' requires numeric library sizes")
-            libsize = (
-                self.pheno.select("iid")
-                .join(self.libsize, on="iid", how="left", validate="1:1", maintain_order="left")
-                .get_column("libsize")
-                .cast(pl.Float64, strict=False)
-                .to_numpy()
-            )
-            if not np.all(np.isfinite(libsize) & (libsize > 0)):
-                raise ValueError("'lognorm' requires finite, positive library sizes for every sample")
-            size_factors = jnp.asarray(libsize / np.median(libsize))
-            pheno = jnp.log1p(pheno / size_factors[:, None])
-        elif transform is not None:
+        if transform not in {"none", "log1p"}:
             raise ValueError(f"Unknown PCA transform: {transform!r}")
+        self.validate_values(require_nonnegative=normalization != "none" or transform == "log1p")
+        normalized = self.normalize(normalization)
+        values = normalized.pheno.select(pl.exclude("iid"))
+        pheno = values.to_jax(dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32)
+        if transform == "log1p":
+            pheno = jnp.log1p(pheno)
 
         if not bool(jnp.all(jnp.isfinite(pheno))):
             raise ValueError("PCA transformed expression values must be finite")
