@@ -23,6 +23,8 @@ def edger_calcnormfactors(
     logratio_trim: float = 0.3,
     sum_trim: float = 0.05,
     acutoff: float = -1e10,
+    *,
+    library_sizes: Any | None = None,
 ) -> jax.Array:
     r"""Calculate edgeR-style TMM scaling factors for a gene-by-sample count matrix.
 
@@ -39,10 +41,15 @@ def edger_calcnormfactors(
       function.
     - `ref`: Optional zero-based reference-sample column. If `None`, select the
       sample whose upper-quartile normalized expression is closest to the mean.
+      When the median upper quartile is near zero, use the sample with the
+      largest sum of square-root counts instead.
     - `logratio_trim`: Fraction trimmed from each tail of the log-ratio ranks.
     - `sum_trim`: Fraction trimmed from each tail of the average-expression
       ranks.
     - `acutoff`: Minimum average log-expression retained for factor estimation.
+    - `library_sizes`: Optional positive library sizes with shape `(n,)`, aligned
+      to count columns. Defaults to column sums. Supply full totals when genes
+      have already been filtered.
 
     **Returns:**
 
@@ -55,12 +62,17 @@ def edger_calcnormfactors(
     values, such as negative counts or NaNs, can also produce nonfinite factors.
     """
     counts_array = _as_inexact_array(counts)
-    library_sizes = jnp.sum(counts_array, axis=0)
+    library_sizes = jnp.sum(counts_array, axis=0) if library_sizes is None else _as_inexact_array(library_sizes)
     normalized_counts = counts_array / library_sizes
 
     if ref is None:
         upper_quartiles = jnp.percentile(normalized_counts, 75.0, axis=0)
         reference_index = jnp.argmin(jnp.abs(upper_quartiles - jnp.mean(upper_quartiles)))
+        reference_index = jnp.where(
+            jnp.median(upper_quartiles) < 1e-20,
+            jnp.argmax(jnp.sum(jnp.sqrt(counts_array), axis=0)),
+            reference_index,
+        )
     else:
         reference_index = jnp.asarray(ref)
 
@@ -106,7 +118,10 @@ def edger_calcnormfactors(
             numerator = jnp.sum(jnp.where(keep, log_ratios_column / variances_column, 0.0))
             denominator = jnp.sum(jnp.where(keep, 1.0 / variances_column, 0.0))
             safe_denominator = jnp.where(denominator > 0.0, denominator, 1.0)
-            return jnp.where(denominator > 0.0, 2.0 ** (numerator / safe_denominator), 1.0)
+            factor = jnp.where(denominator > 0.0, 2.0 ** (numerator / safe_denominator), 1.0)
+            # Identical profiles need no adjustment, including zero-variance weights.
+            identical = jnp.max(jnp.where(finite, jnp.abs(log_ratios_column), 0.0)) < 1e-6
+            return jnp.where(identical, 1.0, factor)
 
         return jax.lax.cond(
             n_finite > 0,

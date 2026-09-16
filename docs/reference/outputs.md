@@ -3,6 +3,22 @@
 Mapping outputs are compressed Parquet files. Columns specific to the Negative Binomial model or permutation
 calibration are omitted when they do not apply.
 
+## Expression PCA output
+
+`jaxqtl compute-pcs --out PATH` writes a TSV at `PATH` with `iid`, optional covariates, and `ExprPC1` through
+`ExprPC{num_pcs}` in decreasing explained-variance order. Rows follow retained expression-file sample order.
+
+`PATH.variance.tsv` contains one row per component:
+
+| Column | Meaning |
+| --- | --- |
+| `component` | Matching PC column name, such as `ExprPC1` |
+| `explained_variance_ratio` | Proportion of total transformed, standardized expression variance explained |
+| `cumulative_explained_variance_ratio` | Sum of proportions through this component |
+
+The command also logs these proportions to `PATH.log`. See [Expression PCA reference](compute-pcs.md)
+for preprocessing and cohort-selection details.
+
 ## Cis output
 
 `jaxqtl cis` writes `${out}.cis.${test}.${perm|acat}.parquet.gz`.

@@ -46,3 +46,5 @@ The gene-level `pvalue_adj` is not an across-gene FDR value.
 
 Genes with no variants in the requested window or no phenotype variance are skipped. See
 [Cis output](../reference/outputs.md#cis-output) for the complete result contract.
+
+See the [Mapping command reference](../reference/mapping.md) for all options and defaults.

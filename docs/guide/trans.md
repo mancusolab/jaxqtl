@@ -23,3 +23,5 @@ summary statistics so metadata are not repeated for every phenotype.
     and records a warning.
 
 See [Trans output](../reference/outputs.md#trans-output) for filenames and schemas.
+
+See the [Mapping command reference](../reference/mapping.md) for all options and defaults.

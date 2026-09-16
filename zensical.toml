@@ -44,7 +44,11 @@ nav = [
         ] },
     ] },
     { "Command and output reference" = [
-        "reference/cli.md",
+        { "Command-line interface" = [
+            { "Overview" = "reference/cli.md" },
+            "reference/mapping.md",
+            "reference/compute-pcs.md",
+        ] },
         "reference/outputs.md",
     ] },
     { "Python API reference" = [
@@ -69,7 +73,7 @@ features = [
     "toc.integrate",
     "header.autohide",
 ]
-favicon = "_static/favicon.png"
+favicon = "_static/qtl-boxplots.svg"
 custom_dir = "docs_theme/overrides"
 
 [[project.theme.palette]]
@@ -88,7 +92,7 @@ toggle = { icon = "material/brightness-4", name = "Switch to light mode" }
 
 [project.theme.icon]
 repo = "fontawesome/brands/github"
-logo = "material/chart-bell-curve-cumulative"
+logo = "custom/qtl-boxplots"
 
 [project.markdown_extensions.pymdownx.arithmatex]
 generic = true
