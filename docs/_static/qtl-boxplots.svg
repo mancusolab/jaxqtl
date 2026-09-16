@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" fill="currentColor" role="img" aria-labelledby="title">
+  <title id="title">Three genotype groups with increasing expression</title>
+  <!-- Adapted from Font Awesome Free 7.3.1 chart-gantt by Fonticons, Inc.
+       https://fontawesome.com/icons/classic/solid/chart-gantt
+       License: CC BY 4.0 https://creativecommons.org/licenses/by/4.0/
+       Changes: three ascending vertical bars; original axes retained. -->
+  <path d="M64 64c0-17.7-14.3-32-32-32S0 46.3 0 64L0 400c0 44.2 35.8 80 80 80l400 0c17.7 0 32-14.3 32-32s-14.3-32-32-32L80 416c-8.8 0-16-7.2-16-16L64 64z"/>
+  <rect x="128" y="240" width="64" height="128" rx="24"/>
+  <rect x="256" y="160" width="64" height="144" rx="24"/>
+  <rect x="384" y="64" width="64" height="160" rx="24"/>
+</svg>
