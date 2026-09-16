@@ -16,7 +16,7 @@ calibration are omitted when they do not apply.
 | `explained_variance_ratio` | Proportion of total transformed, standardized expression variance explained |
 | `cumulative_explained_variance_ratio` | Sum of proportions through this component |
 
-The command also logs these proportions to `PATH.log`. See [Compute expression PCs](../guide/compute-pcs.md)
+The command also logs these proportions to `PATH.log`. See [Expression PCA reference](compute-pcs.md)
 for preprocessing and cohort-selection details.
 
 ## Cis output

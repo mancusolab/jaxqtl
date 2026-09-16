@@ -44,7 +44,11 @@ nav = [
         ] },
     ] },
     { "Command and output reference" = [
-        "reference/cli.md",
+        { "Command-line interface" = [
+            { "Overview" = "reference/cli.md" },
+            "reference/mapping.md",
+            "reference/compute-pcs.md",
+        ] },
         "reference/outputs.md",
     ] },
     { "Python API reference" = [

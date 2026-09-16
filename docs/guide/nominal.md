@@ -26,3 +26,5 @@ Score and SPA tests share one null fit per phenotype; GLM Wald tests fit each va
 See [Troubleshooting](troubleshooting.md) for model controls and [Run large scans](hpc.md) for performance.
 
 See [Nominal output](../reference/outputs.md#nominal-output) for the output columns.
+
+See the [Mapping command reference](../reference/mapping.md) for all options and defaults.
