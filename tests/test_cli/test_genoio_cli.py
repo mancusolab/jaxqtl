@@ -547,6 +547,8 @@ def test_nominal_cli_smoke_writes_genoio_score_schema(tmp_path: Path) -> None:
         "pvalue",
         "negloglikelihood",
         "model_converged",
+        "result_valid",
+        "failure_reason",
     ]
 
 
@@ -656,6 +658,8 @@ def test_map_cis_yields_empty_nominal_frame_when_all_genes_are_skipped() -> None
         "pvalue",
         "negloglikelihood",
         "model_converged",
+        "result_valid",
+        "failure_reason",
     ]
 
 
@@ -672,23 +676,23 @@ def test_map_cis_yields_empty_cis_frame_when_all_genes_are_skipped() -> None:
     assert chunks[0].columns == [
         "phenotype_id",
         "chrom",
-        "num_var",
         "snp",
+        "pos",
         "a1",
         "a0",
-        "pos",
         "tss_distance",
         "af",
         "ma_count",
         "beta",
         "se",
         "pvalue",
-        "pvalue_adj",
-        "adj_method",
         "negloglikelihood",
         "model_converged",
         "result_valid",
         "failure_reason",
+        "num_var",
+        "pvalue_adj",
+        "adj_method",
     ]
 
 
@@ -823,7 +827,9 @@ def test_map_cis_preserves_invalid_rows_and_parquet_schema(
     assert invalid_row["failure_reason"].item() == "no_finite_pvalues"
     assert valid_row["result_valid"].item() is True
     assert valid_row["failure_reason"].item() is None
-    assert log.warnings == ["No finite p-values for invalid over region 1:1-200; emitting an invalid result row."]
+    assert log.warnings == [
+        "Invalid result for invalid over region 1:1-200: no_finite_pvalues; emitting an invalid result row."
+    ]
 
 
 def test_cis_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
@@ -912,3 +918,128 @@ def test_nominal_scan_streams_map_cis_chunks(monkeypatch: pytest.MonkeyPatch, tm
     assert return_code == 0
     assert nominal_output.exists()
     assert pl.read_parquet(nominal_output)["phenotype_id"].to_list() == ["gene1", "gene2"]
+
+
+@pytest.mark.parametrize("bad", [float("nan"), float("inf"), None, "bad"])
+def test_mapping_rejects_invalid_covariates(tmp_path, bad):
+    args = _common_setup_args("nominal")
+    covar = pl.read_csv(args.covar, separator="\t")
+    values = [bad] * covar.height
+    covar = covar.select(covar.columns[0]).with_columns(pl.Series("bad_covariate", values, strict=False))
+    args.covar = str(tmp_path / "covar.tsv")
+    covar.write_csv(args.covar, separator="\t")
+    with pytest.raises(ValueError, match="Covariates.*(numeric|finite|missing)"):
+        cli._common_setup(args, _LoggerStub())
+
+
+@pytest.mark.parametrize("kind", ["constant", "collinear", "too_few", "no_overlap"])
+def test_mapping_rejects_invalid_aligned_design(tmp_path, kind):
+    args = _common_setup_args("nominal")
+    covar = pl.read_csv(args.covar, separator="\t").select(pl.first())
+    n = covar.height
+    if kind == "constant":
+        covar = covar.with_columns(pl.lit(2.0).alias("constant"))
+    else:
+        covar = covar.with_columns(pl.Series("age", range(n)))
+    if kind == "collinear":
+        covar = covar.with_columns((pl.col("age") * 2).alias("age_twice"))
+    if kind == "too_few":
+        covar = covar.head(3)
+    if kind == "no_overlap":
+        covar = covar.with_columns(pl.lit("not_in_expression").alias(covar.columns[0])).head(1)
+    args.covar = str(tmp_path / "covar.tsv")
+    covar.write_csv(args.covar, separator="\t")
+    expected = "(rank|constant|collinear)" if kind in {"constant", "collinear"} else "samples"
+    with pytest.raises(ValueError, match=expected):
+        cli._common_setup(args, _LoggerStub())
+
+
+@pytest.mark.parametrize("value", [float("inf"), float("nan"), "bad"])
+def test_mapping_rejects_invalid_offsets(tmp_path, value):
+    args = _common_setup_args("nominal")
+    ids = pl.read_csv(args.covar, separator="\t").select(pl.first().alias("iid"))
+    offset = ids.with_columns(pl.lit(value).alias("offset"))
+    args.offset = str(tmp_path / "offset.tsv")
+    args.set_offset_from_libsize = False
+    offset.write_csv(args.offset, separator="\t")
+    with pytest.raises(ValueError, match="Offsets.*(numeric|finite|missing)"):
+        cli._common_setup(args, _LoggerStub())
+
+
+@pytest.mark.parametrize("value", [-1.0, float("nan"), float("inf")])
+def test_mapping_rejects_invalid_count_responses(tmp_path, value):
+    args = _common_setup_args("nominal")
+    expression = pl.read_csv(args.pheno, separator="\t")
+    expression = expression.with_columns(pl.lit(value).alias(expression.columns[4]))
+    args.pheno = str(tmp_path / "expression.bed")
+    expression.write_csv(args.pheno, separator="\t")
+    with pytest.raises(ValueError, match="Expression.*(nonnegative|finite)"):
+        cli._common_setup(args, _LoggerStub())
+
+
+@pytest.mark.parametrize("model", ["gaussian", "poisson", "nb"])
+def test_trans_cli_writes_model_specific_schema(tmp_path, model):
+    args = _common_setup_args("trans")
+    args.model = model
+    args.genes = [Path("tutorial/input/genelist_5").read_text().splitlines()[0]]
+    args.gene_list = None
+    args.out = str(tmp_path / model)
+    cli._trans_scan(args, _LoggerStub())
+    result = pl.read_parquet(f"{args.out}.trans.score.sumstats.parquet.gz")
+    assert result.height > 0
+    assert ("nb_alpha" in result.columns) == (model == "nb")
+    assert {"phenotype_id", "snp", "beta", "se", "pvalue", "model_converged"} <= set(result.columns)
+
+
+def test_mapping_rejects_negative_gene_before_prevalence_filter(tmp_path):
+    args = _common_setup_args("nominal")
+    expression = pl.read_csv(args.pheno, separator="\t")
+    gene = Path(args.gene_list).read_text().splitlines()[0]
+    expression = expression.with_columns(
+        [
+            pl.when(pl.col(expression.columns[3]) == gene).then(-1.0).otherwise(pl.col(name)).alias(name)
+            for name in expression.columns[4:]
+        ]
+    )
+    args.pheno = str(tmp_path / "expression.bed")
+    expression.write_csv(args.pheno, separator="\t")
+    with pytest.raises(ValueError, match="nonnegative"):
+        cli._common_setup(args, _LoggerStub())
+
+
+@pytest.mark.parametrize("model", ["gaussian", "poisson", "nb"])
+def test_mapping_accepts_model_appropriate_fractional_responses(tmp_path, model):
+    args = _common_setup_args("nominal")
+    args.model = model
+    args.set_offset_from_libsize = False
+    expression = pl.read_csv(args.pheno, separator="\t")
+    expression = expression.with_columns(
+        [(pl.col(name) * 0.5 - (0.25 if model == "gaussian" else 0.0)).alias(name) for name in expression.columns[4:]]
+    )
+    args.pheno = str(tmp_path / "expression.bed")
+    expression.write_csv(args.pheno, separator="\t")
+    ready, *_ = cli._common_setup(args, _LoggerStub())
+    assert ready.expression.pheno.height > 0
+
+
+def test_mapping_ignores_invalid_covariates_outside_analysis_cohort(tmp_path):
+    args = _common_setup_args("nominal")
+    covar = pl.read_csv(args.covar, separator="\t")
+    extra = covar.head(1).with_columns(pl.lit("unused").alias("iid"), pl.lit(float("inf")).alias("age"))
+    covar = pl.concat([covar, extra], how="vertical_relaxed")
+    args.covar = str(tmp_path / "covar.tsv")
+    covar.write_csv(args.covar, separator="\t")
+    ready, *_ = cli._common_setup(args, _LoggerStub())
+    assert bool(jnp.isfinite(ready.covar).all())
+
+
+def test_mapping_without_covariates_preserves_sample_dimension(tmp_path):
+    args = _common_setup_args("nominal")
+    covar = pl.read_csv(args.covar, separator="\t").select("iid").with_columns(pl.lit(0.0).alias("offset"))
+    args.covar = str(tmp_path / "offset_only.tsv")
+    covar.write_csv(args.covar, separator="\t")
+    args.offset_name_from_covar = "offset"
+    args.set_offset_from_libsize = False
+    args.no_intercept = True
+    ready, *_ = cli._common_setup(args, _LoggerStub())
+    assert ready.covar.shape == (len(ready.sample_ids), 0)
