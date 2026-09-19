@@ -23,6 +23,7 @@ from ..hypothesis import (
     TestResult,
 )
 from ..log import get_log
+from ._results import association_columns, with_result_diagnostics
 from ._scan import (
     _HostBuffers,
     AssociationScan,
@@ -236,7 +237,8 @@ def map_cis(
             )
             if not result_record["result_valid"]:
                 log.warning(
-                    f"No finite p-values for {gene_name} over region {chrom}:{start}-{end}; "
+                    f"Invalid result for {gene_name} over region {chrom}:{start}-{end}: "
+                    f"{result_record['failure_reason']}; "
                     "emitting an invalid result row."
                 )
 
@@ -313,46 +315,26 @@ def _empty_nominal_columns() -> dict[str, Any]:
         "tss_distance": pl.Int64,
         "af": pl.Float64,
         "ma_count": pl.Int64,
-        "beta": pl.Float64,
-        "se": pl.Float64,
-        "pvalue": pl.Float64,
-        "nb_alpha": pl.Float64,
-        "negloglikelihood": pl.Float64,
-        "model_converged": pl.Boolean,
+        **association_columns(),
     }
 
 
 def _empty_cis_columns(gene_test) -> dict[str, Any]:
     columns = {
-        "phenotype_id": pl.Utf8,
-        "chrom": pl.Utf8,
+        **_empty_nominal_columns(),
         "num_var": pl.Int64,
-        "snp": pl.Utf8,
-        "a1": pl.Utf8,
-        "a0": pl.Utf8,
-        "pos": pl.Int64,
-        "tss_distance": pl.Int64,
-        "af": pl.Float64,
-        "ma_count": pl.Int64,
-        "shape1": pl.Float64,
-        "shape2": pl.Float64,
-        "nc_estimate": pl.Float64,
-        "perm_converged": pl.Boolean,
-        "beta": pl.Float64,
-        "se": pl.Float64,
-        "pvalue": pl.Float64,
         "pvalue_adj": pl.Float64,
         "adj_method": pl.Utf8,
-        "nb_alpha": pl.Float64,
-        "negloglikelihood": pl.Float64,
-        "model_converged": pl.Boolean,
-        "result_valid": pl.Boolean,
-        "failure_reason": pl.Utf8,
     }
-
-    if not isinstance(gene_test, BetaPermutation):
-        for beta_perm_col in ["shape1", "shape2", "nc_estimate", "perm_converged"]:
-            columns.pop(beta_perm_col)
+    if isinstance(gene_test, BetaPermutation):
+        columns.update(
+            {
+                "shape1": pl.Float64,
+                "shape2": pl.Float64,
+                "nc_estimate": pl.Float64,
+                "perm_converged": pl.Boolean,
+            }
+        )
 
     return columns
 
@@ -434,7 +416,7 @@ def _process_cis_result(
             perm_converged=bool(beta_params.converged) and bool(reference_converged),
         )
 
-    return result
+    return with_result_diagnostics(pl.DataFrame([result], schema=_empty_cis_columns(gene_test))).row(0, named=True)
 
 
 def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.DataFrame:
@@ -459,4 +441,4 @@ def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.Da
     region_df = region_df.with_columns(pl.lit(cis_data.gene_name).alias("phenotype_id"), *columns)
     # Keep phenotype identifiers first in the exported table.
     region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))
-    return region_df
+    return with_result_diagnostics(region_df).select(*_empty_nominal_columns())

@@ -51,6 +51,25 @@ External offsets are used as given, typically on the log scale. These differ fro
 `compute-pcs --libsize`. Computed library sizes preserve totals before gene selection.
 See [Covariates](../guide/covariates.md) and [Offsets](../guide/offsets.md) for preparation examples.
 
+## Input validation
+
+Mapping requires finite numeric expression, covariates, and offsets. Poisson and Negative Binomial responses
+must be nonnegative; fractional counts are accepted. Gaussian responses may be negative. Selected expression
+is checked before prevalence filtering so invalid values cannot silently remove a gene.
+
+Sample IDs must be present and unique. Covariates and offsets are checked on the shared analysis cohort.
+Categorical encoding and covariate standardization also use that cohort, after alignment. Use `--one-hot`
+for string covariates; missing categories are rejected.
+
+The final covariate design must have full column rank, and the sample count must exceed the number of covariate
+columns (including the intercept) plus one tested variant. Remove redundant columns or reduce the number of
+covariates when these checks fail. A single nonzero constant column can serve as an intercept; extra constant
+columns are collinear. Constant columns cannot be standardized with `--normalize-covar`. If your input already
+contains a column named `intercept`, use `--no-intercept` or remove that column.
+
+These checks validate the shared design before fitting. A particular variant can still be collinear with the
+covariates or have insufficient information for reliable inference; inspect scan diagnostics too.
+
 ## Sample, gene, and variant selection
 
 | Option | Effect |

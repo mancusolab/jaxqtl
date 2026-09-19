@@ -261,7 +261,9 @@ class ReadyDataState:
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
         # convert covariates to jax.numpy at this point
-        covar_array = covar.select(pl.all().exclude("iid")).to_jax()
+        covar_array = (
+            covar.select(pl.all().exclude("iid")).to_jax() if covar.width > 1 else jnp.empty((len(sample_ids), 0))
+        )
 
         # offset should only have two columns by construction at this point
         if offset is not None:
@@ -307,7 +309,7 @@ def align_on_iid(
     ordered_common_iids = [iid for iid in base_iids if iid in common_iids]
 
     # construct canonical iid frame in *base order*
-    iid_df = pl.DataFrame({iid_col: ordered_common_iids})
+    iid_df = pl.DataFrame({iid_col: ordered_common_iids}, schema={iid_col: dfs[0].schema[iid_col]})
 
     # align all dfs using left join on the canonical ordering
     aligned = []
@@ -318,6 +320,8 @@ def align_on_iid(
 
 
 def _reject_duplicate_iids(df: pl.DataFrame, iid_col: str, df_idx: int) -> None:
+    if iid_col not in df.columns or df.get_column(iid_col).null_count():
+        raise ValueError(f"Dataframe {df_idx} must contain non-null {iid_col} sample IDs")
     duplicated = df.filter(pl.col(iid_col).is_duplicated()).get_column(iid_col).unique().to_list()
     if duplicated:
         examples = ", ".join(str(iid) for iid in duplicated[:5])
