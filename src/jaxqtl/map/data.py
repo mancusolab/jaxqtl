@@ -239,8 +239,9 @@ class ReadyDataState:
 
         **Raises:**
 
-        - `ValueError`: If keep and drop filters are both supplied, an input contains
-          duplicate IIDs, or genotype sample metadata lack `iid`.
+        - `ValueError`: If keep and drop filters are both supplied, an input lacks
+          `iid` or contains null or duplicate IIDs, or the covariate frame contains
+          no covariate or intercept columns.
         - `AssertionError`: If `offset` does not have exactly two columns after
           alignment.
         """
@@ -260,8 +261,9 @@ class ReadyDataState:
         # at this point we have only 1 kind of expression object so just make a new one
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
-        # convert covariates to jax.numpy at this point
-        covar_array = covar.select(pl.all().exclude("iid")).to_jax()
+        if covar.width <= 1:
+            raise ValueError("No covariates remain; supply at least one covariate or an intercept column")
+        covar_array = covar.select(pl.exclude("iid")).to_jax()
 
         # offset should only have two columns by construction at this point
         if offset is not None:
@@ -307,7 +309,7 @@ def align_on_iid(
     ordered_common_iids = [iid for iid in base_iids if iid in common_iids]
 
     # construct canonical iid frame in *base order*
-    iid_df = pl.DataFrame({iid_col: ordered_common_iids})
+    iid_df = pl.DataFrame({iid_col: ordered_common_iids}, schema={iid_col: dfs[0].schema[iid_col]})
 
     # align all dfs using left join on the canonical ordering
     aligned = []
@@ -318,6 +320,8 @@ def align_on_iid(
 
 
 def _reject_duplicate_iids(df: pl.DataFrame, iid_col: str, df_idx: int) -> None:
+    if iid_col not in df.columns or df.get_column(iid_col).null_count():
+        raise ValueError(f"Dataframe {df_idx} must contain non-null {iid_col} sample IDs")
     duplicated = df.filter(pl.col(iid_col).is_duplicated()).get_column(iid_col).unique().to_list()
     if duplicated:
         examples = ", ".join(str(iid) for iid in duplicated[:5])

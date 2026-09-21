@@ -318,3 +318,10 @@ def test_cis_data_uses_genoio_variant_metadata_without_legacy_columns() -> None:
 
     output = cis_data.get_cis_info()
     assert output.columns == ["chrom", "snp", "pos", "a1", "a0", "tss_distance", "af", "ma_count"]
+
+
+def test_ready_data_rejects_empty_covariate_design():
+    dataset = _SyntheticGenoioDataset()
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"]})
+    with pytest.raises(ValueError, match="No covariates remain"):
+        ReadyDataState.from_data(cast(genoio.Dataset, dataset), _expression(), covar)
