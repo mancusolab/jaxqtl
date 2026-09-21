@@ -20,7 +20,7 @@ def validate_numeric_frame(frame: pl.DataFrame, label: str) -> None:
 
 
 def prepare_covariates(covar: pl.DataFrame, *, one_hot: bool, normalize: bool, intercept: bool) -> pl.DataFrame:
-    """Encode and validate the aligned design, then optionally standardize it."""
+    """Encode and optionally standardize the aligned design, then validate it."""
     if covar.height == 0:
         raise ValueError("No shared samples remain for mapping")
     if any(covar.get_column(name).null_count() for name in covar.columns if name != "iid"):
@@ -42,19 +42,20 @@ def prepare_covariates(covar: pl.DataFrame, *, one_hot: bool, normalize: bool, i
         covar = covar.with_columns((cols - cols.mean()) / cols.std())
     validate_numeric_frame(covar, "Covariates")
     n, p = covar.height, covar.width - 1
+    if p == 0:
+        raise ValueError("No covariates remain; retain at least one covariate or enable the intercept")
     if n <= p + 1:
         raise ValueError(f"Mapping requires more than {p + 1} samples for {p} covariates and a tested variant; got {n}")
-    if p:
-        values = covar.select(pl.exclude("iid")).to_jax(
-            dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32
+    values = covar.select(pl.exclude("iid")).to_jax(
+        dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32
+    )
+    if not bool(jnp.isfinite(values).all()):
+        raise ValueError("Covariates must remain finite in the active JAX precision")
+    # Column scaling prevents different measurement units from dominating the rank tolerance.
+    scale = jnp.max(jnp.abs(values), axis=0)
+    scaled = values / jnp.where(scale > 0, scale, 1.0)
+    if jnp.linalg.matrix_rank(scaled) < p:
+        raise ValueError(
+            f"Covariates must have full column rank; remove constant or collinear columns: {covar.columns[1:]}"
         )
-        if not bool(jnp.isfinite(values).all()):
-            raise ValueError("Covariates must remain finite in the active JAX precision")
-        # Column scaling prevents different measurement units from dominating the rank tolerance.
-        scale = jnp.max(jnp.abs(values), axis=0)
-        scaled = values / jnp.where(scale > 0, scale, 1.0)
-        if jnp.linalg.matrix_rank(scaled) < p:
-            raise ValueError(
-                f"Covariates must have full column rank; remove constant or collinear columns: {covar.columns[1:]}"
-            )
     return covar

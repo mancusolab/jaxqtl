@@ -1033,7 +1033,7 @@ def test_mapping_ignores_invalid_covariates_outside_analysis_cohort(tmp_path):
     assert bool(jnp.isfinite(ready.covar).all())
 
 
-def test_mapping_without_covariates_preserves_sample_dimension(tmp_path):
+def test_mapping_rejects_empty_design_after_offset_extraction(tmp_path):
     args = _common_setup_args("nominal")
     covar = pl.read_csv(args.covar, separator="\t").select("iid").with_columns(pl.lit(0.0).alias("offset"))
     args.covar = str(tmp_path / "offset_only.tsv")
@@ -1041,5 +1041,5 @@ def test_mapping_without_covariates_preserves_sample_dimension(tmp_path):
     args.offset_name_from_covar = "offset"
     args.set_offset_from_libsize = False
     args.no_intercept = True
-    ready, *_ = cli._common_setup(args, _LoggerStub())
-    assert ready.covar.shape == (len(ready.sample_ids), 0)
+    with pytest.raises(ValueError, match="No covariates remain"):
+        cli._common_setup(args, _LoggerStub())

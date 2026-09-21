@@ -717,7 +717,7 @@ def _common_setup(args, log):
 
     covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
-    # before filter gene list, calculate library size and set offset, or read in pre-computed offset
+    # Extract offsets before covariate encoding; stored library totals precede gene selection.
     if args.offset:
         offset = read_offset_tsvlike(args.offset)
     elif args.offset_name_from_covar:
@@ -735,7 +735,6 @@ def _common_setup(args, log):
         frames.append(offset)
     aligned = align_on_iid(frames)
     expr_data = ExpressionData(aligned[1], expr_data.pheno_meta, aligned[2])
-    expr_data.validate_values(require_nonnegative=args.model != "gaussian")
     covar = prepare_covariates(
         aligned[3], one_hot=args.one_hot, normalize=args.normalize_covar, intercept=not args.no_intercept
     )

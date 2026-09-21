@@ -66,6 +66,8 @@ columns (including the intercept) plus one tested variant. Remove redundant colu
 covariates when these checks fail. A single nonzero constant column can serve as an intercept; extra constant
 columns are collinear. Constant columns cannot be standardized with `--normalize-covar`. If your input already
 contains a column named `intercept`, use `--no-intercept` or remove that column.
+An empty final design is rejected, including when offset extraction or categorical encoding removes the last
+covariate and `--no-intercept` is set. Intercept-only models remain valid.
 
 These checks validate the shared design before fitting. A particular variant can still be collinear with the
 covariates or have insufficient information for reliable inference; inspect scan diagnostics too.

@@ -239,8 +239,9 @@ class ReadyDataState:
 
         **Raises:**
 
-        - `ValueError`: If keep and drop filters are both supplied, an input contains
-          duplicate IIDs, or genotype sample metadata lack `iid`.
+        - `ValueError`: If keep and drop filters are both supplied, an input lacks
+          `iid` or contains null or duplicate IIDs, or the covariate frame contains
+          no covariate or intercept columns.
         - `AssertionError`: If `offset` does not have exactly two columns after
           alignment.
         """
@@ -260,10 +261,9 @@ class ReadyDataState:
         # at this point we have only 1 kind of expression object so just make a new one
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
-        # convert covariates to jax.numpy at this point
-        covar_array = (
-            covar.select(pl.all().exclude("iid")).to_jax() if covar.width > 1 else jnp.empty((len(sample_ids), 0))
-        )
+        if covar.width <= 1:
+            raise ValueError("No covariates remain; supply at least one covariate or an intercept column")
+        covar_array = covar.select(pl.exclude("iid")).to_jax()
 
         # offset should only have two columns by construction at this point
         if offset is not None:

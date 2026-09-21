@@ -5,16 +5,24 @@ interpretable result.
 
 ## Cis validity
 
-Use `result_valid` as the first filter for cis results. It indicates that the scan selected a variant with a finite
-nominal p-value. When it is false, `failure_reason` records why no association was selected. The explicit reason
-`no_finite_pvalues` means every SNP-level p-value in the window was nonfinite.
+Use `result_valid` as the first filter for mapping results. Across cis, nominal, and trans scans, it requires a
+finite effect, a finite positive standard error, a finite nominal p-value in `[0, 1]`, and a finite objective.
+When present, dispersion must be finite and nonnegative, and the adjusted p-value must be finite and in `[0, 1]`.
+Zero p-values are accepted. When a check fails, `failure_reason` records the first failed check; invalid rows
+retain their computed values for inspection. See the [output reference](../reference/outputs.md#validity-and-convergence)
+for the check order.
+
+For cis scans, `no_finite_pvalues` means every SNP-level p-value in the window was nonfinite, so no lead variant
+could be selected. This row retains the phenotype identifier and variant count, with null association and
+convergence fields.
 
 `model_converged` describes the selected model fit. For Beta-permutation calibration, `perm_converged` requires both
 the calibration estimate and fitted Beta parameters to converge.
 
-Check that `pvalue_adj` is finite even when `result_valid` is true. A selected lead can coexist with failed
-Beta calibration or a nonfinite ACAT aggregate. The separate fields should not be interpreted as a single
-overall success flag.
+Check `model_converged` and, when present, `perm_converged` alongside `result_valid`. A finite but nonconverged
+fit can pass the numerical validity checks. A nonfinite or out-of-range `pvalue_adj` makes a cis result invalid,
+even when a lead variant was selected. Numerical validity alone does not establish model adequacy or
+statistical calibration.
 
 ## Interpreting an unsuccessful fit
 

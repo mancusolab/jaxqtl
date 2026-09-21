@@ -27,10 +27,12 @@ def test_single_intercept_is_valid_without_normalization():
     assert result.equals(covar)
 
 
-def test_empty_covariate_design_is_valid_without_intercept():
+def test_empty_covariate_design_requires_intercept():
     covar = pl.DataFrame({"iid": list("abcd")})
-    result = prepare_covariates(covar, one_hot=False, normalize=False, intercept=False)
-    assert result.equals(covar)
+    with pytest.raises(ValueError, match="No covariates remain"):
+        prepare_covariates(covar, one_hot=False, normalize=False, intercept=False)
+    result = prepare_covariates(covar, one_hot=False, normalize=False, intercept=True)
+    assert result.columns == ["iid", "intercept"]
 
 
 def test_categorical_covariates_are_encoded_after_alignment():
@@ -76,3 +78,12 @@ def test_covariate_rank_validation_in_active_precision(x64):
             prepare_covariates(
                 covar.with_columns((pl.col("x") * 2).alias("duplicate")), one_hot=False, normalize=False, intercept=True
             )
+
+
+def test_single_category_requires_intercept_after_encoding():
+    covar = pl.DataFrame({"iid": list("abcd"), "batch": ["one"] * 4})
+    with pytest.raises(ValueError, match="No covariates remain"):
+        prepare_covariates(covar, one_hot=True, normalize=False, intercept=False)
+    result = prepare_covariates(covar, one_hot=True, normalize=False, intercept=True)
+    assert result.columns == ["iid", "intercept"]
+    assert result["intercept"].to_list() == [1.0] * 4

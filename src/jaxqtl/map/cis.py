@@ -439,6 +439,5 @@ def _process_nominal_result(cis_data: CisData, test_result: TestResult) -> pl.Da
         else:
             columns.append(pl.Series(name, values))
     region_df = region_df.with_columns(pl.lit(cis_data.gene_name).alias("phenotype_id"), *columns)
-    # Keep phenotype identifiers first in the exported table.
-    region_df = region_df.select(pl.col("phenotype_id"), pl.all().exclude("phenotype_id"))
+    # Apply the common output order, including phenotype identifiers first.
     return with_result_diagnostics(region_df).select(*_empty_nominal_columns())
