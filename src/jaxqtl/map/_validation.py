@@ -1,8 +1,10 @@
 # pattern: Functional Core
-"""Validate host-side mapping inputs before fitting or device conversion."""
+"""Validate mapping inputs and the covariate design before fitting."""
 
-import numpy as np
 import polars as pl
+
+import jax
+import jax.numpy as jnp
 
 
 def validate_numeric_frame(frame: pl.DataFrame, label: str) -> None:
@@ -39,17 +41,19 @@ def prepare_covariates(covar: pl.DataFrame, *, one_hot: bool, normalize: bool, i
         cols = pl.col(names).cast(pl.Float64)
         covar = covar.with_columns((cols - cols.mean()) / cols.std())
     validate_numeric_frame(covar, "Covariates")
-    values = (
-        covar.select(pl.exclude("iid")).to_numpy().astype(float) if covar.width > 1 else np.empty((covar.height, 0))
-    )
-    n, p = values.shape
+    n, p = covar.height, covar.width - 1
     if n <= p + 1:
         raise ValueError(f"Mapping requires more than {p + 1} samples for {p} covariates and a tested variant; got {n}")
     if p:
+        values = covar.select(pl.exclude("iid")).to_jax(
+            dtype=pl.Float64 if jax.config.read("jax_enable_x64") else pl.Float32
+        )
+        if not bool(jnp.isfinite(values).all()):
+            raise ValueError("Covariates must remain finite in the active JAX precision")
         # Column scaling prevents different measurement units from dominating the rank tolerance.
-        scale = np.max(np.abs(values), axis=0)
-        scaled = values / np.where(scale > 0, scale, 1.0)
-        if np.linalg.matrix_rank(scaled) < p:
+        scale = jnp.max(jnp.abs(values), axis=0)
+        scaled = values / jnp.where(scale > 0, scale, 1.0)
+        if jnp.linalg.matrix_rank(scaled) < p:
             raise ValueError(
                 f"Covariates must have full column rank; remove constant or collinear columns: {covar.columns[1:]}"
             )

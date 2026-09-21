@@ -4,6 +4,8 @@ import numpy as np
 import polars as pl
 import pytest
 
+import jax
+
 from jaxqtl.map._validation import prepare_covariates
 from jaxqtl.map.data import align_on_iid
 
@@ -56,3 +58,21 @@ def test_normalization_rejects_covariates_that_become_collinear_without_intercep
 def test_alignment_rejects_invalid_sample_ids(ids):
     with pytest.raises(ValueError, match="(non-null|Duplicate)"):
         align_on_iid([pl.DataFrame({"iid": ids})])
+
+
+def test_covariate_validation_rejects_overflow_in_active_precision():
+    covar = pl.DataFrame({"iid": list("abcde"), "large": [1e40 * v for v in [1, 3, 2, 4, 5]]})
+    with jax.enable_x64(False), pytest.raises(ValueError, match="finite.*precision"):
+        prepare_covariates(covar, one_hot=False, normalize=False, intercept=True)
+
+
+@pytest.mark.parametrize("x64", [False, True])
+def test_covariate_rank_validation_in_active_precision(x64):
+    covar = pl.DataFrame({"iid": list("abcde"), "x": [1.0, 3.0, 2.0, 4.0, 5.0]})
+    with jax.enable_x64(x64):
+        result = prepare_covariates(covar, one_hot=False, normalize=False, intercept=True)
+        assert result.height == covar.height
+        with pytest.raises(ValueError, match="full column rank"):
+            prepare_covariates(
+                covar.with_columns((pl.col("x") * 2).alias("duplicate")), one_hot=False, normalize=False, intercept=True
+            )
