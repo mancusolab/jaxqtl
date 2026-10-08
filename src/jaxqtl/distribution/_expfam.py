@@ -813,6 +813,20 @@ class NegativeBinomial(ExponentialFamily):
     def scale(self, X: ArrayLike, y: ArrayLike, mu: ArrayLike) -> Array:
         return jnp.asarray(1.0)
 
+    def calc_weight(self, eta: ArrayLike, disp: ScalarLike = 0.0) -> tuple[Array, Array, Array]:
+        """Compute log-link weights without forming the potentially overflowing NB variance."""
+        if not isinstance(self.glink, LogLink):
+            return super().calc_weight(eta, disp)
+
+        eta = jnp.asarray(eta)
+        disp = jnp.asarray(disp)
+        mu = jnp.clip(self.glink.inverse(eta), self._bounds[0], self._bounds[1])
+        link_prime = self.glink.deriv(mu)
+        # 1 / ((mu + alpha * mu**2) * (1 / mu)**2) = 1 / (1 / mu + alpha).
+        # Avoid inf * 0 when the variance overflows and the squared derivative underflows.
+        weight = 1.0 / (1.0 / mu + disp)
+        return mu, link_prime, weight
+
     def negloglikelihood(self, X: ArrayLike, y: ArrayLike, eta: ArrayLike, disp: ScalarLike) -> Array:
         y = jnp.asarray(y)
         eta = jnp.asarray(eta)
