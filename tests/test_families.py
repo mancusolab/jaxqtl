@@ -18,6 +18,7 @@ from jaxqtl.distribution._expfam import (
     _nb2_mean_terms,
     _nb2_riemannian_direction,
     Binomial,
+    ExponentialFamily,
     Gamma,
     Gaussian,
     NegativeBinomial,
@@ -370,6 +371,48 @@ def test_family_calc_weight_shapes_and_finiteness(family, disp):
     assert jnp.all(jnp.isfinite(mu))
     assert jnp.all(jnp.isfinite(link_prime))
     assert jnp.all(jnp.isfinite(jnp.atleast_1d(weight)))
+
+
+@pytest.mark.parametrize(("dtype", "predictor"), [(jnp.float32, 50.0), (jnp.float64, 360.0)])
+@pytest.mark.parametrize("alpha", [0.0, 1.46e6])
+def test_negative_binomial_log_weights_avoid_variance_overflow(dtype, predictor, alpha):
+    family = NegativeBinomial()
+    eta = jnp.asarray([predictor], dtype=dtype)
+    disp = jnp.asarray(alpha, dtype=dtype)
+    # At these means the NB variance overflows, but the weight is representable.
+    # Positive-dispersion weights approach 1 / alpha; alpha=0 has Poisson weights.
+    expected_weight = jnp.exp(eta) if alpha == 0.0 else jnp.full_like(eta, 1.0 / alpha)
+
+    def batched(eta, disp):
+        result = jax.vmap(family.calc_weight, in_axes=(0, None))(eta[jnp.newaxis], disp)
+        return tuple(value[0] for value in result)
+
+    for calculate in (family.calc_weight, jax.jit(family.calc_weight), jax.jit(batched)):
+        mu, link_prime, weight = calculate(eta, disp)
+
+        assert jnp.all(jnp.isfinite(weight))
+        assert jnp.all(weight > 0)
+        assert jnp.allclose(weight, expected_weight, rtol=1e-6, atol=0.0)
+        assert jnp.allclose(mu, jnp.exp(eta), rtol=1e-6, atol=0.0)
+        assert jnp.allclose(link_prime, jnp.exp(-eta), rtol=1e-6, atol=0.0)
+
+
+@pytest.mark.parametrize("link", [LogLink(), IdentityLink(), PowerLink(0.5), NBLink(0.3)])
+def test_negative_binomial_weights_match_generic_formula_and_jvp(link):
+    family = NegativeBinomial(link)
+    eta = link(jnp.asarray([0.1, 1.0, 10.0, 100.0]))
+    alpha = jnp.asarray(0.3)
+
+    def reference(eta, alpha):
+        return ExponentialFamily.calc_weight(family, eta, alpha)
+
+    tangents = (jnp.ones_like(eta), jnp.ones_like(alpha))
+    expected, expected_tangent = jax.jvp(reference, (eta, alpha), tangents)
+    actual, actual_tangent = jax.jit(lambda eta, alpha: jax.jvp(family.calc_weight, (eta, alpha), tangents))(eta, alpha)
+
+    for observed, target in zip((*actual, *actual_tangent), (*expected, *expected_tangent), strict=True):
+        assert jnp.all(jnp.isfinite(observed))
+        assert jnp.allclose(observed, target, rtol=1e-12, atol=1e-12)
 
 
 @pytest.mark.parametrize(
