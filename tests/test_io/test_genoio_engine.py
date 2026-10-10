@@ -325,3 +325,21 @@ def test_ready_data_rejects_empty_covariate_design():
     covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"]})
     with pytest.raises(ValueError, match="No covariates remain"):
         ReadyDataState.from_data(cast(genoio.Dataset, dataset), _expression(), covar)
+
+
+@pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), -float("inf")])
+def test_ready_data_rejects_invalid_covariates_after_sample_filtering(bad):
+    dataset = cast(genoio.Dataset, _SyntheticGenoioDataset())
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "Age": [1.0, bad, 3.0]})
+    with pytest.raises(ValueError, match="Age.*iid2"):
+        ReadyDataState.from_data(dataset, _expression(), covar)
+    ready = ReadyDataState.from_data(dataset, _expression(), covar, drop_samples=["iid2"])
+    assert ready.sample_ids == ("iid1", "iid3")
+    assert np.isfinite(np.asarray(ready.covar)).all()
+
+
+def test_ready_data_rejects_covariate_overflow_in_active_precision():
+    dataset = cast(genoio.Dataset, _SyntheticGenoioDataset())
+    covar = pl.DataFrame({"iid": ["iid1", "iid2", "iid3"], "large": [1.0, 1e40, 3.0]})
+    with jax.enable_x64(False), pytest.raises(ValueError, match="large.*precision.*iid2"):
+        ReadyDataState.from_data(dataset, _expression(), covar)

@@ -24,6 +24,7 @@ from ..io._geno_engine import (
 )
 from ..io._pheno import ExpressionData
 from ._scan import allele_summaries
+from ._validation import covariate_array
 
 
 class SNPInfo(eqx.Module):
@@ -261,9 +262,7 @@ class ReadyDataState:
         # at this point we have only 1 kind of expression object so just make a new one
         expression = ExpressionData(expression_samples, expression.pheno_meta, expression_libsize)
 
-        if covar.width <= 1:
-            raise ValueError("No covariates remain; supply at least one covariate or an intercept column")
-        covar_array = covar.select(pl.exclude("iid")).to_jax()
+        covar_array = covariate_array(covar)
 
         # offset should only have two columns by construction at this point
         if offset is not None:

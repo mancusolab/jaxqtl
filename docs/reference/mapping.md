@@ -60,6 +60,10 @@ is checked before prevalence filtering so invalid values cannot silently remove 
 Sample IDs must be present and unique. Covariates and offsets are checked on the shared analysis cohort.
 Categorical encoding and covariate standardization also use that cohort, after alignment. Use `--one-hot`
 for string covariates; missing categories are rejected.
+Missing or nonfinite covariate errors name the affected column and report the number of affected retained
+samples, with up to five sample IDs. Correct those values or explicitly exclude the affected samples;
+mapping does not silently drop or impute them. Values must also remain finite in the active JAX precision.
+These numeric and finiteness checks also apply to aligned covariates passed to `ReadyDataState.from_data`.
 
 The final covariate design must have full column rank, and the sample count must exceed the number of covariate
 columns (including the intercept) plus one tested variant. Remove redundant columns or reduce the number of

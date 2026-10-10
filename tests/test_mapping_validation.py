@@ -87,3 +87,30 @@ def test_single_category_requires_intercept_after_encoding():
     result = prepare_covariates(covar, one_hot=True, normalize=False, intercept=True)
     assert result.columns == ["iid", "intercept"]
     assert result["intercept"].to_list() == [1.0] * 4
+
+
+@pytest.mark.parametrize("bad", [None, float("nan"), float("inf"), -float("inf")])
+def test_invalid_covariates_identify_column_and_sample(bad):
+    covar = pl.DataFrame({"iid": list("abcde"), "Age": [1.0, bad, 3.0, 4.0, 5.0]})
+    with pytest.raises(ValueError, match="Age.*1 retained sample.*b"):
+        prepare_covariates(covar, one_hot=False, normalize=True, intercept=True)
+
+
+def test_missing_categorical_covariate_identifies_sample_before_encoding():
+    covar = pl.DataFrame({"iid": list("abcde"), "batch": ["x", None, "y", "x", "y"]})
+    with pytest.raises(ValueError, match="batch.*1 retained sample.*b"):
+        prepare_covariates(covar, one_hot=True, normalize=False, intercept=True)
+
+
+def test_covariate_diagnostics_limit_sample_listing():
+    covar = pl.DataFrame({"iid": [f"sample{i}" for i in range(20)], "Age": [None] * 20})
+    with pytest.raises(ValueError, match="Age.*20 retained samples") as exc:
+        prepare_covariates(covar, one_hot=False, normalize=False, intercept=True)
+    assert "sample0" in str(exc.value)
+    assert "sample19" not in str(exc.value)
+
+
+def test_covariate_diagnostics_count_all_missing_and_nonfinite_values():
+    covar = pl.DataFrame({"iid": list("abcde"), "Age": [1.0, None, float("nan"), float("inf"), 5.0]})
+    with pytest.raises(ValueError, match="Age.*3 retained samples.*'b', 'c', 'd'"):
+        prepare_covariates(covar, one_hot=False, normalize=True, intercept=True)
