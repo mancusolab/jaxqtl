@@ -44,7 +44,8 @@ from .io import (
 from .io._utils import validate_sample_ids
 from .log import get_logger
 from .map import get_trans_schemas, map_cis, map_trans
-from .map.data import ReadyDataState
+from .map._validation import prepare_covariates, validate_numeric_frame
+from .map.data import align_on_iid, ReadyDataState
 
 
 class _HelpFormatter(ArgumentDefaultsRichHelpFormatter):
@@ -540,7 +541,7 @@ def _trans_scan(args, log):
 
     # convert types from python to pyarrow types
     type_map: dict[type, pa.DataType] = {int: pa.int64(), float: pa.float64(), str: pa.string(), bool: pa.bool_()}
-    var_schema, stats_schema = get_trans_schemas()
+    var_schema, stats_schema = get_trans_schemas(include_dispersion=isinstance(family, NegativeBinomial))
     var_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in var_schema.items()])
     stats_schema_pa = pa.schema([(col, type_map[col_type]) for col, col_type in stats_schema.items()])
 
@@ -709,33 +710,14 @@ def _common_setup(args, log):
     chromosome = getattr(args, "chr", None)
     analysis_chromosomes = _validate_chromosome_labels(expr_data, geno_data, chromosome=chromosome)
     expr_data = expr_data.filter_genes_by_chromosomes(analysis_chromosomes)
+    expr_data.validate_values(require_nonnegative=args.model != "gaussian")
     expr_data = expr_data.filter_genes_by_percentage(args.min_gene_expr_pct)
-    if args.min_indiv_expr_pct:
+    if args.min_indiv_expr_pct is not None:
         expr_data = expr_data.filter_individuals_by_percentage(args.min_indiv_expr_pct)
 
     covar = read_plink_style_tsvlike(args.covar, args.covar_name, args.rm_covar)
 
-    # perform one-hot encoding for string-based columns, if specified
-    if args.one_hot:
-        cat = pl.selectors.string().exclude("iid")
-        covar = covar.to_dummies(cat, drop_first=True).drop(cat)
-
-    # normalize all numeric columns to have mean 0 and var 1
-    if args.normalize_covar:
-        num = pl.all().exclude("iid")
-
-        # let's make sure to not standardize the offset if it was provided, as we haven't yet extracted it
-        if args.offset_name_from_covar:
-            num = num.exclude(args.offset_name_from_covar)
-
-        covar = covar.with_columns((num - num.mean()) / num.std())
-
-    # we add an intercept column to the covariates by default if no normalization is performed
-    # but we allow users to disable this
-    if not args.no_intercept:
-        covar = covar.with_columns(pl.lit(1.0).alias("intercept"))
-
-    # before filter gene list, calculate library size and set offset, or read in pre-computed offset
+    # Extract offsets before covariate encoding; stored library totals precede gene selection.
     if args.offset:
         offset = read_offset_tsvlike(args.offset)
     elif args.offset_name_from_covar:
@@ -746,6 +728,19 @@ def _common_setup(args, log):
         offset = expr_data.offset_from_libsize
     else:
         offset = None
+
+    # Align before encoding and standardization so only the analysis cohort defines the design.
+    frames = [geno_data.samples().select("iid"), expr_data.pheno, expr_data.libsize, covar]
+    if offset is not None:
+        frames.append(offset)
+    aligned = align_on_iid(frames)
+    expr_data = ExpressionData(aligned[1], expr_data.pheno_meta, aligned[2])
+    covar = prepare_covariates(
+        aligned[3], one_hot=args.one_hot, normalize=args.normalize_covar, intercept=not args.no_intercept
+    )
+    if offset is not None:
+        offset = aligned[4]
+        validate_numeric_frame(offset, "Offsets")
 
     # take the genotype, expression, covariates, and offset and align by iid for valid analyses
     # lump those into single object for easier passing around

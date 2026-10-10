@@ -1,3 +1,5 @@
+# pattern: Imperative Shell
+
 import itertools as itt
 
 from collections.abc import Iterator
@@ -13,6 +15,7 @@ from jax import numpy as jnp
 from ..distribution._expfam import NegativeBinomial
 from ..hypothesis import AbstractHypothesisTest
 from ..log import get_log
+from ._results import association_columns, with_result_diagnostics
 from .data import ReadyDataState
 
 
@@ -102,15 +105,10 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
     af = counts / (2.0 * n)
     flag = af <= 0.5
     ma_counts = jnp.where(flag, counts, 2 * n - counts)
-    if jnp.ndim(test_result.disp) == 1:
-        nb_alpha = jnp.repeat(test_result.disp, p)
-    else:
-        nb_alpha = test_result.disp.flatten()
 
-    if jnp.ndim(test_result.converged) == 1:
-        glm_converged = jnp.repeat(test_result.converged, p)
-    else:
-        glm_converged = test_result.converged.flatten()
+    def flatten_fit(values):
+        values = np.asarray(values)
+        return np.repeat(values, p) if values.ndim == 1 else values.flatten()
 
     k = len(pheno_ids)
     assert k == test_result.beta.shape[0], "we're not passing in the same number of phenotypes"
@@ -124,28 +122,34 @@ def _process_result(geno_chunk, region_df, test_result, pheno_ids):
     ).select(["chrom", "snp", "pos", "a1", "a0", "af", "ma_count"])
     sumstats_df = pl.DataFrame(
         {
-            "phenotype": pheno_ids,
+            "phenotype_id": pheno_ids,
             "snp": snp_ids,
             "beta": np.asarray(test_result.beta.flatten()),
             "se": np.asarray(test_result.se.flatten()),
             "pvalue": np.asarray(test_result.p.flatten()),
-            "nb_alpha": np.asarray(nb_alpha),
-            "model_converged": np.asarray(glm_converged),
+            "nb_alpha": flatten_fit(test_result.disp),
+            "negloglikelihood": flatten_fit(test_result.negloglikelihood),
+            "model_converged": flatten_fit(test_result.converged),
         }
     )
     # put pheno id in front
-    return variant_df, sumstats_df
+    return variant_df, with_result_diagnostics(sumstats_df).select("phenotype_id", "snp", *association_columns())
 
 
-def get_trans_schemas() -> tuple[dict[str, type], dict[str, type]]:
+def get_trans_schemas(*, include_dispersion: bool = True) -> tuple[dict[str, type], dict[str, type]]:
     r"""Return column schemas for trans mapping outputs.
+
+    **Arguments:**
+
+    - `include_dispersion`: Include `nb_alpha` for Negative Binomial output.
 
     **Returns:**
 
     A tuple `(variant_schema, sumstat_schema)`. The variant schema contains `chrom`,
     `snp`, `pos`, `a1`, `a0`, `af`, and `ma_count`. The summary-stat schema contains
-    `phenotype`, `snp`, `beta`, `se`, `pvalue`, `nb_alpha`, and
-    `model_converged`. Non-Negative-Binomial scans omit `nb_alpha` from emitted
+    `phenotype_id`, `snp`, and the shared association fields, including
+    `negloglikelihood`, `model_converged`, `result_valid`, and `failure_reason`.
+    Non-Negative-Binomial scans omit `nb_alpha` from emitted
     summary-stat frames.
     """
     var_schema = {
@@ -157,13 +161,12 @@ def get_trans_schemas() -> tuple[dict[str, type], dict[str, type]]:
         "af": float,
         "ma_count": int,
     }
+    python_types = {pl.Float64: float, pl.Boolean: bool, pl.String: str}
     stats_schema = {
-        "phenotype": str,
+        "phenotype_id": str,
         "snp": str,
-        "beta": float,
-        "se": float,
-        "pvalue": float,
-        "nb_alpha": float,
-        "model_converged": bool,
+        **{name: python_types[dtype] for name, dtype in association_columns().items()},
     }
+    if not include_dispersion:
+        del stats_schema["nb_alpha"]
     return var_schema, stats_schema
