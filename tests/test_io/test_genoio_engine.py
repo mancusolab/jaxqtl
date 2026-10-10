@@ -335,7 +335,7 @@ def test_ready_data_rejects_invalid_covariates_after_sample_filtering(bad):
         ReadyDataState.from_data(dataset, _expression(), covar)
     ready = ReadyDataState.from_data(dataset, _expression(), covar, drop_samples=["iid2"])
     assert ready.sample_ids == ("iid1", "iid3")
-    assert np.isfinite(np.asarray(ready.covar)).all()
+    assert bool(jnp.isfinite(ready.covar).all())
 
 
 def test_ready_data_rejects_covariate_overflow_in_active_precision():
