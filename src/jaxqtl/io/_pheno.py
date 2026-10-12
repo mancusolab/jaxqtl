@@ -70,7 +70,7 @@ class ExpressionData:
         if not values.select(pl.all().is_finite().fill_null(False).all()).to_numpy().all():
             raise ValueError("Expression values must be finite")
         if require_nonnegative and not values.select((pl.all() >= 0).all()).to_numpy().all():
-            raise ValueError("Log transforms require nonnegative expression values")
+            raise ValueError("Expression values must be nonnegative for count models, normalization, or log transforms")
 
     def filter_genes_by_ids(self, *, keep: list[str] | None = None, drop: list[str] | None = None) -> "ExpressionData":
         """Select gene IDs in metadata order, preserving samples and original library sizes.
